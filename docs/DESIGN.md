@@ -332,8 +332,8 @@ Library maintenance (`purgeExpiredData()`) runs on a daily Cron Trigger.
     a `Sec-Fetch-Site` other than `same-origin` is rejected.
 - **Response headers on every response:**
   - `Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`
-  - Stylesheet, font (Readex Pro, OFL, Latin subset, self-hosted), lattice pattern and icon are
-    Workers static assets in `public/`, with their own headers in `public/_headers`. No third-party
+  - Stylesheet, font (Readex Pro, OFL, Latin subset, self-hosted) and the 2earl mark (icon) are
+    Workers static assets in `public/`, referenced with content fingerprints (`?v=`), with their own headers in `public/_headers`. No third-party
     requests, no JavaScript.
     - Exception: the **consent page** omits `form-action`. Some browsers apply `form-action` to
       the redirect that follows a form submission, and approving consent redirects to the

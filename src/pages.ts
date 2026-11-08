@@ -1,6 +1,6 @@
 /**
  * Server-rendered HTML. Every dynamic value goes through `escapeHtml`. No scripts.
- * Styles, font, lattice and icon are static assets in /public.
+ * Styles, font and icon are static assets in /public; the mark and panel are inline markup.
  */
 
 import { ASSET_URLS } from './assets.generated';
@@ -37,6 +37,23 @@ const ALERT_ICON =
   '<circle cx="8" cy="11.25" r="0.9" fill="currentColor"/>' +
   '</svg>';
 
+/** The 2earl mark (the same geometry as public/favicon.svg). */
+const MARK =
+  '<svg viewBox="0 0 100 100" aria-hidden="true" focusable="false">' +
+  '<path fill="#F15A24" d="M0 0 50 50V100L0 50Z"/>' +
+  '<path fill="#F7931E" d="M100 0 50 50V100L100 50Z"/>' +
+  '<path fill="#ED1C24" d="M0 50 50 100H15A15 15 0 0 1 0 85Z"/>' +
+  '<path fill="#FBB03B" d="M100 50V85A15 15 0 0 1 85 100H50Z"/>' +
+  '</svg>';
+
+const PANEL =
+  '<div class="panel" aria-hidden="true">' +
+  '<span class="facet facet-vermilion"></span>' +
+  '<span class="facet facet-orange"></span>' +
+  '<span class="facet facet-red"></span>' +
+  '<span class="facet facet-amber"></span>' +
+  '</div>';
+
 export function page(title: string, main: string): string {
   return (
     '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
@@ -47,9 +64,12 @@ export function page(title: string, main: string): string {
     `<link rel="preload" href="${ASSET_URLS.font}" as="font" type="font/woff2" crossorigin>` +
     `<link rel="stylesheet" href="${ASSET_URLS.appCss}">` +
     '</head><body><div class="frame">' +
-    '<div class="panel"><a class="wordmark" href="/">2earl<small>Account</small></a></div>' +
-    `<div class="content"><main class="main">${main}</main>${LEGAL_LINKS}</div>` +
-    '</div></body></html>'
+    PANEL +
+    '<div class="content">' +
+    `<a class="brand" href="/">${MARK}<span class="brand-name">2earl</span><span class="brand-sub">Account</span></a>` +
+    `<main class="main">${main}</main>` +
+    LEGAL_LINKS +
+    '</div></div></body></html>'
   );
 }
 

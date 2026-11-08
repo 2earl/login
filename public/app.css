@@ -1,7 +1,8 @@
 /*
  * login.2earl.com
- * Palette after İznik tiles (cobalt, turquoise, coral on cool white): 2earl is Istanbul & Berlin.
- * The lattice panel is the one decorative element; everything else stays quiet.
+ * Colours come from the 2earl mark: red, vermilion, orange and amber facets cut at 45°.
+ * The panel is the mark itself, extended to the height of the screen. That is the one bold
+ * element; everything else stays neutral so the brand colours carry the page.
  */
 
 @font-face {
@@ -15,55 +16,39 @@
 :root {
   color-scheme: light dark;
 
-  /* Light */
-  --porcelain-light: #f3f6fb;
-  --ink-light: #0e1a2b;
-  --muted-light: #4f5b6e;
-  --rule-light: #d6dde8;
-  --link-light: #1d3fa8;
-  --surface-light: #ffffff;
-  /* Dark */
-  --porcelain-dark: #0b1220;
-  --ink-dark: #e7ecf4;
-  --muted-dark: #9aa6b8;
-  --rule-dark: #223049;
-  --link-dark: #9db3ff;
-  --surface-dark: #111b2e;
+  /* The mark's four facets */
+  --red: #ed1c24;
+  --vermilion: #f15a24;
+  --orange: #f7931e;
+  --amber: #fbb03b;
 
-  /* Same in both schemes */
-  --cobalt: #17318a;
-  --cobalt-deep: #0f2263;
-  --turquoise: #7fd6cf;
-  --coral: #c8372d;
-  --coral-dark: #ff8a80;
-
-  --bg: var(--porcelain-light);
-  --fg: var(--ink-light);
-  --muted: var(--muted-light);
-  --rule: var(--rule-light);
-  --link: var(--link-light);
-  --surface: var(--surface-light);
-  --alert: var(--coral);
-  /* Focus ring: ≥ 3:1 against the page in each scheme */
-  --focus: #1d3fa8;
+  /* Light scheme (all text pairs checked for WCAG AA) */
+  --bg: #f7f7f8;
+  --fg: #1c1b1f;
+  --muted: #5c5a60; /* 6.4:1 on --bg */
+  --rule: #e2e1e5;
+  --link: #b23a0c; /* 5.6:1 on --bg */
+  --alert: #c8141b; /* 5.5:1 on --bg */
+  --focus: #b23a0c; /* ≥ 3:1 against --bg */
+  --button-fg: #1c1b1f; /* 5.1:1 on vermilion */
+  --surface: #ffffff;
 
   --display: 'Readex Pro', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --body: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
 
-  accent-color: var(--cobalt);
+  accent-color: var(--vermilion);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: var(--porcelain-dark);
-    --fg: var(--ink-dark);
-    --muted: var(--muted-dark);
-    --rule: var(--rule-dark);
-    --link: var(--link-dark);
-    --surface: var(--surface-dark);
-    --alert: var(--coral-dark);
-    --badge: #2a47b8;
-    --focus: var(--turquoise);
+    --bg: #141315;
+    --fg: #f2f1f3;
+    --muted: #a19fa6; /* 7.1:1 */
+    --rule: #2c2a2f;
+    --link: #fbb03b; /* 10:1 */
+    --alert: #ff7a6b; /* 7.3:1 */
+    --focus: #fbb03b;
+    --surface: #1c1b1f;
   }
 }
 
@@ -103,86 +88,97 @@ a:hover {
   border-radius: 4px;
 }
 
-/* ---- Frame: lattice panel + content ---------------------------------------------------- */
+/* ---- Frame: the mark panel + content ------------------------------------------------------ */
 
 .frame {
   display: grid;
   min-height: 100vh;
   min-height: 100dvh;
-  grid-template-columns: minmax(16rem, 38%) 1fr;
+  grid-template-columns: minmax(15rem, 34%) 1fr;
 }
 
+/*
+ * The mark, extended: the V-notch at the top is as deep as half the panel's width, the two
+ * upper facets run down as bands, and the two lower facets meet at the bottom centre — all at
+ * 45°, exactly as in the icon. Container units keep the angles true at any panel size.
+ */
 .panel {
   position: relative;
+  container-type: size;
   overflow: hidden;
-  background: var(--cobalt-deep);
-  color: #f3f6fb;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  padding: 2.5rem;
 }
 
-/* The lattice: an 8-fold star-and-cross tiling, drawn as a mask so CSS sets its colour. */
-.panel::before {
-  content: '';
-  position: absolute;
-  inset: -2px;
-  background: var(--turquoise);
-  opacity: 0.42;
-  -webkit-mask: url('/lattice.svg?v=748e0bd2e3f4') 0 0 / 64px 64px repeat;
-  mask: url('/lattice.svg?v=748e0bd2e3f4') 0 0 / 64px 64px repeat;
-}
-
-/* Fade the lattice towards the wordmark so the name reads cleanly. */
-.panel::after {
-  content: '';
+.facet {
   position: absolute;
   inset: 0;
-  background: linear-gradient(to top, var(--cobalt-deep) 12%, transparent 55%);
 }
 
-.wordmark:focus-visible {
-  outline-color: var(--turquoise);
+.facet-vermilion {
+  background: var(--vermilion);
+  /* 1px past the centre so no hairline of the page shows between the two bands. */
+  clip-path: polygon(0 0, calc(50cqw + 1px) calc(50cqw + 1px), calc(50cqw + 1px) 100cqh, 0 100cqh);
 }
 
-.wordmark {
-  position: relative;
-  z-index: 1;
-  color: inherit;
-  text-decoration: none;
-  font-family: var(--display);
-  font-weight: 600;
-  font-size: clamp(2.75rem, 5vw, 4rem);
-  line-height: 1;
-  letter-spacing: -0.03em;
+.facet-orange {
+  background: var(--orange);
+  clip-path: polygon(100cqw 0, 50cqw 50cqw, 50cqw 100cqh, 100cqw 100cqh);
 }
 
-.wordmark small {
-  display: block;
-  margin-top: 0.6rem;
-  font-family: var(--body);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--turquoise);
+.facet-red {
+  background: var(--red);
+  clip-path: polygon(0 calc(100cqh - 50cqw), 50cqw 100cqh, 0 100cqh);
+}
+
+.facet-amber {
+  background: var(--amber);
+  clip-path: polygon(100cqw calc(100cqh - 50cqw), 50cqw 100cqh, 100cqw 100cqh);
 }
 
 .content {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  padding: 3rem clamp(1.25rem, 6vw, 5rem);
+  padding: 2.5rem clamp(1.25rem, 6vw, 5.5rem) 2rem;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  align-self: flex-start;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.brand svg {
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+}
+
+.brand-name {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.brand-sub {
+  padding-left: 0.75rem;
+  border-left: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 0.9375rem;
+  line-height: 1.5rem;
 }
 
 .main {
   width: 100%;
   max-width: 27rem;
+  margin: auto 0;
+  padding: 3rem 0;
 }
 
 .legal {
-  margin-top: 3rem;
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem 1.25rem;
@@ -193,15 +189,15 @@ a:hover {
   color: var(--muted);
 }
 
-/* ---- Type ------------------------------------------------------------------------------- */
+/* ---- Type --------------------------------------------------------------------------------- */
 
 h1 {
   font-family: var(--display);
   font-weight: 500;
-  font-size: clamp(1.75rem, 3.2vw, 2.25rem);
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-  margin: 0 0 0.75rem;
+  font-size: clamp(1.875rem, 3.4vw, 2.5rem);
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+  margin: 0 0 0.875rem;
   text-wrap: balance;
 }
 
@@ -209,7 +205,6 @@ h2 {
   font-family: var(--display);
   font-weight: 500;
   font-size: 1.0625rem;
-  letter-spacing: -0.005em;
   margin: 0 0 0.5rem;
 }
 
@@ -224,23 +219,21 @@ p {
   text-wrap: pretty;
 }
 
-.note,
-.fine {
-  color: var(--muted);
-  font-size: 0.875rem;
-}
-
 .note {
   margin-top: 1.25rem;
+  color: var(--muted);
+  font-size: 0.875rem;
 }
 
 .fine {
   margin-top: 2rem;
   padding-top: 1.25rem;
   border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 0.875rem;
 }
 
-/* ---- Buttons ---------------------------------------------------------------------------- */
+/* ---- Buttons ------------------------------------------------------------------------------ */
 
 /* Google's sign-in button, following its branding guidelines (neutral theme). */
 .gsi {
@@ -249,19 +242,22 @@ p {
   justify-content: center;
   gap: 0.75rem;
   width: 100%;
-  min-height: 3rem;
+  min-height: 3.25rem;
   padding: 0 1.25rem;
   border: 1px solid #747775;
-  border-radius: 0.5rem;
+  border-radius: 0.625rem;
   background: #ffffff;
   color: #1f1f1f;
   font: 500 1rem/1 var(--body);
   text-decoration: none;
-  transition: background-color 0.15s;
+  transition:
+    background-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .gsi:hover {
-  background: #f2f4f8;
+  background: #f8f9fb;
+  box-shadow: 0 1px 3px rgb(28 27 31 / 0.12);
   text-decoration: none;
 }
 
@@ -289,20 +285,23 @@ p {
   justify-content: center;
   min-height: 2.75rem;
   padding: 0 1.25rem;
-  border-radius: 0.5rem;
+  border-radius: 0.625rem;
   border: 1px solid transparent;
-  font: 500 0.9375rem/1 var(--body);
+  font: 600 0.9375rem/1 var(--body);
   text-decoration: none;
   cursor: pointer;
+  transition: background-color 0.15s;
 }
 
+/* Brand vermilion with dark text: white on vermilion would fail contrast (3.4:1). */
 .button.primary {
-  background: var(--cobalt);
-  color: #ffffff;
+  background: var(--vermilion);
+  color: var(--button-fg);
 }
 
 .button.primary:hover {
-  background: var(--cobalt-deep);
+  background: var(--orange);
+  text-decoration: none;
 }
 
 .button.secondary {
@@ -315,7 +314,7 @@ p {
   border-color: var(--muted);
 }
 
-/* ---- Account ---------------------------------------------------------------------------- */
+/* ---- Account ------------------------------------------------------------------------------ */
 
 .identity {
   display: flex;
@@ -336,34 +335,17 @@ p {
   overflow-wrap: anywhere;
 }
 
-/* The account badge takes the lattice's star as its shape. */
+/* The badge borrows the mark's silhouette: square top, rounded bottom corners. */
 .badge {
   flex: none;
   display: grid;
   place-items: center;
   width: 3.5rem;
   height: 3.5rem;
-  background: var(--badge, var(--cobalt));
-  color: #ffffff;
+  border-radius: 0.25rem 0.25rem 0.875rem 0.875rem;
+  background: var(--amber);
+  color: #1c1b1f; /* 9.3:1 */
   font: 600 1.375rem/1 var(--display);
-  clip-path: polygon(
-    50% 0%,
-    65.3% 13%,
-    85.4% 14.6%,
-    87% 34.7%,
-    100% 50%,
-    87% 65.3%,
-    85.4% 85.4%,
-    65.3% 87%,
-    50% 100%,
-    34.7% 87%,
-    14.6% 85.4%,
-    13% 65.3%,
-    0% 50%,
-    13% 34.7%,
-    14.6% 14.6%,
-    34.7% 13%
-  );
 }
 
 .section {
@@ -403,7 +385,7 @@ p {
   margin: 0;
 }
 
-/* ---- Messages --------------------------------------------------------------------------- */
+/* ---- Messages ----------------------------------------------------------------------------- */
 
 .status {
   display: inline-flex;
@@ -422,7 +404,7 @@ p {
   height: 1rem;
 }
 
-/* ---- Small screens: the panel becomes a band ------------------------------------------- */
+/* ---- Small screens: the mark's colours become a stripe across the top -------------------- */
 
 @media (max-width: 52rem) {
   .frame {
@@ -431,31 +413,62 @@ p {
   }
 
   .panel {
-    min-height: 9.5rem;
-    padding: 1.5rem 1.25rem;
+    container-type: normal;
+    display: flex;
+    height: 0.375rem;
   }
 
-  .wordmark {
-    font-size: 2.5rem;
+  .facet {
+    position: static;
+    flex: 1;
+    clip-path: none;
+  }
+
+  .facet-red {
+    order: 1;
+  }
+
+  .facet-vermilion {
+    order: 2;
+  }
+
+  .facet-orange {
+    order: 3;
+  }
+
+  .facet-amber {
+    order: 4;
   }
 
   .content {
-    justify-content: flex-start;
-    padding-top: 2.25rem;
+    padding-top: 1.75rem;
+  }
+
+  .main {
+    margin: 0;
+    padding: 2.5rem 0;
+  }
+
+  .legal {
+    margin-top: auto;
   }
 }
 
-/* ---- Forced colours: keep boundaries visible ------------------------------------------- */
+/* ---- Forced colours: keep boundaries visible --------------------------------------------- */
 
 @media (forced-colors: active) {
   .gsi,
-  .button {
+  .button,
+  .badge {
     border: 1px solid ButtonText;
   }
 
-  .badge {
-    clip-path: none;
-    border: 1px solid CanvasText;
+  .panel {
+    display: none;
+  }
+
+  .frame {
+    grid-template-columns: 1fr;
   }
 }
 
