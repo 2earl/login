@@ -16,6 +16,7 @@ export default defineConfig(async () => {
             // Test-only values for the Worker secrets declared in wrangler.jsonc.
             GOOGLE_CLIENT_SECRET: 'test-google-client-secret',
             SESSION_PEPPER: 'test-session-pepper',
+            CONSENT_REMEMBER_SECRET: 'test-consent-remember-secret-at-least-32-chars',
           },
         },
       }),

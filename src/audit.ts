@@ -9,7 +9,11 @@ export type AuditEvent =
   | 'login.failed'
   | 'allowlist.pinned'
   | 'user.created'
-  | 'logout';
+  | 'logout'
+  | 'consent.approved'
+  | 'consent.denied'
+  | 'consent.reused'
+  | 'grant.revoked';
 
 export async function audit(
   db: D1Database,

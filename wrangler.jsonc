@@ -30,12 +30,14 @@
     "GOOGLE_CLIENT_ID": "862466313467-kgrf9bd3j96b0peeujk8h5j3ak49ugou.apps.googleusercontent.com",
     // Locked launch (DESIGN D9): only allowlisted accounts may sign in. "false" opens sign-up.
     "LOGIN_LOCKED": "true",
+    // The MCP gateway's canonical resource URL: the only audience tokens are issued for.
+    "MCP_RESOURCE": "https://mcp.2earl.com/mcp",
   },
 
   // Set by the deploy workflow from the GitHub `production` environment. Deploys fail if any
   // is missing.
   "secrets": {
-    "required": ["GOOGLE_CLIENT_SECRET", "SESSION_PEPPER"],
+    "required": ["GOOGLE_CLIENT_SECRET", "SESSION_PEPPER", "CONSENT_REMEMBER_SECRET"],
   },
 
   // Per-IP limit on the sign-in endpoints, on top of the zone rate-limit rule (infra/firewall.tf).
@@ -63,4 +65,9 @@
       "id": "b6dea62be04345379994f7e08a569984",
     },
   ],
+
+  // Daily clean-up: expired OAuth records, sessions, sign-in transactions, old audit events.
+  "triggers": {
+    "crons": ["17 3 * * *"],
+  },
 }
