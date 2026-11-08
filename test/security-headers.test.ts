@@ -21,6 +21,15 @@ describe('applySecurityHeaders', () => {
   });
 });
 
+describe('Referrer-Policy', () => {
+  // Regression: under no-referrer, browsers send `Origin: null` on same-site form posts, which
+  // made POST /logout fail its Origin check in production.
+  it('is same-origin, so same-site form posts keep their Origin header', async () => {
+    const { BASE_HEADERS } = await import('../src/security-headers');
+    expect(BASE_HEADERS['Referrer-Policy']).toBe('same-origin');
+  });
+});
+
 describe('CSP values', () => {
   it('default CSP restricts form targets to this origin', () => {
     expect(DEFAULT_CSP).toContain("form-action 'self'");

@@ -287,6 +287,28 @@ describe('sessions', () => {
     expect(await count('sessions')).toBe(1);
   });
 
+  it('accept a sign-out the browser marks as same-origin', async () => {
+    const { session } = await signIn(app, google);
+    const response = await call(app, '/logout', {
+      method: 'POST',
+      headers: { Origin: ORIGIN, 'Sec-Fetch-Site': 'same-origin' },
+      cookies: { '__Host-session': session ?? '' },
+    });
+    expect(response.status).toBe(303);
+    expect(await count('sessions')).toBe(0);
+  });
+
+  it('refuse a sign-out the browser marks as cross-site, even with a matching Origin', async () => {
+    const { session } = await signIn(app, google);
+    const response = await call(app, '/logout', {
+      method: 'POST',
+      headers: { Origin: ORIGIN, 'Sec-Fetch-Site': 'cross-site' },
+      cookies: { '__Host-session': session ?? '' },
+    });
+    expect(response.status).toBe(403);
+    expect(await count('sessions')).toBe(1);
+  });
+
   it('are replaced on a new sign-in (no session fixation)', async () => {
     const first = await signIn(app, google);
     const ip = freshIp();

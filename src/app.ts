@@ -50,8 +50,13 @@ function clientIp(c: AppContext): string | null {
   return ipPrefix(c.req.header('CF-Connecting-IP'));
 }
 
-/** Requests that change state must come from our own pages (DESIGN §7). */
+/**
+ * Requests that change state must come from our own pages (DESIGN §7). The Origin header must
+ * match, and if the browser reports Sec-Fetch-Site it must say same-origin.
+ */
 function isSameOrigin(c: AppContext): boolean {
+  const fetchSite = c.req.header('Sec-Fetch-Site');
+  if (fetchSite !== undefined && fetchSite !== 'same-origin') return false;
   return c.req.header('Origin') === new URL(c.env.ISSUER).origin;
 }
 
