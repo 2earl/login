@@ -4,8 +4,8 @@
 //   node scripts/asset-versions.mjs          rewrite references and src/assets.generated.ts
 //   node scripts/asset-versions.mjs --check  fail if anything is out of date (CI)
 //
-// Order matters: the font and lattice are referenced from app.css, so their versions are written
-// into app.css first, and app.css is fingerprinted afterwards.
+// Order matters: the font is referenced from app.css, so its version is written into app.css
+// first, and app.css is fingerprinted afterwards.
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 
@@ -25,16 +25,13 @@ async function update(path, next) {
 }
 
 const font = await fingerprint('public/fonts/readex-pro-latin.woff2');
-const lattice = await fingerprint('public/lattice.svg');
 const favicon = await fingerprint('public/favicon.svg');
 
 const css = await readFile('public/app.css', 'utf8');
-const versionedCss = css
-  .replace(
-    /url\('\/fonts\/readex-pro-latin\.woff2(\?v=[0-9a-f]+)?'\)/g,
-    `url('/fonts/readex-pro-latin.woff2?v=${font}')`,
-  )
-  .replace(/url\('\/lattice\.svg(\?v=[0-9a-f]+)?'\)/g, `url('/lattice.svg?v=${lattice}')`);
+const versionedCss = css.replace(
+  /url\('\/fonts\/readex-pro-latin\.woff2(\?v=[0-9a-f]+)?'\)/g,
+  `url('/fonts/readex-pro-latin.woff2?v=${font}')`,
+);
 await update('public/app.css', versionedCss);
 
 const appCss = createHash('sha256').update(versionedCss).digest('hex').slice(0, 12);
