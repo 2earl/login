@@ -8,6 +8,7 @@ export const DEFAULT_CSP = [
   "default-src 'none'",
   "style-src 'self'",
   "img-src 'self'",
+  "font-src 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
   "base-uri 'none'",
@@ -22,6 +23,7 @@ export const CONSENT_CSP = [
   "default-src 'none'",
   "style-src 'self'",
   "img-src 'self'",
+  "font-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'none'",
 ].join('; ');
