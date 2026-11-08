@@ -21,4 +21,21 @@
   "vars": {
     "ISSUER": "https://login.2earl.com",
   },
+
+  // Created by Terraform (infra/storage.tf), both in the EU jurisdiction. IDs are not secrets.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "login",
+      "database_id": "86e9ee5a-6410-45fc-87a3-d3ae0bdd4190",
+      "migrations_dir": "migrations",
+    },
+  ],
+  // Owned by @cloudflare/workers-oauth-provider, which requires the binding name OAUTH_KV.
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "b6dea62be04345379994f7e08a569984",
+    },
+  ],
 }
