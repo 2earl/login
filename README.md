@@ -3,7 +3,23 @@
 Identity service and OAuth 2.1 authorization server for 2earl.com, served at
 `https://login.2earl.com`. Runs on Cloudflare Workers.
 
-**Status:** design phase. No authentication code yet.
+**Status:** phase 2 — project scaffold and CI. No authentication code yet; the Worker serves a
+holding page and `/healthz`.
+
+## Development
+
+Requires Node.js 24 and pnpm (version pinned in `package.json`).
+
+```sh
+pnpm install
+pnpm dev         # local Worker on http://localhost:8787
+pnpm test        # tests run inside the Workers runtime
+pnpm typecheck   # also checks that worker-configuration.d.ts matches wrangler.jsonc
+pnpm lint
+```
+
+After changing `wrangler.jsonc`, run `pnpm cf-typegen` and commit `worker-configuration.d.ts`.
+Production deploys run only from `main`, through the `deploy` workflow, after owner approval.
 
 ## Documents
 

@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "login",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  // Required by @cloudflare/workers-oauth-provider before it enables Client ID Metadata
+  // Documents: outbound fetches never use same-zone routing (SSRF protection).
+  "compatibility_flags": ["global_fetch_strictly_public"],
+
+  // The Worker is reachable only on its custom domain (attached by Terraform in phase 3),
+  // never on *.workers.dev or preview URLs.
+  "workers_dev": false,
+  "preview_urls": false,
+
+  // Phase 4 will decide what is logged. Invocation logs would record full request URLs,
+  // which carry authorization codes and state on /authorize and /callback/*.
+  "observability": {
+    "enabled": false,
+  },
+
+  "vars": {
+    "ISSUER": "https://login.2earl.com",
+  },
+}
