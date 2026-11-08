@@ -3,6 +3,8 @@
  * Styles, font, lattice and icon are static assets in /public.
  */
 
+import { ASSET_URLS } from './assets.generated';
+
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -41,9 +43,9 @@ export function page(title: string, main: string): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
     '<meta name="color-scheme" content="light dark">' +
     `<title>${escapeHtml(title)} · 2earl</title>` +
-    '<link rel="icon" href="/favicon.svg" type="image/svg+xml">' +
-    '<link rel="preload" href="/fonts/readex-pro-latin.woff2" as="font" type="font/woff2" crossorigin>' +
-    '<link rel="stylesheet" href="/app.css">' +
+    `<link rel="icon" href="${ASSET_URLS.favicon}" type="image/svg+xml">` +
+    `<link rel="preload" href="${ASSET_URLS.font}" as="font" type="font/woff2" crossorigin>` +
+    `<link rel="stylesheet" href="${ASSET_URLS.appCss}">` +
     '</head><body><div class="frame">' +
     '<div class="panel"><a class="wordmark" href="/">2earl<small>Account</small></a></div>' +
     `<div class="content"><main class="main">${main}</main>${LEGAL_LINKS}</div>` +

@@ -6,7 +6,7 @@
 
 @font-face {
   font-family: 'Readex Pro';
-  src: url('/fonts/readex-pro-latin.woff2') format('woff2');
+  src: url('/fonts/readex-pro-latin.woff2?v=2380d42e5c3c') format('woff2');
   font-weight: 300 700;
   font-style: normal;
   font-display: swap;
@@ -130,8 +130,8 @@ a:hover {
   inset: -2px;
   background: var(--turquoise);
   opacity: 0.42;
-  -webkit-mask: url('/lattice.svg') 0 0 / 64px 64px repeat;
-  mask: url('/lattice.svg') 0 0 / 64px 64px repeat;
+  -webkit-mask: url('/lattice.svg?v=748e0bd2e3f4') 0 0 / 64px 64px repeat;
+  mask: url('/lattice.svg?v=748e0bd2e3f4') 0 0 / 64px 64px repeat;
 }
 
 /* Fade the lattice towards the wordmark so the name reads cleanly. */

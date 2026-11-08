@@ -45,3 +45,15 @@ describe('security headers', () => {
     expect(res.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
   });
 });
+
+describe('static asset references', () => {
+  // Regression: an unversioned /app.css cached by browsers for an hour made the redesigned pages
+  // render with the old stylesheet after deploy.
+  it('carry a content fingerprint, so a changed file always gets a new URL', async () => {
+    const html = await (await get('/')).text();
+    expect(html).toMatch(/href="\/app\.css\?v=[0-9a-f]{12}"/);
+    expect(html).toMatch(/href="\/fonts\/readex-pro-latin\.woff2\?v=[0-9a-f]{12}"/);
+    expect(html).toMatch(/href="\/favicon\.svg\?v=[0-9a-f]{12}"/);
+    expect(html).not.toMatch(/href="\/app\.css"/);
+  });
+});

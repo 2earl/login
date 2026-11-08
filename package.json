@@ -13,11 +13,12 @@
     "dev": "wrangler dev",
     "build": "wrangler deploy --dry-run --outdir dist",
     "cf-typegen": "wrangler types",
-    "typecheck": "wrangler types --check && tsc --noEmit",
+    "typecheck": "node scripts/asset-versions.mjs --check && wrangler types --check && tsc --noEmit",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "assets:version": "node scripts/asset-versions.mjs"
   },
   "dependencies": {
     "hono": "4.13.17",
