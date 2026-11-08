@@ -43,8 +43,9 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
 | D5 | No OIDC in v1; opaque access tokens | Owner, 2026-11-08 |
 | D6 | Production only for now; no staging environment | Owner |
 | D7 | Terraform state and runs in HCP Terraform, workspace `2earl-login-prod`, VCS-driven, manual apply | Owner |
-| D8 | One Cloudflare account API token used by both Terraform (HCP) and deploys (GitHub) | Owner (accepted risk, see THREAT_MODEL R3) |
-| D9 | Launch **locked**: only allowlisted Google accounts may sign in until phase 5 is complete | Proposed — see §11 |
+| D8 | One Cloudflare account API token used by both Terraform (HCP) and deploys (GitHub) | Owner (accepted risk, see THREAT_MODEL R2) |
+| D9 | Launch **locked**: only allowlisted Google accounts may sign in until phase 5 is complete | Confirmed (PR #1 merged) |
+| D10 | Second factor in our own service, controlled by a feature flag: optional when off, enforced when on (§4.7) | Owner, 2026-11-08 |
 
 ---
 
@@ -179,6 +180,35 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
   - audit log view.
 - Every admin action is audited.
 
+### 4.7 Second factor (MFA), behind a feature flag
+
+Google sign-in proves the Google account. A second factor proves the person at login.2earl.com
+too, independent of how the Google account is protected. Google's ID token does not reliably say
+whether the user passed 2-step verification, so we cannot rely on Google for this.
+
+- **Factors:**
+  - **Passkeys / security keys (WebAuthn)**: primary, phishing-resistant.
+  - **TOTP** (authenticator app): fallback.
+  - **Recovery codes**: 10 single-use codes, shown once, stored hashed.
+- **Feature flag `MFA_REQUIRED`** (Worker variable, default `false`):
+
+  | Flag | User has no factor | User has a factor |
+  |---|---|---|
+  | `false` | Signs in with Google only; may enrol in `/account/security` | Challenged after Google on every new session |
+  | `true` | Must enrol before the session is usable: no consent, no account changes | Challenged after Google on every new session |
+
+  - A user who has enrolled is **always** challenged, whatever the flag. Turning the flag off
+    never downgrades an enrolled account.
+  - **Proposal:** the owner/admin session always requires a second factor, independent of the
+    flag (§11).
+- **Where the challenge sits:** after the Google callback and before the session is marked
+  `aal2`. Consent, account changes and admin actions require `aal2` when MFA applies to that user.
+- **Changing factors:** adding or removing a factor requires a fresh second-factor challenge
+  (≤ 5 min old). Removing the last factor is refused while the flag is on.
+- **Lost factors:** recovery code; otherwise the owner resets MFA for the user from `/admin`,
+  audited.
+- **Phase:** built after the MVP, in phase 5 (§12). The flag ships `false`.
+
 ---
 
 ## 5. Protocol surface
@@ -194,6 +224,7 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
 | `/login`, `/callback/google`, `/logout` | app | Google sign-in, session |
 | `/consent` | app + library | Consent form POST |
 | `/account`, `/account/apps`, `/account/delete`, `/account/export` | app | Self-service |
+| `/account/security`, `/mfa/challenge` | app | Second factor enrolment and challenge (§4.7) |
 | `/admin/*` | app | Owner-only |
 | `/privacy`, `/imprint`, `/terms` | app | Legal pages (DATA_PROTECTION.md) |
 
@@ -243,9 +274,15 @@ users            id (ulid PK), status (active|suspended), created_at, updated_at
 identities       id PK, user_id FK, provider ('google'), subject (provider's stable ID),
                  email, email_verified, created_at, last_login_at
                  UNIQUE(provider, subject)
-sessions         id_hash PK (SHA-256 of cookie value), user_id FK, created_at,
-                 last_seen_at, expires_at, ip_prefix, user_agent_hash
+sessions         id_hash PK (HMAC-SHA-256 of cookie value, SESSION_PEPPER), user_id FK,
+                 aal ('aal1'|'aal2'), aal2_at NULL, created_at, last_seen_at, expires_at,
+                 ip_prefix, user_agent_hash
 login_tx         id_hash PK, state, nonce, pkce_verifier, auth_request (JSON), expires_at
+mfa_factors      id PK, user_id FK, kind ('webauthn'|'totp'), label, created_at, last_used_at,
+                 webauthn_credential_id UNIQUE NULL, webauthn_public_key NULL,
+                 webauthn_sign_count NULL, totp_secret_enc NULL (AES-GCM, MFA_ENCRYPTION_KEY),
+                 totp_last_step NULL (blocks code reuse)
+recovery_codes   id PK, user_id FK, code_hash, used_at NULL
 allowlist        id PK, kind ('google_sub'|'email'), value, added_by, created_at
 trusted_clients  client_id PK, note, created_at
 audit_events     id PK, at, actor_user_id NULL, event, client_id NULL, ip_prefix, detail (JSON)
@@ -348,6 +385,9 @@ provider cannot set the D1 jurisdiction, the database is created once with
 | `OWNER_GOOGLE_SUB` | secret | owner, once |
 | `CONSENT_REMEMBER_SECRET` | secret | owner, generated locally |
 | `SESSION_PEPPER` | secret | owner, generated locally (HMAC for session/tx ID hashing) |
+| `MFA_ENCRYPTION_KEY` | secret | owner, generated locally (encrypts TOTP secrets; phase 5) |
+| `MFA_REQUIRED` | var | `wrangler.jsonc`, default `"false"` (§4.7) |
+| `LEGAL_CONTROLLER_NAME`, `LEGAL_CONTACT_EMAIL`, `LEGAL_POSTAL_ADDRESS` | var | deploy (from GitHub env variables); rendered on `/imprint` and `/privacy`, kept out of the repo |
 
 ---
 
@@ -355,14 +395,19 @@ provider cannot set the D1 jurisdiction, the database is created once with
 
 | Workflow | Trigger | Does |
 |---|---|---|
-| `ci.yml` | PR, push to `main` | install (frozen lockfile), lint, typecheck, unit + integration tests on the Workers runtime, protocol tests, `pnpm audit`; CodeQL. Becomes a **required check** on `main`. |
-| `deploy.yml` | push to `main` (non-`infra/` changes), manual | environment `production` (**owner approval**) → `wrangler d1 migrations apply` → `wrangler deploy` → smoke test of the metadata endpoint |
+| `ci.yml` | PR, push to `main` | job `verify`: install (frozen lockfile), typecheck (including `wrangler types --check`), lint + format, tests on the Workers runtime, bundle (dry-run deploy), `pnpm audit`. **Required check** on `main`. |
+| CodeQL | PR, push, weekly | GitHub default setup (no workflow file) |
+| `deploy.yml` | push to `main` (except `docs/`, `infra/`, Markdown), manual | environment `production` (**owner approval**) → tests → `wrangler deploy`. Migrations and a smoke test of the metadata endpoint are added in phase 4. |
+| Dependabot | weekly | npm and GitHub Actions updates, grouped, 3-day cooldown |
 
 - Default `GITHUB_TOKEN` permissions are read-only; jobs request only what they need.
 - All actions are pinned by SHA (enforced by repo setting) and limited to the allow-list.
 - No `pull_request_target`; outside contributors' workflows need approval.
-- Terraform is not run from GitHub Actions (HCP is VCS-driven), so `TF_API_TOKEN` is not needed in
-  GitHub and will be removed.
+- Checkout never persists credentials.
+- pnpm runs install scripts only for `esbuild` and `workerd`, and never installs a version
+  published less than 24 hours ago (`minimumReleaseAge`).
+- Terraform is not run from GitHub Actions (HCP is VCS-driven). `TF_API_TOKEN` was removed from
+  GitHub on 2026-11-08.
 
 ### Protocol tests (must pass before unlock)
 
@@ -378,6 +423,8 @@ provider cannot set the D1 jurisdiction, the database is created once with
 - Consent handle: replay, cross-browser, missing → rejected; page not frameable.
 - Google callback: bad `state`, bad `nonce`, wrong `aud`, `email_verified=false` → rejected.
 - Locked mode: non-allowlisted user cannot obtain a code.
+- MFA (phase 5): enrolled user is challenged with the flag off; unenrolled user cannot consent with
+  the flag on; TOTP code reuse and recovery-code reuse rejected; WebAuthn origin and RP ID checked.
 
 ---
 
@@ -386,9 +433,12 @@ provider cannot set the D1 jurisdiction, the database is created once with
 1. **Sign-up policy after unlock.** Proposal: any Google account may create an account; no
    privileged scopes; owner-only `admin`. The allowlist stays as a kill switch.
 2. **Gateway hostname** — `mcp.2earl.com`?
-3. **Cloudflare account ID** — needed as a GitHub environment variable for `deploy.yml`.
-4. **Legal pages** — controller name and address for `/imprint` and `/privacy`
-   (DATA_PROTECTION.md §8).
+3. **Legal pages** — postal address still to come (DATA_PROTECTION.md §8). Name and contact email
+   are set as environment variables, not in the repo.
+4. **Admin always needs a second factor?** Proposal: yes, independent of `MFA_REQUIRED` (§4.7).
+
+Resolved: Cloudflare account ID is set as the `production` environment variable
+`CLOUDFLARE_ACCOUNT_ID`.
 
 ---
 
@@ -396,11 +446,11 @@ provider cannot set the D1 jurisdiction, the database is created once with
 
 | Phase | Deliverable |
 |---|---|
-| 1 | This PR: design, threat model, data protection |
-| 2 | Scaffold, `ci.yml`, `deploy.yml`; required checks; rotate credentials exposed during setup |
+| 1 | Design, threat model, data protection (PR #1, merged) |
+| 2 | Scaffold, `ci.yml`, `deploy.yml`, Dependabot, CodeQL; required checks; rotate credentials exposed during setup |
 | 3 | `infra/`: import zone, DNS, D1 (EU), KV, WAF, rate limits |
 | 4 | MVP deployed **locked**: Google sign-in, authorization, token, CIMD, consent, revocation, account deletion, legal pages |
-| 5 | Protocol test suite complete, audit log, purge cron; optional OpenID conformance tests for the Google client side → **unlock** |
+| 5 | Protocol test suite complete, audit log, purge cron, **second factor behind `MFA_REQUIRED`** (§4.7); optional OpenID conformance tests for the Google client side → **unlock** |
 | 6 | `GATEWAY_INTEGRATION.md`: handoff to the gateway session |
 
 ## References

@@ -1,0 +1,8 @@
+# Only these packages may run install scripts (native binaries for the Workers runtime and
+# the bundler). Everything else is blocked by pnpm's default.
+onlyBuiltDependencies:
+  - esbuild
+  - workerd
+
+# Supply-chain delay: never install a version published less than 24 hours ago.
+minimumReleaseAge: 1440

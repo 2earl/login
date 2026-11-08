@@ -35,6 +35,7 @@ with German law on telemedia: TDDDG for cookies, DDG for the imprint **[verify]*
 | OAuth grants and tokens (hashed, encrypted props `{uid, authTime}`) | KV | Generated | Authorise apps the user approved |
 | Consent decisions | Signed cookie + grants | User | Remember approvals |
 | Audit events (event, time, IP prefix, client ID, user ID) | D1 `audit_events` | Generated | Security and accountability |
+| Second-factor data (passkey public keys and IDs, encrypted TOTP secret, hashed recovery codes) | D1 `mfa_factors`, `recovery_codes` | User (enrolment) | Protect the account; phase 5. Deleted with the account |
 | Request logs | Cloudflare (Workers logs, if enabled) | Request | Operations; configured without tokens or full query strings |
 
 IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
@@ -95,7 +96,11 @@ within 72 h where required (Art. 33). Notify users where there is high risk (Art
 
 ## 8. Owner to-dos before opening sign-up
 
-1. Provide the controller's name, postal address and contact email for `/imprint` and `/privacy`.
+1. Controller identity for `/imprint` and `/privacy`: name and contact email are set (GitHub
+   environment variables `LEGAL_CONTROLLER_NAME`, `LEGAL_CONTACT_EMAIL`, kept out of the repo).
+   **Postal address still to come.** Consider a role address on the domain (for example
+   `privacy@2earl.com` via Cloudflare Email Routing) instead of a personal mailbox, which becomes
+   public on these pages.
 2. Confirm the Cloudflare DPA is in place for the account.
 3. Have the privacy policy and imprint reviewed **[verify]**.
 4. Create a record of processing activities (Art. 30) — this document is a starting point.
