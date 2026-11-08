@@ -3,8 +3,8 @@
 Identity service and OAuth 2.1 authorization server for 2earl.com, served at
 `https://login.2earl.com`. Runs on Cloudflare Workers.
 
-**Status:** phase 2 — project scaffold and CI. No authentication code yet; the Worker serves a
-holding page and `/healthz`.
+**Status:** phase 4. Google sign-in, sessions and a minimal account page are live, locked to
+allowlisted accounts. The OAuth authorization server for apps (MCP clients) comes next.
 
 ## Development
 

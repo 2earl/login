@@ -88,6 +88,7 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | Threat | Mitigation |
 |---|---|
 | Account takeover by email collision (attacker controls a different identity with the same email) | Users keyed on Google `sub`; **no automatic linking by email**; `email_verified` required |
+| Allowlist by email admits a different Google account with the same address (e.g. a reassigned Workspace address) | Email entries are replaced by the `sub` on first successful sign-in; tested |
 | Forged or replayed ID token | `jose` verification against Google JWKS; `iss`, `aud`, `exp`, `nonce` checks |
 | Google account compromise | Out of our control. Mitigation: user can revoke all grants; owner can suspend the user. Owner account must use Google 2-step verification / passkey |
 | Google client secret leak (A5) | Stored only as GitHub environment secret and Worker secret. Leak alone does not bypass redirect-URI matching. **Rotate** — it was shared in plain text during setup (R5) |
@@ -151,7 +152,7 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | R3 | `terraform-cloud` GitHub App can read all org repos, not just this one. | **Accepted** by owner (org token revoked) | — |
 | R4 | GitHub org members without 2FA. Not the same as MFA in this service (DESIGN §4.7). | **Resolved** 2026-11-08 (org requires 2FA, verified via API) | — |
 | R5a | Cloudflare Global API Key (`cfk_…`) was pasted into chat. It has full control of the Cloudflare account and cannot be scoped. | **Accepted** by owner, against recommendation | Roll it in the Cloudflare dashboard if it is ever needed again or exposure is suspected |
-| R5b | Cloudflare account token and Google client secret were pasted into chat. | **Open** — due now (first deploy succeeded 2026-11-08) | Roll the Cloudflare token (same permissions) and update it in both GitHub `production` and HCP; add a new Google client secret, update GitHub, disable the old one. HCP team token: revoked 2026-11-08 |
+| R5b | Cloudflare account token and Google client secret were pasted into chat. | **Deferred** by owner (2026-11-08); must be done before sign-up opens | Roll the Cloudflare token (same permissions) and update it in both GitHub `production` and HCP; add a new Google client secret, update GitHub, disable the old one. HCP team token: revoked 2026-11-08 |
 | R6 | No staging: first exposure of new code is production. | **Accepted**, mitigated by locked launch (D9) | — |
 | R7 | Library keeps the previous refresh token valid until the rotated one is used (retry safety). A stolen-and-raced refresh token may work once. | Accepted (library design) | Monitor via audit; consider DPoP later |
 | R8 | Old org-level secrets (`CLOUDFLARE_API_KEY`, Google pair) readable by every org repo. | **Resolved** 2026-11-08 (deleted) | — |

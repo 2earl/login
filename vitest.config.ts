@@ -10,7 +10,14 @@ export default defineConfig(async () => {
     plugins: [
       cloudflareTest({
         wrangler: { configPath: './wrangler.jsonc' },
-        miniflare: { bindings: { TEST_MIGRATIONS: migrations } },
+        miniflare: {
+          bindings: {
+            TEST_MIGRATIONS: migrations,
+            // Test-only values for the Worker secrets declared in wrangler.jsonc.
+            GOOGLE_CLIENT_SECRET: 'test-google-client-secret',
+            SESSION_PEPPER: 'test-session-pepper',
+          },
+        },
       }),
     ],
     test: {
