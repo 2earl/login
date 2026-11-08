@@ -6,7 +6,7 @@ updates:
       interval: weekly
       day: monday
     cooldown:
-      default-days: 3
+      default-days: 1
     groups:
       dev-tooling:
         dependency-type: development
@@ -18,7 +18,7 @@ updates:
       interval: weekly
       day: monday
     cooldown:
-      default-days: 3
+      default-days: 1
     groups:
       actions:
         patterns: ['*']

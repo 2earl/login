@@ -103,6 +103,7 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | TOTP secret theft from D1 | Encrypted with `MFA_ENCRYPTION_KEY` (AES-GCM); key only in Worker secrets |
 | Recovery-code guessing | 10 random codes, stored hashed, single use, rate-limited with the challenge endpoint |
 | Attacker with a stolen session adds their own factor | Factor changes need a challenge ≤ 5 minutes old |
+| Owner's Google account taken over → full admin | `/admin` always requires the second factor, whatever `MFA_REQUIRED` says (D11) |
 | Admin MFA reset abused | Owner-only, audited; the user is notified by email (when email sending exists) |
 
 ### B5 — Gateway integration
@@ -128,7 +129,8 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 |---|---|
 | KV dump exposes tokens | Library stores only hashes; `props` encrypted with token-holder key; `props` minimal (`uid`, `authTime`) |
 | D1 dump exposes sessions | Only HMAC-SHA-256 hashes of session and transaction IDs are stored (`SESSION_PEPPER`) |
-| Personal data outside the EU | D1 jurisdiction `eu`; KV holds pseudonymous IDs only |
+| Personal data outside the EU | D1 and KV both in jurisdiction `eu`; D1 read replication disabled; KV holds pseudonymous IDs only |
+| Accidental destruction of D1/KV (all users and grants lost) | `prevent_destroy` on both in Terraform; manual apply in HCP |
 
 ### Availability
 
@@ -147,9 +149,9 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | R1 | **GitHub org owner `TayfunCesur`** has admin on this repo and can change rulesets, environments and secrets. Installed apps `claude` and `azure-pipelines` have write access to all org repos, including workflows (`claude`). | **Accepted** by owner (2026-11-08: trusted person) | Re-review if org membership changes |
 | R2 | One Cloudflare token (D8) is held by both HCP (Terraform) and GitHub (deploy). Compromise of either path gives zone + DNS + Workers control. | **Accepted** by owner | Revisit when staging is added |
 | R3 | `terraform-cloud` GitHub App can read all org repos, not just this one. | **Accepted** by owner (org token revoked) | — |
-| R4 | The GitHub org does not require 2FA for its members. Not the same as MFA in this service (DESIGN §4.7). A member account taken over by password alone has owner/admin rights here. | **Open** | Org Settings → Authentication security → "Require two-factor authentication" |
+| R4 | GitHub org members without 2FA. Not the same as MFA in this service (DESIGN §4.7). | **Resolved** 2026-11-08 (org requires 2FA, verified via API) | — |
 | R5a | Cloudflare Global API Key (`cfk_…`) was pasted into chat. It has full control of the Cloudflare account and cannot be scoped. | **Accepted** by owner, against recommendation | Roll it in the Cloudflare dashboard if it is ever needed again or exposure is suspected |
-| R5b | Cloudflare account token, Google client secret and HCP team token were pasted into chat. | **Open** | Rotate the Cloudflare token and Google secret after the first successful deploy. The HCP team token is no longer used anywhere: revoke it |
+| R5b | Cloudflare account token and Google client secret were pasted into chat. | **Open** — due now (first deploy succeeded 2026-11-08) | Roll the Cloudflare token (same permissions) and update it in both GitHub `production` and HCP; add a new Google client secret, update GitHub, disable the old one. HCP team token: revoked 2026-11-08 |
 | R6 | No staging: first exposure of new code is production. | **Accepted**, mitigated by locked launch (D9) | — |
 | R7 | Library keeps the previous refresh token valid until the rotated one is used (retry safety). A stolen-and-raced refresh token may work once. | Accepted (library design) | Monitor via audit; consider DPoP later |
 | R8 | Old org-level secrets (`CLOUDFLARE_API_KEY`, Google pair) readable by every org repo. | **Resolved** 2026-11-08 (deleted) | — |
