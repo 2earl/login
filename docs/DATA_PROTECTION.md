@@ -16,10 +16,10 @@ with German law on telemedia: TDDDG for cookies, DDG for the imprint **[verify]*
 - **Minimisation.** We ask Google only for `openid email profile`. We keep:
   - the Google `sub`, email, `email_verified` and display name;
   - not the profile picture, locale or Google tokens.
-- **Pseudonymisation outside the EU.** Data stored in KV (no EU option) holds only our internal
-  user ID.
-- **Location.** The D1 database is created with jurisdiction `eu`. This cannot be added later
-  (Cloudflare D1 docs).
+- **Pseudonymisation.** Data stored in KV holds only our internal user ID.
+- **Location.** The D1 database and the KV namespace are both created with jurisdiction `eu`
+  (`infra/storage.tf`). This cannot be added later. D1 read replication is disabled so no copies
+  run outside the EU.
 - **No tracking.** No analytics, no third-party scripts, no advertising cookies.
 - **Short retention by default** (§4).
 
@@ -63,7 +63,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 
 | Party | Role | Notes |
 |---|---|---|
-| Cloudflare, Inc. | Processor (hosting, Workers, D1, KV, network) | Cloudflare's DPA applies through its terms **[verify that the account has accepted it]**. US company: transfers rely on the EU-US Data Privacy Framework and/or SCCs **[verify current status]**. D1 data stays in the EU jurisdiction; edge processing is global |
+| Cloudflare, Inc. | Processor (hosting, Workers, D1, KV, network) | Cloudflare's DPA applies through its terms **[verify that the account has accepted it]**. US company: transfers rely on the EU-US Data Privacy Framework and/or SCCs **[verify current status]**. D1 and KV data stay in the EU jurisdiction; request processing at the edge is global |
 | Google | Independent controller for the user's Google account | We receive identity claims when the user chooses "Sign in with Google". Google's privacy terms apply to the user's Google account |
 | GitHub, HashiCorp | Not recipients of user data | Hold code, infrastructure state and secrets only. **Terraform state must not contain user data** |
 | OAuth clients (MCP apps) | Separate controllers | Receive only what the user approves. In v1 the gateway receives the internal user ID and scopes, not email or name |

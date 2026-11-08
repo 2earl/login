@@ -46,6 +46,8 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
 | D8 | One Cloudflare account API token used by both Terraform (HCP) and deploys (GitHub) | Owner (accepted risk, see THREAT_MODEL R2) |
 | D9 | Launch **locked**: only allowlisted Google accounts may sign in until phase 5 is complete | Confirmed (PR #1 merged) |
 | D10 | Second factor in our own service, controlled by a feature flag: optional when off, enforced when on (§4.7) | Owner, 2026-11-08 |
+| D11 | `/admin` always requires a second factor, regardless of the flag | Owner, 2026-11-08 |
+| D12 | KV namespace in the EU jurisdiction too (supported by the Cloudflare provider, verified in phase 3) | Phase 3 |
 
 ---
 
@@ -60,7 +62,7 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
                          │     App routes (login UI, Google callback, consent, account, admin)  │
                          │        │            │                     ▲                          │
                          │        ▼            ▼                     │ Service Binding (RPC)    │
-                         │   D1 "login" (EU)  KV "OAUTH_KV"          │ validateToken()          │
+                         │   D1 "login" (EU)  KV "OAUTH_KV" (EU)     │ validateToken()          │
                          │   users, identities, grants/tokens/       │                          │
                          │   sessions, audit  codes (hashed)         │                          │
                          │                                           │                          │
@@ -199,8 +201,9 @@ whether the user passed 2-step verification, so we cannot rely on Google for thi
 
   - A user who has enrolled is **always** challenged, whatever the flag. Turning the flag off
     never downgrades an enrolled account.
-  - **Proposal:** the owner/admin session always requires a second factor, independent of the
-    flag (§11).
+  - **Admin (D11):** `/admin` always requires a second factor, independent of the flag. The owner
+    must enrol before `/admin` opens; an owner session at `aal1` is treated as a normal user
+    session. `MFA_REQUIRED` only governs ordinary users.
 - **Where the challenge sits:** after the Google callback and before the session is marked
   `aal2`. Consent, account changes and admin actions require `aal2` when MFA applies to that user.
 - **Changing factors:** adding or removing a factor requires a fresh second-factor challenge
@@ -299,8 +302,8 @@ audit_events     id PK, at, actor_user_id NULL, event, client_id NULL, ip_prefix
 - Holds clients, grants, codes and tokens in the library's schema. Tokens, codes and secrets are
   stored **only as hashes**, and `props` are **encrypted with a key only the token holder can
   unwrap** (library documentation).
-- KV has no EU jurisdiction option [to be re-checked], so **`props` contain only `{ uid, authTime }`**.
-  No email, no name.
+- The namespace is created in the **EU jurisdiction** (D12). `props` still contain only
+  `{ uid, authTime }`: no email, no name. Minimal props limit what any single store holds.
 
 ### 6.3 Deletion
 
@@ -362,12 +365,17 @@ Library maintenance (`purgeExpiredData()`) runs on a daily Cron Trigger.
 
 | Managed by | Resources |
 |---|---|
-| **Terraform** (`infra/`, HCP workspace `2earl-login-prod`) | Zone settings (TLS ≥ 1.2, always HTTPS, HSTS, DNSSEC), DNS for `login`, D1 database (jurisdiction `eu`), KV namespace, WAF custom rules, rate-limit rules, Worker custom domain |
-| **Wrangler** (GitHub deploy) | Worker code, Worker secrets, D1 migrations, Cron Trigger |
+| **Terraform** (`infra/`, HCP workspace `2earl-login-prod`) | Zone settings (TLS ≥ 1.2, TLS 1.3, strict SSL, always HTTPS, 0-RTT off, HSTS), DNSSEC, D1 database and KV namespace (both jurisdiction `eu`, `prevent_destroy`), WAF custom rule, rate-limit rule, Worker custom domain |
+| **Wrangler** (GitHub deploy) | Worker script, Worker secrets, D1 migrations, Cron Trigger |
 
-No resource is managed by both. The existing zone is imported, not created. If the Cloudflare
-provider cannot set the D1 jurisdiction, the database is created once with
-`wrangler d1 create --jurisdiction eu` and imported.
+No resource is managed by both. The zone itself is **read** through a data source, never
+managed, so no Terraform change can delete it. The custom domain creates the `login` DNS record
+and certificate, so there is no separate DNS resource. The Worker script must exist before the
+custom domain is applied; the first deploy created it.
+
+Zone-wide effects to be aware of: HSTS with `includeSubDomains` (1 year) and strict SSL apply to
+every hostname in 2earl.com, not only `login`. The edge rules are written for the Free plan; the
+fine-grained limits are in the Worker (§8).
 
 ### 9.2 HCP Terraform
 
@@ -398,7 +406,7 @@ provider cannot set the D1 jurisdiction, the database is created once with
 | `ci.yml` | PR, push to `main` | job `verify`: install (frozen lockfile), typecheck (including `wrangler types --check`), lint + format, tests on the Workers runtime, bundle (dry-run deploy), `pnpm audit`. **Required check** on `main`. |
 | CodeQL | PR, push, weekly | GitHub default setup (no workflow file) |
 | `deploy.yml` | push to `main` (except `docs/`, `infra/`, Markdown), manual | environment `production` (**owner approval**) → tests → `wrangler deploy`. Migrations and a smoke test of the metadata endpoint are added in phase 4. |
-| Dependabot | weekly | npm and GitHub Actions updates, grouped, 3-day cooldown |
+| Dependabot | weekly | npm and GitHub Actions updates, grouped, 1-day cooldown (matches pnpm `minimumReleaseAge`) |
 
 - Default `GITHUB_TOKEN` permissions are read-only; jobs request only what they need.
 - All actions are pinned by SHA (enforced by repo setting) and limited to the allow-list.
@@ -435,10 +443,10 @@ provider cannot set the D1 jurisdiction, the database is created once with
 2. **Gateway hostname** — `mcp.2earl.com`?
 3. **Legal pages** — postal address still to come (DATA_PROTECTION.md §8). Name and contact email
    are set as environment variables, not in the repo.
-4. **Admin always needs a second factor?** Proposal: yes, independent of `MFA_REQUIRED` (§4.7).
 
-Resolved: Cloudflare account ID is set as the `production` environment variable
-`CLOUDFLARE_ACCOUNT_ID`.
+Resolved:
+- Cloudflare account ID is set as the `production` environment variable `CLOUDFLARE_ACCOUNT_ID`.
+- Admin second factor is mandatory (D11).
 
 ---
 
@@ -448,7 +456,7 @@ Resolved: Cloudflare account ID is set as the `production` environment variable
 |---|---|
 | 1 | Design, threat model, data protection (PR #1, merged) |
 | 2 | Scaffold, `ci.yml`, `deploy.yml`, Dependabot, CodeQL; required checks; rotate credentials exposed during setup |
-| 3 | `infra/`: import zone, DNS, D1 (EU), KV, WAF, rate limits |
+| 3 | `infra/`: zone settings, DNSSEC, D1 (EU), KV (EU), custom domain, WAF, rate limits |
 | 4 | MVP deployed **locked**: Google sign-in, authorization, token, CIMD, consent, revocation, account deletion, legal pages |
 | 5 | Protocol test suite complete, audit log, purge cron, **second factor behind `MFA_REQUIRED`** (§4.7); optional OpenID conformance tests for the Google client side → **unlock** |
 | 6 | `GATEWAY_INTEGRATION.md`: handoff to the gateway session |
