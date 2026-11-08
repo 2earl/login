@@ -12,6 +12,12 @@
   "workers_dev": false,
   "preview_urls": false,
 
+  // Stylesheet, font, lattice pattern and icon. Served before the Worker runs; their headers
+  // are in public/_headers.
+  "assets": {
+    "directory": "./public",
+  },
+
   // Phase 4 will decide what is logged. Invocation logs would record full request URLs,
   // which carry authorization codes and state on /authorize and /callback/*.
   "observability": {

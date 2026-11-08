@@ -5,7 +5,7 @@ import { pkceChallenge, sha256Hex } from './crypto';
 import { GoogleSignInError, buildGoogleAuthUrl, exchangeCode, verifyGoogleIdToken } from './google';
 import { LOGIN_TX_TTL_SECONDS, consumeLoginTx, createLoginTx } from './login-tx';
 import { ipPrefix } from './net';
-import { APP_CSS, accountPage, homePage, messagePage } from './pages';
+import { MESSAGES, accountPage, messagePage, notFoundPage, signInPage } from './pages';
 import { safeReturnTo } from './return-to';
 import { applySecurityHeaders } from './security-headers';
 import { createSession, deleteSession, getSession, type Session } from './sessions';
@@ -89,18 +89,13 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     await next();
   });
 
-  app.get('/', (c) => c.html(homePage(c.get('session')?.user.primaryEmail ?? null)));
+  app.get('/', (c) => (c.get('session') ? c.redirect('/account', 303) : c.html(signInPage())));
 
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
 
-  app.get('/app.css', (c) => {
-    c.header('Cache-Control', 'public, max-age=3600');
-    return c.body(APP_CSS, 200, { 'Content-Type': 'text/css; charset=utf-8' });
-  });
-
   app.get('/login', async (c) => {
     if (!(await underRateLimit(c, 'login'))) {
-      return c.html(messagePage('Too many attempts', 'Please wait a minute and try again.'), 429);
+      return c.html(messagePage(MESSAGES.tooManyAttempts), 429);
     }
     const now = deps.now();
     const returnTo = safeReturnTo(c.req.query('return_to'));
@@ -124,7 +119,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
 
   app.get('/callback/google', async (c) => {
     if (!(await underRateLimit(c, 'callback'))) {
-      return c.html(messagePage('Too many attempts', 'Please wait a minute and try again.'), 429);
+      return c.html(messagePage(MESSAGES.tooManyAttempts), 429);
     }
     const now = deps.now();
     const ip = clientIp(c);
@@ -133,16 +128,10 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         ipPrefix: ip,
         detail: { reason },
       });
-      return status === 403
-        ? c.html(
-            messagePage(
-              'Access not available',
-              'This Google account cannot sign in to 2earl yet.',
-              false,
-            ),
-            403,
-          )
-        : c.html(messagePage('Sign-in failed', 'Your sign-in could not be completed.'), 400);
+      return c.html(
+        messagePage(status === 403 ? MESSAGES.notInvited : MESSAGES.signInFailed),
+        status,
+      );
     };
 
     // The transaction is single-use and bound to this browser by its cookie.
@@ -235,7 +224,11 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     );
   });
 
-  app.notFound((c) => c.json({ error: 'not_found' }, 404));
+  app.notFound((c) =>
+    (c.req.header('Accept') ?? '').includes('text/html')
+      ? c.html(notFoundPage(), 404)
+      : c.json({ error: 'not_found' }, 404),
+  );
 
   app.onError((err, c) => {
     // Never echo error details to the client; they may contain request data.
