@@ -136,7 +136,10 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
       - `nonce` matches
       - `email_verified` = true
 4. Find the user **by `(provider='google', subject=sub)`**, never by email. If none exists:
-   - Locked mode: allow only if `sub` or email is on the allowlist.
+   - Locked mode (`LOGIN_LOCKED`, default `"true"`): allow only if the `sub` or the email is on
+     the allowlist, checked **before** any account is created. An email entry is replaced by a
+     `google_sub` entry on the first successful sign-in, so a different Google account that later
+     gets the same address is not admitted.
    - Open mode: create user + identity.
 5. **Rotate the session**: delete any pre-existing session cookie, create a new session, set
    `__Host-session`.
@@ -229,7 +232,7 @@ whether the user passed 2-step verification, so we cannot rely on Google for thi
 | `/account`, `/account/apps`, `/account/delete`, `/account/export` | app | Self-service |
 | `/account/security`, `/mfa/challenge` | app | Second factor enrolment and challenge (§4.7) |
 | `/admin/*` | app | Owner-only |
-| `/privacy`, `/imprint`, `/terms` | app | Legal pages (DATA_PROTECTION.md) |
+| `https://2earl.com/privacy`, `/terms`, `/imprint` | `2earl/website` | Legal pages for all 2earl services; login pages link to them |
 
 There is **no registration endpoint** (`clientRegistrationEndpoint` unset).
 
@@ -388,14 +391,14 @@ fine-grained limits are in the Worker (§8).
 
 | Name | Kind | Set by |
 |---|---|---|
-| `GOOGLE_CLIENT_ID` | var | deploy (from GitHub env variable) |
-| `GOOGLE_CLIENT_SECRET` | secret | deploy (from GitHub env secret) |
+| `GOOGLE_CLIENT_ID` | var | `wrangler.jsonc` (public by design: it appears in every sign-in URL) |
+| `LOGIN_LOCKED` | var | `wrangler.jsonc`, `"true"` until phase 5 |
+| `GOOGLE_CLIENT_SECRET` | secret | deploy (`wrangler secret bulk` from the GitHub `production` environment); listed in `secrets.required`, so a deploy without it fails |
 | `OWNER_GOOGLE_SUB` | secret | owner, once |
 | `CONSENT_REMEMBER_SECRET` | secret | owner, generated locally |
-| `SESSION_PEPPER` | secret | owner, generated locally (HMAC for session/tx ID hashing) |
+| `SESSION_PEPPER` | secret | owner, generated locally (HMAC for session/tx ID hashing); deployed like `GOOGLE_CLIENT_SECRET` |
 | `MFA_ENCRYPTION_KEY` | secret | owner, generated locally (encrypts TOTP secrets; phase 5) |
 | `MFA_REQUIRED` | var | `wrangler.jsonc`, default `"false"` (§4.7) |
-| `LEGAL_CONTROLLER_NAME`, `LEGAL_CONTACT_EMAIL`, `LEGAL_POSTAL_ADDRESS` | var | deploy (from GitHub env variables); rendered on `/imprint` and `/privacy`, kept out of the repo |
 
 ---
 

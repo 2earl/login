@@ -13,7 +13,7 @@ describe('placeholder worker', () => {
     const res = await get('/');
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toMatch(/^text\/html/);
-    expect(await res.text()).toContain('not open yet');
+    expect(await res.text()).toContain('not open to the public yet');
   });
 
   it('answers the health check', async () => {

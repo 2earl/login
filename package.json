@@ -20,7 +20,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "hono": "4.13.17"
+    "hono": "4.13.17",
+    "jose": "6.2.15"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.6.0",

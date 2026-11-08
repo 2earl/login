@@ -3,7 +3,8 @@
 Status: **Draft for review** · Owner: @FerhatDundar · Last updated: 2026-11-08
 
 > These are engineering notes on how the service handles personal data. They are **not legal
-> advice**. The legal pages (`/privacy`, `/imprint`) must be reviewed by someone qualified before
+> advice**. The legal pages (`https://2earl.com/privacy`, `/terms`, `/imprint`, in the `2earl/website`
+> repo) must be reviewed by someone qualified before
 > sign-up is opened (phase 5). Items marked **[verify]** need that review.
 
 The service is operated from Germany and will have users in the EU, so the GDPR applies, along
@@ -79,7 +80,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | Portability (Art. 20) | Same JSON export |
 | Withdraw approvals for apps | `/account/apps` → revoke |
 
-Requests can also be sent to the contact address on `/privacy`.
+Requests can also be sent to the contact address on `https://2earl.com/privacy`.
 
 ## 7. Security measures (Art. 32)
 
@@ -96,13 +97,13 @@ within 72 h where required (Art. 33). Notify users where there is high risk (Art
 
 ## 8. Owner to-dos before opening sign-up
 
-1. Controller identity for `/imprint` and `/privacy`: name and contact email are set (GitHub
-   environment variables `LEGAL_CONTROLLER_NAME`, `LEGAL_CONTACT_EMAIL`, kept out of the repo).
-   **Postal address still to come.** Consider a role address on the domain (for example
-   `privacy@2earl.com` via Cloudflare Email Routing) instead of a personal mailbox, which becomes
-   public on these pages.
+1. Controller identity: done. Name, postal address and contact email are published on
+   `https://2earl.com/imprint` and `/privacy` (`2earl/website`). Consider a role address on the
+   domain (for example `privacy@2earl.com` via Cloudflare Email Routing) instead of a personal
+   mailbox.
 2. Confirm the Cloudflare DPA is in place for the account.
 3. Have the privacy policy and imprint reviewed **[verify]**.
 4. Create a record of processing activities (Art. 30) — this document is a starting point.
-5. Set the Google OAuth consent screen's privacy-policy and terms URLs to `/privacy` and
-   `/terms`, then publish the consent screen ("In production").
+5. Google consent screen: privacy and terms links are set to `https://2earl.com/privacy` and
+   `https://2earl.com/terms`. Publish the consent screen ("In production") only when sign-up opens;
+   until then it stays in Testing with the owner as test user.

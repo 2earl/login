@@ -20,7 +20,26 @@
 
   "vars": {
     "ISSUER": "https://login.2earl.com",
+    // Google OAuth client ID. Public by design: it appears in every sign-in URL.
+    "GOOGLE_CLIENT_ID": "862466313467-kgrf9bd3j96b0peeujk8h5j3ak49ugou.apps.googleusercontent.com",
+    // Locked launch (DESIGN D9): only allowlisted accounts may sign in. "false" opens sign-up.
+    "LOGIN_LOCKED": "true",
   },
+
+  // Set by the deploy workflow from the GitHub `production` environment. Deploys fail if any
+  // is missing.
+  "secrets": {
+    "required": ["GOOGLE_CLIENT_SECRET", "SESSION_PEPPER"],
+  },
+
+  // Per-IP limit on the sign-in endpoints, on top of the zone rate-limit rule (infra/firewall.tf).
+  "ratelimits": [
+    {
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 20, "period": 60 },
+    },
+  ],
 
   // Created by Terraform (infra/storage.tf), both in the EU jurisdiction. IDs are not secrets.
   "d1_databases": [

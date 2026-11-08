@@ -50,9 +50,16 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           packageManager: pnpm
+          # Uploaded with `wrangler secret bulk` before the commands below run.
+          secrets: |
+            GOOGLE_CLIENT_SECRET
+            SESSION_PEPPER
           command: |
             d1 migrations apply DB --remote
             deploy
+        env:
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          SESSION_PEPPER: ${{ secrets.SESSION_PEPPER }}
 
       - name: Smoke test
         run: |
