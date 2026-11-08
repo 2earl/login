@@ -328,7 +328,8 @@ Library maintenance (`purgeExpiredData()`) runs on a daily Cron Trigger.
   - logout and account deletion revoke it server-side
 - **CSRF**
   - Consent: the library's bound single-use handle.
-  - Other POSTs (account, admin): a per-session synchronizer token, plus `Origin` header check.
+  - Other POSTs (account, admin): a per-session synchronizer token, plus `Origin` header check;
+    a `Sec-Fetch-Site` other than `same-origin` is rejected.
 - **Response headers on every response:**
   - `Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`
     - Exception: the **consent page** omits `form-action`. Some browsers apply `form-action` to
@@ -336,7 +337,9 @@ Library maintenance (`purgeExpiredData()`) runs on a daily Cron Trigger.
       client's (arbitrary) redirect URI. That redirect target is already restricted by exact
       redirect-URI matching.
   - `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`
-  - `Referrer-Policy: no-referrer` (codes and state never leak via Referer)
+  - `Referrer-Policy: same-origin` (codes and state never leak via Referer to other sites).
+    Not `no-referrer`: under that policy browsers send `Origin: null` on same-site form posts,
+    which breaks the Origin check below.
   - `X-Content-Type-Options: nosniff`
   - `Cross-Origin-Opener-Policy: same-origin`
   - `Cache-Control: no-store` on all authenticated and OAuth responses

@@ -80,7 +80,7 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | Login CSRF (victim signed in as attacker) | Google `state` bound to a server-side transaction and cookie; one-time use |
 | Session fixation | New session ID issued on every sign-in; old cookie discarded |
 | XSS | No user-authored HTML; all client strings escaped; strict CSP (`default-src 'none'`, no inline script) |
-| Code/token leakage via Referer, logs or caches | `Referrer-Policy: no-referrer`; `Cache-Control: no-store`; logging rules (DESIGN §7) |
+| Code/token leakage via Referer, logs or caches | `Referrer-Policy: same-origin` (nothing sent to other sites); `Cache-Control: no-store`; logging rules (DESIGN §7) |
 | Cookie theft by a sibling subdomain | `__Host-` prefix (no `Domain`, Path=/, Secure). Other `*.2earl.com` apps cannot set or read it |
 
 ### B3 — Google sign-in

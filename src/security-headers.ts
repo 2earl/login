@@ -28,7 +28,10 @@ export const CONSENT_CSP = [
 
 export const BASE_HEADERS: Readonly<Record<string, string>> = {
   'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',
-  'Referrer-Policy': 'no-referrer',
+  // same-origin, not no-referrer: under no-referrer browsers send `Origin: null` on same-site
+  // form posts, which breaks the Origin check on state-changing requests. same-origin still
+  // sends nothing to other sites, so codes and state in our URLs cannot leak there.
+  'Referrer-Policy': 'same-origin',
   'X-Content-Type-Options': 'nosniff',
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Resource-Policy': 'same-origin',
