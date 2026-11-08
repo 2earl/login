@@ -98,21 +98,61 @@ function initial(name: string | null, email: string | null): string {
   return first.toLocaleUpperCase('en');
 }
 
+export interface ConnectedApp {
+  grantId: string;
+  name: string;
+  /** Host of the app's Client ID Metadata Document URL, when it has one. */
+  domain: string | null;
+  scopes: string[];
+  allowedAt: number;
+}
+
+function connectedApps(apps: ConnectedApp[]): string {
+  if (apps.length === 0) {
+    return '<p class="empty">No apps are connected. When you allow an app to act for you, it appears here and you can disconnect it at any time.</p>';
+  }
+  return (
+    '<ul class="apps">' +
+    apps
+      .map(
+        (app) =>
+          '<li class="app">' +
+          '<div class="app-main">' +
+          `<p class="app-name">${escapeHtml(app.name)}</p>` +
+          `<p class="app-meta">${app.domain ? `${escapeHtml(app.domain)} · ` : ''}Allowed ${formatDate(app.allowedAt)}</p>` +
+          (app.scopes.length > 0
+            ? `<ul class="app-scopes">${app.scopes.map((s) => `<li>${escapeHtml(s)}</li>`).join('')}</ul>`
+            : '') +
+          '</div>' +
+          '<form method="post" action="/account/apps/disconnect">' +
+          `<input type="hidden" name="grant" value="${escapeHtml(app.grantId)}">` +
+          `<button class="button secondary small" type="submit" aria-label="Disconnect ${escapeHtml(app.name)}">Disconnect</button>` +
+          '</form>' +
+          '</li>',
+      )
+      .join('') +
+    '</ul>'
+  );
+}
+
 export function accountPage(params: {
   email: string | null;
   name: string | null;
   memberSince: number;
+  apps: ConnectedApp[];
+  notice?: string;
 }): string {
   const heading = params.name ?? 'Your account';
   return page(
     'Your account',
-    '<header class="identity">' +
+    (params.notice ? `<p class="notice" role="status">${escapeHtml(params.notice)}</p>` : '') +
+      '<header class="identity">' +
       `<div class="badge" aria-hidden="true">${escapeHtml(initial(params.name, params.email))}</div>` +
       `<div><h1>${escapeHtml(heading)}</h1><p>${escapeHtml(params.email ?? '')}</p></div>` +
       '</header>' +
       '<section class="section" aria-labelledby="apps-heading">' +
       '<h2 id="apps-heading">Connected apps</h2>' +
-      '<p class="empty">No apps are connected. When you allow an app to act for you, it appears here and you can disconnect it at any time.</p>' +
+      connectedApps(params.apps) +
       '</section>' +
       '<section class="section" aria-labelledby="details-heading">' +
       '<h2 id="details-heading">Account details</h2>' +
@@ -127,16 +167,85 @@ export function accountPage(params: {
   );
 }
 
+/** Everything the consent page shows comes from the library's validated description. */
+export interface ConsentView {
+  handle: string;
+  clientName: string;
+  /** Verified domain of a CIMD client; absent for a pre-registered or self-registered client. */
+  clientDomain: string | null;
+  /** Owner-marked as trusted (trusted_clients table). */
+  trusted: boolean;
+  redirectHost: string;
+  redirectIsLoopback: boolean;
+  resource: string;
+  /** Requested scopes this server can grant, with their labels. */
+  scopes: { scope: string; label: string }[];
+  /** Requested scopes this server does not grant. */
+  unavailable: string[];
+}
+
+export function consentPage(view: ConsentView): string {
+  const name = escapeHtml(view.clientName);
+  const origin = view.clientDomain
+    ? `<p class="consent-origin">Published by <strong>${escapeHtml(view.clientDomain)}</strong>${
+        view.trusted ? ' <span class="tag">Verified by 2earl</span>' : ''
+      }</p>`
+    : '<p class="consent-origin">This app named itself. 2earl has not verified who runs it.</p>';
+  const loopback = view.redirectIsLoopback
+    ? '<p class="warning">Access will be sent to an app on your own computer. Continue only if you just started signing in from that app.</p>'
+    : '';
+  const scopes =
+    view.scopes.length > 0
+      ? '<fieldset class="scopes"><legend>It will be able to</legend>' +
+        view.scopes
+          .map(
+            ({ scope, label }) =>
+              `<label class="scope"><input type="checkbox" name="scope" value="${escapeHtml(scope)}" checked>` +
+              `<span>${escapeHtml(label)}</span></label>`,
+          )
+          .join('') +
+        '</fieldset>'
+      : '<p class="lede">It is asking only to know that you have a 2earl account.</p>';
+  const unavailable =
+    view.unavailable.length > 0
+      ? `<p class="note">It also asked for permissions 2earl doesn’t grant: ${view.unavailable
+          .map((s) => `<code>${escapeHtml(s)}</code>`)
+          .join(', ')}. They will not be given.</p>`
+      : '';
+
+  return page(
+    `Allow ${view.clientName}?`,
+    `<h1>Allow <span class="client">${name}</span> to use your 2earl account?</h1>` +
+      origin +
+      '<dl class="details consent-facts">' +
+      `<dt>Sends access to</dt><dd><strong>${escapeHtml(view.redirectHost)}</strong></dd>` +
+      `<dt>For</dt><dd>${escapeHtml(view.resource)}</dd>` +
+      '</dl>' +
+      loopback +
+      '<form method="post" action="/authorize" class="consent-form">' +
+      `<input type="hidden" name="handle" value="${escapeHtml(view.handle)}">` +
+      scopes +
+      unavailable +
+      '<label class="remember"><input type="checkbox" name="remember" value="on"> Don’t ask again for this app for 30 days</label>' +
+      '<div class="consent-actions">' +
+      '<button class="button primary" type="submit" name="decision" value="approve">Allow</button>' +
+      '<button class="button secondary" type="submit" name="decision" value="deny">Deny</button>' +
+      '</div>' +
+      '</form>' +
+      '<p class="fine">You can disconnect this app at any time in your account.</p>',
+  );
+}
+
 export interface Message {
   title: string;
   body: string;
   action?: { href: string; label: string };
 }
 
-export function messagePage(message: Message): string {
+export function messagePage(message: Message, status = 'Sign-in stopped'): string {
   return page(
     message.title,
-    `<p class="status">${ALERT_ICON}<span>Sign-in stopped</span></p>` +
+    `<p class="status">${ALERT_ICON}<span>${escapeHtml(status)}</span></p>` +
       `<h1>${escapeHtml(message.title)}</h1>` +
       `<p class="lede">${escapeHtml(message.body)}</p>` +
       (message.action
@@ -155,6 +264,18 @@ export const MESSAGES = {
     title: 'Sign-in didn’t complete',
     body: 'The sign-in link expired, was already used, or was cancelled. Start again to get a new one.',
     action: { href: '/login', label: 'Start again' },
+  },
+  authorizeInvalid: {
+    title: 'This app’s request isn’t valid',
+    body: 'The app sent an authorization request 2earl can’t accept, so nothing was shared. Return to the app and try connecting again; if it keeps happening, the app needs fixing.',
+  },
+  appUnverifiable: {
+    title: 'This app couldn’t be checked',
+    body: 'The app’s published details could not be loaded or are invalid, so nothing was shared. Try again later.',
+  },
+  consentExpired: {
+    title: 'This approval page has expired',
+    body: 'Approval pages work once, for ten minutes, in the browser that opened them. Return to the app and connect again.',
   },
   notInvited: {
     title: 'This Google account can’t sign in yet',

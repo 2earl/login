@@ -162,10 +162,25 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
 
 ### 4.4 Token validation (gateway → login, via Service Binding)
 
-- The gateway's `OAuthResourceServer.validateToken` calls the `login` Worker's RPC entrypoint.
-- That entrypoint returns `{ props: { uid }, audience, scope, expiresAt }`.
-- The gateway enforces `audience === its resource URL` and per-tool scopes. It returns
-  `insufficientScope()` for step-up.
+- The `login` Worker's default export is a `WorkerEntrypoint` (`src/index.ts`) with an RPC
+  method `validateToken(resource, token)`. It is reachable only through a Service Binding, never
+  over HTTP.
+- The gateway binds it and hands it to `OAuthResourceServer`:
+
+  ```jsonc
+  // gateway wrangler.jsonc
+  { "services": [{ "binding": "AUTH_SERVER", "service": "login" }] }
+  ```
+
+  ```ts
+  validateToken: (env) => env.AUTH_SERVER.validateToken,
+  ```
+
+- It returns `{ props: { uid, authTime }, audience, expiresAt, scope, userId, clientId }` or
+  `null`. A resource other than `MCP_RESOURCE` is rejected.
+- The gateway enforces per-tool scopes and returns `insufficientScope()` for step-up. It never
+  forwards the token upstream.
+- Revocation is immediate: a disconnected app's next call fails validation.
 
 ### 4.5 Account page
 
@@ -226,7 +241,9 @@ whether the user passed 2-step verification, so we cannot rely on Google for thi
 | `/.well-known/oauth-authorization-server` | library | RFC 8414 metadata |
 | `/authorize` | app + library | Authorization endpoint (GET) |
 | `/oauth/token` | library | Token endpoint: `authorization_code`, `refresh_token` |
-| revocation endpoint (as advertised) | library | RFC 7009 |
+| `/oauth/token` (revocation, as advertised) | library | RFC 7009 |
+| `/.well-known/oauth-authorization-server` | library | RFC 8414 metadata |
+| `/account/apps/disconnect` | app | Revoke one app's grant (same-origin POST) |
 | `/login`, `/callback/google`, `/logout` | app | Google sign-in, session |
 | `/consent` | app + library | Consent form POST |
 | `/account`, `/account/apps`, `/account/delete`, `/account/export` | app | Self-service |

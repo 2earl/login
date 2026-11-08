@@ -54,12 +54,14 @@ jobs:
           secrets: |
             GOOGLE_CLIENT_SECRET
             SESSION_PEPPER
+            CONSENT_REMEMBER_SECRET
           command: |
             d1 migrations apply DB --remote
             deploy
         env:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           SESSION_PEPPER: ${{ secrets.SESSION_PEPPER }}
+          CONSENT_REMEMBER_SECRET: ${{ secrets.CONSENT_REMEMBER_SECRET }}
 
       - name: Smoke test
         run: |

@@ -21,6 +21,7 @@
     "assets:version": "node scripts/asset-versions.mjs"
   },
   "dependencies": {
+    "@cloudflare/workers-oauth-provider": "1.2.4",
     "hono": "4.13.17",
     "jose": "6.2.15"
   },

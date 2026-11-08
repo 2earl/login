@@ -23,7 +23,7 @@ describe('placeholder worker', () => {
   });
 
   it('returns a JSON 404 for unknown paths', async () => {
-    const res = await get('/authorize?client_id=x');
+    const res = await get('/no-such-page');
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'not_found' });
   });
