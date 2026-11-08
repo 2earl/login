@@ -405,7 +405,7 @@ fine-grained limits are in the Worker (§8).
 |---|---|---|
 | `ci.yml` | PR, push to `main` | job `verify`: install (frozen lockfile), typecheck (including `wrangler types --check`), lint + format, tests on the Workers runtime, bundle (dry-run deploy), `pnpm audit`. **Required check** on `main`. |
 | CodeQL | PR, push, weekly | GitHub default setup (no workflow file) |
-| `deploy.yml` | push to `main` (except `docs/`, `infra/`, Markdown), manual | environment `production` (**owner approval**) → tests → `wrangler deploy`. Migrations and a smoke test of the metadata endpoint are added in phase 4. |
+| `deploy.yml` | push to `main` (except `docs/`, `infra/`, Markdown), manual | environment `production` (**owner approval**) → tests → `wrangler d1 migrations apply DB --remote` → `wrangler deploy` → smoke test of `/healthz` (the metadata endpoint once it exists). Migrations must stay compatible with the code already live. |
 | Dependabot | weekly | npm and GitHub Actions updates, grouped, 1-day cooldown (matches pnpm `minimumReleaseAge`) |
 
 - Default `GITHUB_TOKEN` permissions are read-only; jobs request only what they need.
