@@ -92,6 +92,19 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | Google account compromise | Out of our control. Mitigation: user can revoke all grants; owner can suspend the user. Owner account must use Google 2-step verification / passkey |
 | Google client secret leak (A5) | Stored only as GitHub environment secret and Worker secret. Leak alone does not bypass redirect-URI matching. **Rotate** — it was shared in plain text during setup (R5) |
 
+### B1/B3 — Second factor (DESIGN §4.7, phase 5)
+
+| Threat | Mitigation |
+|---|---|
+| Google account takeover gives full access | Second factor in our service. Optional by default; enforced when `MFA_REQUIRED=true`; always required for enrolled users |
+| Downgrade: turning the flag off weakens enrolled accounts | Enrolled users are challenged regardless of the flag |
+| TOTP phishing / relay | Passkeys are the primary factor (origin-bound); TOTP is a fallback |
+| TOTP code reuse | Last accepted time step stored; same or older step rejected |
+| TOTP secret theft from D1 | Encrypted with `MFA_ENCRYPTION_KEY` (AES-GCM); key only in Worker secrets |
+| Recovery-code guessing | 10 random codes, stored hashed, single use, rate-limited with the challenge endpoint |
+| Attacker with a stolen session adds their own factor | Factor changes need a challenge ≤ 5 minutes old |
+| Admin MFA reset abused | Owner-only, audited; the user is notified by email (when email sending exists) |
+
 ### B5 — Gateway integration
 
 | Threat | Mitigation |
@@ -131,14 +144,15 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 
 | ID | Risk | Status | Owner action |
 |---|---|---|---|
-| R1 | **GitHub org owner `TayfunCesur`** has admin on this repo and can change rulesets, environments and secrets. Installed apps `claude` and `azure-pipelines` have write access to all org repos, including workflows (`claude`). | **Open** | Decide: demote/remove, or accept and record here |
+| R1 | **GitHub org owner `TayfunCesur`** has admin on this repo and can change rulesets, environments and secrets. Installed apps `claude` and `azure-pipelines` have write access to all org repos, including workflows (`claude`). | **Accepted** by owner (2026-11-08: trusted person) | Re-review if org membership changes |
 | R2 | One Cloudflare token (D8) is held by both HCP (Terraform) and GitHub (deploy). Compromise of either path gives zone + DNS + Workers control. | **Accepted** by owner | Revisit when staging is added |
 | R3 | `terraform-cloud` GitHub App can read all org repos, not just this one. | **Accepted** by owner (org token revoked) | — |
-| R4 | GitHub org does not require 2FA. | **Open** | Enable "Require two-factor authentication" |
-| R5 | Credentials pasted into chat during setup: Cloudflare Global API Key (`cfk_…`), Cloudflare account token, Google client secret, HCP team token. | **Open** | Roll the Global API Key now; rotate the other three after the first successful deploy (phase 2) |
+| R4 | The GitHub org does not require 2FA for its members. Not the same as MFA in this service (DESIGN §4.7). A member account taken over by password alone has owner/admin rights here. | **Open** | Org Settings → Authentication security → "Require two-factor authentication" |
+| R5a | Cloudflare Global API Key (`cfk_…`) was pasted into chat. It has full control of the Cloudflare account and cannot be scoped. | **Accepted** by owner, against recommendation | Roll it in the Cloudflare dashboard if it is ever needed again or exposure is suspected |
+| R5b | Cloudflare account token, Google client secret and HCP team token were pasted into chat. | **Open** | Rotate the Cloudflare token and Google secret after the first successful deploy. The HCP team token is no longer used anywhere: revoke it |
 | R6 | No staging: first exposure of new code is production. | **Accepted**, mitigated by locked launch (D9) | — |
 | R7 | Library keeps the previous refresh token valid until the rotated one is used (retry safety). A stolen-and-raced refresh token may work once. | Accepted (library design) | Monitor via audit; consider DPoP later |
-| R8 | Old org-level secrets (`CLOUDFLARE_API_KEY`, Google pair) may still be readable by every org repo. | **Open** | Delete them |
+| R8 | Old org-level secrets (`CLOUDFLARE_API_KEY`, Google pair) readable by every org repo. | **Resolved** 2026-11-08 (deleted) | — |
 
 ## 6. Security review triggers
 
