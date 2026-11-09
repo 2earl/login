@@ -1,5 +1,6 @@
 /**
- * Server-rendered HTML. Every dynamic value goes through `escapeHtml`. No scripts.
+ * Server-rendered HTML. Every dynamic value goes through `escapeHtml`. No inline scripts; the
+ * second-factor pages load /passkey.js (with MFA_CSP).
  * Styles, font and icon are static assets in /public; the mark and panel are inline markup.
  */
 
@@ -54,7 +55,11 @@ const PANEL =
   '<span class="facet facet-amber"></span>' +
   '</div>';
 
-export function page(title: string, main: string): string {
+export function page(
+  title: string,
+  main: string,
+  options: { passkeyScript?: boolean } = {},
+): string {
   return (
     '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
@@ -63,6 +68,7 @@ export function page(title: string, main: string): string {
     `<link rel="icon" href="${ASSET_URLS.favicon}" type="image/svg+xml">` +
     `<link rel="preload" href="${ASSET_URLS.font}" as="font" type="font/woff2" crossorigin>` +
     `<link rel="stylesheet" href="${ASSET_URLS.appCss}">` +
+    (options.passkeyScript ? `<script type="module" src="${ASSET_URLS.passkeyJs}"></script>` : '') +
     '</head><body><div class="frame">' +
     PANEL +
     '<div class="content">' +
@@ -140,6 +146,7 @@ export function accountPage(params: {
   name: string | null;
   memberSince: number;
   apps: ConnectedApp[];
+  factors: { kind: 'webauthn' | 'totp' }[];
   notice?: string;
 }): string {
   const heading = params.name ?? 'Your account';
@@ -153,6 +160,11 @@ export function accountPage(params: {
       '<section class="section" aria-labelledby="apps-heading">' +
       '<h2 id="apps-heading">Connected apps</h2>' +
       connectedApps(params.apps) +
+      '</section>' +
+      '<section class="section" aria-labelledby="security-heading">' +
+      '<h2 id="security-heading">Security</h2>' +
+      `<p class="section-text">${escapeHtml(factorSummary(params.factors))}</p>` +
+      '<a class="button secondary" href="/account/security">Manage second factor</a>' +
       '</section>' +
       '<section class="section" aria-labelledby="details-heading">' +
       '<h2 id="details-heading">Account details</h2>' +
@@ -297,6 +309,204 @@ export function accountDeletedPage(): string {
       '<p class="lede">Your 2earl account, its link to Google and its sessions are gone, and connected apps no longer have access.</p>' +
       '<p class="note">Google still lists 2earl among the apps you signed in to. You can remove it in your Google Account under Security → Your connections to third-party apps &amp; services.</p>' +
       '<a class="button secondary" href="https://2earl.com">Go to 2earl.com</a>',
+  );
+}
+
+// ---- Second factor (DESIGN §4.7) ---------------------------------------------------------------
+
+function factorSummary(factors: { kind: 'webauthn' | 'totp' }[]): string {
+  if (factors.length === 0) {
+    return 'Second factor: off. Adding a passkey protects your account even if someone gets into your Google account.';
+  }
+  const passkeys = factors.filter((f) => f.kind === 'webauthn').length;
+  const parts = [];
+  if (passkeys > 0) parts.push(passkeys === 1 ? '1 passkey' : `${String(passkeys)} passkeys`);
+  if (factors.some((f) => f.kind === 'totp')) parts.push('an authenticator app');
+  return `Second factor: on, with ${parts.join(' and ')}.`;
+}
+
+export interface FactorView {
+  id: string;
+  kind: 'webauthn' | 'totp';
+  label: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+}
+
+function factorRow(factor: FactorView): string {
+  const used = factor.lastUsedAt ? ` · Last used ${formatDate(factor.lastUsedAt)}` : '';
+  // Under its own heading, the authenticator app needs no name of its own.
+  const name = factor.kind === 'totp' ? 'Turned on' : factor.label;
+  return (
+    '<li class="app">' +
+    '<div class="app-main">' +
+    `<p class="app-name">${escapeHtml(name)}</p>` +
+    `<p class="app-meta">Added ${formatDate(factor.createdAt)}${used}</p>` +
+    '</div>' +
+    '<form method="post" action="/account/security/factors/remove">' +
+    `<input type="hidden" name="factor" value="${escapeHtml(factor.id)}">` +
+    `<button class="button secondary small" type="submit" aria-label="Remove ${escapeHtml(factor.label)}">Remove</button>` +
+    '</form>' +
+    '</li>'
+  );
+}
+
+export function securityPage(params: {
+  factors: FactorView[];
+  recoveryRemaining: number;
+  mfaRequired: boolean;
+  /** The account can't be used until a factor is added (MFA_REQUIRED). */
+  mustEnrol: boolean;
+  /** Where to continue after the first factor is set up. */
+  next: string;
+  notice?: string;
+  error?: string;
+}): string {
+  const next = escapeHtml(params.next);
+  const passkeys = params.factors.filter((f) => f.kind === 'webauthn');
+  const totp = params.factors.find((f) => f.kind === 'totp');
+  const hasFactor = params.factors.length > 0;
+  const lastFactorLocked = params.mfaRequired && params.factors.length === 1;
+
+  const passkeyList =
+    passkeys.length > 0
+      ? `<ul class="apps">${passkeys.map(factorRow).join('')}</ul>`
+      : '<p class="empty">No passkeys yet.</p>';
+
+  return page(
+    'Security',
+    (params.mustEnrol
+      ? '<p class="warning" role="status">2earl requires a second factor. Add one to continue to your account.</p>'
+      : '') +
+      (params.notice ? `<p class="notice" role="status">${escapeHtml(params.notice)}</p>` : '') +
+      (params.error ? `<p class="warning" role="alert">${escapeHtml(params.error)}</p>` : '') +
+      '<h1>Second factor</h1>' +
+      '<p class="lede">After signing in with Google, you confirm it’s you with something only you have. ' +
+      'Someone who gets into your Google account still can’t get into 2earl.</p>' +
+      '<section class="section" aria-labelledby="passkeys-heading">' +
+      '<h2 id="passkeys-heading">Passkeys <span class="tag">Recommended</span></h2>' +
+      '<p class="section-text">Your fingerprint, face, screen lock or a security key. Passkeys only work on login.2earl.com, so they can’t be phished.</p>' +
+      passkeyList +
+      '<div class="add-passkey">' +
+      '<label class="field"><span>Name (optional)</span>' +
+      '<input id="passkey-label" type="text" maxlength="60" autocomplete="off" placeholder="e.g. MacBook, YubiKey"></label>' +
+      `<button class="button primary" type="button" data-passkey="register" data-status="passkey-status" data-label="passkey-label" data-next="${next}" hidden>Add a passkey</button>` +
+      '<noscript><p class="note">Adding a passkey needs JavaScript.</p></noscript>' +
+      '<p class="field-status" id="passkey-status" role="alert"></p>' +
+      '</div>' +
+      '</section>' +
+      '<section class="section" aria-labelledby="totp-heading">' +
+      '<h2 id="totp-heading">Authenticator app</h2>' +
+      (totp
+        ? `<ul class="apps">${factorRow(totp)}</ul>`
+        : '<p class="section-text">Six-digit codes from an app such as Google Authenticator, Microsoft Authenticator, 1Password or Aegis.</p>' +
+          `<a class="button secondary" href="/account/security/totp?return_to=${encodeURIComponent(params.next)}">Set up an authenticator app</a>`) +
+      '</section>' +
+      '<section class="section" aria-labelledby="recovery-heading">' +
+      '<h2 id="recovery-heading">Recovery codes</h2>' +
+      (hasFactor
+        ? `<p class="section-text">${String(params.recoveryRemaining)} of 10 unused. Use one if you can’t use your passkey or app. Creating new codes replaces the old ones.</p>` +
+          '<form method="post" action="/account/security/recovery-codes">' +
+          '<button class="button secondary" type="submit">Create new codes</button></form>'
+        : '<p class="section-text">Created when you add your first passkey or app.</p>') +
+      '</section>' +
+      (lastFactorLocked
+        ? '<p class="fine">2earl requires a second factor, so your only one can’t be removed. Add another first.</p>'
+        : '') +
+      '<p class="fine">Adding or removing a factor asks for your second factor again if you last used it more than 5 minutes ago.</p>' +
+      '<div class="actions"><a class="button secondary" href="/account">Back to your account</a></div>',
+    { passkeyScript: true },
+  );
+}
+
+/** Groups a base32 secret in fours, as authenticator apps display them. */
+function groupSecret(secret: string): string {
+  return secret.replace(/(.{4})(?=.)/g, '$1 ');
+}
+
+export function totpSetupPage(params: {
+  qrSvg: string;
+  secret: string;
+  next: string;
+  error?: string;
+}): string {
+  return page(
+    'Set up an authenticator app',
+    '<h1>Set up an authenticator app</h1>' +
+      (params.error ? `<p class="warning" role="alert">${escapeHtml(params.error)}</p>` : '') +
+      '<p class="lede">Scan this code with your authenticator app. It adds 2earl and starts showing six-digit codes.</p>' +
+      // The QR code is generated on the server from the secret; it contains no user input.
+      `<div class="qr" role="img" aria-label="QR code for your authenticator app">${params.qrSvg}</div>` +
+      '<details class="manual"><summary>Can’t scan it? Enter the key instead</summary>' +
+      `<p><code class="secret">${escapeHtml(groupSecret(params.secret))}</code></p>` +
+      '<p class="note">Account: 2earl. Type: time-based. Six digits, every 30 seconds.</p></details>' +
+      '<form method="post" action="/account/security/totp" class="code-form">' +
+      `<input type="hidden" name="next" value="${escapeHtml(params.next)}">` +
+      '<label class="field"><span>Code from the app</span>' +
+      '<input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required></label>' +
+      '<div class="consent-actions">' +
+      '<button class="button primary" type="submit">Turn on</button>' +
+      '<a class="button secondary" href="/account/security">Cancel</a>' +
+      '</div></form>',
+  );
+}
+
+export function recoveryCodesPage(params: { codes: string[]; next: string }): string {
+  const text = `2earl recovery codes\n\nEach code works once.\n\n${params.codes.join('\n')}\n`;
+  return page(
+    'Save your recovery codes',
+    '<h1>Save your recovery codes</h1>' +
+      '<p class="lede">If you can’t use your passkey or app, each of these codes lets you in once. This is the only time they’re shown.</p>' +
+      `<ul class="codes">${params.codes.map((code) => `<li><code>${escapeHtml(code)}</code></li>`).join('')}</ul>` +
+      `<p class="note">Keep them in a password manager, or <a href="data:text/plain;charset=utf-8,${encodeURIComponent(text)}" download="2earl-recovery-codes.txt">download them as a text file</a>.</p>` +
+      `<a class="button primary" href="${escapeHtml(params.next)}">I’ve saved them</a>`,
+  );
+}
+
+export function challengePage(params: {
+  hasPasskey: boolean;
+  hasTotp: boolean;
+  returnTo: string;
+  stepUp: boolean;
+  error?: string;
+  lockedUntil?: number | null;
+}): string {
+  const returnTo = escapeHtml(params.returnTo);
+  const locked = params.lockedUntil
+    ? `<p class="warning" role="alert">Too many wrong codes. Try again after ${new Intl.DateTimeFormat('en-GB', { timeStyle: 'short', timeZone: 'UTC' }).format(new Date(params.lockedUntil * 1000))} UTC.</p>`
+    : '';
+  const disabled = params.lockedUntil ? ' disabled' : '';
+  return page(
+    'Confirm it’s you',
+    `<p class="step">${params.stepUp ? 'Before this change' : 'Second step'}</p>` +
+      '<h1>Confirm it’s you</h1>' +
+      `<p class="lede">${
+        params.stepUp
+          ? 'This change needs your second factor, used in the last 5 minutes.'
+          : 'Your account has a second factor. Use it to finish signing in.'
+      }</p>` +
+      locked +
+      (params.error ? `<p class="warning" role="alert">${escapeHtml(params.error)}</p>` : '') +
+      (params.hasPasskey
+        ? `<button class="button primary wide" type="button" data-passkey="authenticate" data-status="challenge-status" data-return-to="${returnTo}" hidden${disabled}>Use a passkey</button>` +
+          '<noscript><p class="note">Passkeys need JavaScript. Use a code instead.</p></noscript>' +
+          '<p class="field-status" id="challenge-status" role="alert"></p>'
+        : '') +
+      (params.hasTotp
+        ? '<form method="post" action="/mfa/totp" class="code-form">' +
+          `<input type="hidden" name="return_to" value="${returnTo}">` +
+          '<label class="field"><span>Code from your authenticator app</span>' +
+          `<input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required${disabled}></label>` +
+          `<button class="button ${params.hasPasskey ? 'secondary' : 'primary'}" type="submit"${disabled}>Verify</button></form>`
+        : '') +
+      '<details class="manual"><summary>Use a recovery code</summary>' +
+      '<form method="post" action="/mfa/recovery" class="code-form">' +
+      `<input type="hidden" name="return_to" value="${returnTo}">` +
+      '<label class="field"><span>Recovery code</span>' +
+      `<input name="code" type="text" autocomplete="off" spellcheck="false" maxlength="20" required${disabled}></label>` +
+      `<button class="button secondary" type="submit"${disabled}>Use code</button></form></details>` +
+      '<form method="post" action="/logout" class="signout"><button class="link-button" type="submit">Sign out</button></form>',
+    { passkeyScript: params.hasPasskey },
   );
 }
 

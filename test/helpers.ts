@@ -71,7 +71,12 @@ export function freshIp(): string {
 export async function call(
   app: App,
   path: string,
-  init: RequestInit & { cookies?: Record<string, string>; ip?: string } = {},
+  init: RequestInit & {
+    cookies?: Record<string, string>;
+    ip?: string;
+    /** Worker variables to override for this request, e.g. { MFA_REQUIRED: 'true' }. */
+    vars?: Partial<Record<keyof Env, string>>;
+  } = {},
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   if (init.cookies) {
@@ -84,7 +89,15 @@ export async function call(
   }
   headers.set('CF-Connecting-IP', init.ip ?? '192.0.2.1');
   const ctx = createExecutionContext();
-  const response = await app.fetch(new Request(`${ORIGIN}${path}`, { ...init, headers }), env, ctx);
+  // The overrides sit in front of the real env, so bindings stay reachable through the prototype.
+  const requestEnv = init.vars
+    ? (Object.assign(Object.create(env) as object, init.vars) as Env)
+    : env;
+  const response = await app.fetch(
+    new Request(`${ORIGIN}${path}`, { ...init, headers }),
+    requestEnv,
+    ctx,
+  );
   await waitOnExecutionContext(ctx);
   return response;
 }
@@ -135,6 +148,9 @@ export async function signIn(
 
 export async function resetDatabase(): Promise<void> {
   await env.DB.batch([
+    env.DB.prepare('DELETE FROM mfa_pending'),
+    env.DB.prepare('DELETE FROM recovery_codes'),
+    env.DB.prepare('DELETE FROM mfa_factors'),
     env.DB.prepare('DELETE FROM sessions'),
     env.DB.prepare('DELETE FROM identities'),
     env.DB.prepare('DELETE FROM users'),

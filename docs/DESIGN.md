@@ -240,7 +240,31 @@ whether the user passed 2-step verification, so we cannot rely on Google for thi
   (≤ 5 min old). Removing the last factor is refused while the flag is on.
 - **Lost factors:** recovery code; otherwise the owner resets MFA for the user from `/admin`,
   audited.
-- **Phase:** built after the MVP, in phase 5 (§12). The flag ships `false`.
+- **Phase:** built in phase 5 (§12). The flag ships `false`.
+
+**Implementation (phase 5a):**
+- Passkeys: `@simplewebauthn/server`, RP ID `login.2earl.com`, attestation `none`, user
+  verification preferred (a security key without a PIN still counts: it is the *second* factor).
+  The browser side is `public/passkey.js`, the only script in the service, loaded only on
+  `/account/security` and `/mfa` under `MFA_CSP` (`script-src 'self'; connect-src 'self'`).
+- Authenticator app: RFC 6238 (SHA-1, 6 digits, 30 s, ±1 step), `src/totp.ts`. The secret is
+  encrypted with AES-256-GCM under a key derived from `MFA_ENCRYPTION_KEY`, bound to the user ID.
+  The last accepted step is stored and the update is conditional, so a code works once even under
+  concurrent requests.
+- Recovery codes: 10 × 50-bit codes (`xxxxx-xxxxx`, Crockford base32), stored as
+  HMAC-SHA-256 under `MFA_ENCRYPTION_KEY`, bound to the user. Shown once: the plaintext lives
+  encrypted in `mfa_pending` until the page that shows it is opened.
+- Gate: a middleware sends a session that must pass the challenge to `/mfa`, and one that must
+  enrol (flag on, no factor) to `/account/security`; other non-GET requests get 403. Export and
+  deletion stay reachable without a factor (GDPR).
+- Changes: with a factor, adding, removing or regenerating needs `aal2` from the last 5 minutes;
+  the first factor needs a Google sign-in from the last 10 minutes (`/login?reauth=1` otherwise),
+  so a stolen session cookie can't attach the thief's factor later. Deletion needs a fresh
+  second factor too, when the user has one (THREAT_MODEL R9).
+- Lockout: 5 wrong answers in a row lock the user's second-factor step for 15 minutes
+  (`users.mfa_failed_attempts`, `mfa_locked_until`), on top of the per-network rate limit. This
+  caps guessing a 6-digit code at 480 attempts a day (about 1 in 700 per day, with 3 valid codes
+  per attempt).
 
 ---
 
@@ -316,9 +340,13 @@ login_tx         id_hash PK, state, nonce, pkce_verifier, return_to, created_at,
                  purpose ('sign_in'|'delete_account'), user_id NULL (deletion only)
 mfa_factors      id PK, user_id FK, kind ('webauthn'|'totp'), label, created_at, last_used_at,
                  webauthn_credential_id UNIQUE NULL, webauthn_public_key NULL,
-                 webauthn_sign_count NULL, totp_secret_enc NULL (AES-GCM, MFA_ENCRYPTION_KEY),
+                 webauthn_sign_count NULL, webauthn_transports NULL (JSON),
+                 totp_secret_enc NULL (AES-GCM, MFA_ENCRYPTION_KEY),
                  totp_last_step NULL (blocks code reuse)
 recovery_codes   id PK, user_id FK, code_hash, used_at NULL
+mfa_pending      (session_hash FK sessions, purpose) PK, value, expires_at
+                 purpose: webauthn_register | webauthn_authenticate | totp_enrol | recovery_codes
+users            + mfa_failed_attempts, mfa_locked_until (migration 0004)
 allowlist        id PK, kind ('google_sub'|'email'), value, added_by, created_at
 trusted_clients  client_id PK, note, created_at
 audit_events     id PK, at, actor_user_id NULL, event, client_id NULL, ip_prefix, detail (JSON)

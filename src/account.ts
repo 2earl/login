@@ -59,6 +59,8 @@ export async function deleteAccount(
             OR (kind = 'email' AND value = (SELECT primary_email FROM users WHERE id = ?))`,
       )
       .bind(userId, userId),
+    db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').bind(userId),
+    db.prepare('DELETE FROM mfa_factors WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM identities WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM users WHERE id = ?').bind(userId),
@@ -81,7 +83,9 @@ export async function exportAccount(
   currentSessionHash: string,
   now: number,
 ): Promise<Record<string, unknown>> {
-  const [user, identities, sessions, invitation, events] = await db.batch<Record<string, unknown>>([
+  const [user, identities, sessions, invitation, events, factors, codes] = await db.batch<
+    Record<string, unknown>
+  >([
     db
       .prepare(
         'SELECT id, status, display_name, primary_email, created_at, updated_at FROM users WHERE id = ?',
@@ -110,6 +114,17 @@ export async function exportAccount(
       .prepare(
         `SELECT at, event, client_id, ip_prefix, detail FROM audit_events
          WHERE actor_user_id = ? ORDER BY at`,
+      )
+      .bind(userId),
+    db
+      .prepare(
+        `SELECT kind, label, created_at, last_used_at FROM mfa_factors
+         WHERE user_id = ? ORDER BY created_at`,
+      )
+      .bind(userId),
+    db
+      .prepare(
+        'SELECT COUNT(*) AS unused FROM recovery_codes WHERE user_id = ? AND used_at IS NULL',
       )
       .bind(userId),
   ]);
@@ -171,6 +186,15 @@ export async function exportAccount(
       browserFingerprint: row.user_agent_hash,
     })),
     connectedApps: apps,
+    secondFactor: {
+      factors: (factors?.results ?? []).map((row) => ({
+        type: row.kind === 'webauthn' ? 'passkey' : 'authenticator app',
+        name: row.label,
+        addedAt: iso(row.created_at as number),
+        lastUsedAt: iso(row.last_used_at as number | null),
+      })),
+      recoveryCodesUnused: codes?.results[0]?.unused ?? 0,
+    },
     invitation: invitation?.results[0]
       ? {
           addedBy: invitation.results[0].added_by,
@@ -188,6 +212,7 @@ export async function exportAccount(
       'Network prefixes are shortened IP addresses (/24 for IPv4, /48 for IPv6). Full IP addresses are never stored.',
       'browserFingerprint is a shortened SHA-256 hash of the browser’s user-agent string, not the string itself.',
       'Session cookies, access tokens, refresh tokens and authorization codes are stored only as hashes and are not included.',
+      'Second-factor secrets are not included: passkey public keys, the encrypted authenticator-app secret and hashed recovery codes.',
       'Security log entries are kept for 90 days. Sign-in attempts made before you were signed in are not linked to your account and are not included.',
     ],
   };

@@ -36,7 +36,8 @@ with German law on telemedia: TDDDG for cookies, DDG for the imprint **[verify]*
 | OAuth grants and tokens (hashed, encrypted props `{uid, authTime}`) | KV | Generated | Authorise apps the user approved |
 | Consent decisions | Signed cookie + grants | User | Remember approvals |
 | Audit events (event, time, IP prefix, client ID, user ID) | D1 `audit_events` | Generated | Security and accountability |
-| Second-factor data (passkey public keys and IDs, encrypted TOTP secret, hashed recovery codes) | D1 `mfa_factors`, `recovery_codes` | User (enrolment) | Protect the account; phase 5. Deleted with the account |
+| Second-factor data (passkey public keys, IDs, names and counters; encrypted TOTP secret; hashed recovery codes; wrong-attempt counter and lock time) | D1 `mfa_factors`, `recovery_codes`, `users` | User (enrolment) | Protect the account. Deleted with the factor or the account; included in the export without secrets |
+| Second-factor steps in progress (passkey challenge, TOTP secret being set up, new recovery codes before they are shown) | D1 `mfa_pending` | System | ≤ 10 minutes, deleted with the session |
 | Request logs | Cloudflare (Workers logs, if enabled) | Request | Operations; configured without tokens or full query strings |
 
 IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
