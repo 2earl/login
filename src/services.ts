@@ -30,11 +30,27 @@ export const SERVICES: readonly Service[] = [
     id: 'mcp',
     name: '2earl MCP gateway',
     resource: (env) => env.MCP_RESOURCE,
+    // The gateway's own scope, and one set per service behind it, prefixed `mcp:<service>.`
+    // (2earl/mcp docs/DESIGN.md §4). Write implies read; the gateway enforces the hierarchy.
     scopes: {
       'mcp:tools.read': 'See which tools are available to you',
-      'mcp:tools.invoke': 'Use those tools on your behalf',
+      'mcp:promptshare.read': 'Read your prompts and public prompts in Prompt share',
+      'mcp:promptshare.write': 'Create, change and delete your prompts in Prompt share',
+      'mcp:promptshare.state':
+        'Save to and read your shared sessions in Prompt share, including ones other people can see',
     },
     deletionBinding: 'MCP_GATEWAY_EVENTS',
+  },
+  {
+    // Prompt share (2earl/promptshare). Its own data, so its own deletion and export. The scope
+    // is for its website's sign-in (phase P2); assistants use the `mcp:promptshare.*` scopes.
+    id: 'promptshare',
+    name: 'Prompt share',
+    resource: (env) => env.PROMPTSHARE_RESOURCE,
+    scopes: {
+      'promptshare:account': 'Sign in to Prompt share',
+    },
+    deletionBinding: 'PROMPTSHARE_EVENTS',
   },
 ];
 

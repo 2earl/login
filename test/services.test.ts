@@ -53,7 +53,12 @@ function fakeService(fail = false) {
  * Deletes the signed-in account. By default as if the gateway were not deployed yet, so the
  * notices stay for the test to deliver; pass the real binding to deliver at once.
  */
-async function deleteOwnAccount(gateway?: unknown): Promise<void> {
+async function deleteOwnAccount(
+  bindings: Record<string, unknown> = {
+    MCP_GATEWAY_EVENTS: undefined,
+    PROMPTSHARE_EVENTS: undefined,
+  },
+): Promise<void> {
   const ip = freshIp();
   const start = await call(app, '/account/delete', {
     method: 'POST',
@@ -73,7 +78,7 @@ async function deleteOwnAccount(gateway?: unknown): Promise<void> {
         '__Host-session': session,
         '__Host-login_tx': setCookies(start)['__Host-login_tx'] ?? '',
       },
-      vars: { MCP_GATEWAY_EVENTS: gateway },
+      vars: bindings,
     },
   );
   expect(done.headers.get('Location')).toBe('/account/deleted');
@@ -142,7 +147,7 @@ describe('per-service permissions', () => {
     const handle = parseConsent(html);
     const body = consentBody(handle, { decision: 'approve' });
     body.append('scope', 'mcp:tools.read');
-    body.append('scope', 'mcp:tools.invoke'); // not requested
+    body.append('scope', 'mcp:promptshare.read'); // not requested
     body.append('scope', 'other:files.write'); // not this service's
     const approved = await call(app, '/authorize', {
       method: 'POST',
@@ -179,9 +184,9 @@ describe('signed offered scopes', () => {
     const handle = parseConsent(await page.text());
     const body = consentBody(handle, {
       decision: 'approve',
-      offered: 'mcp:tools.read mcp:tools.invoke',
+      offered: 'mcp:tools.read mcp:promptshare.read',
     });
-    body.append('scope', 'mcp:tools.invoke');
+    body.append('scope', 'mcp:promptshare.read');
     const response = await call(app, '/authorize', {
       method: 'POST',
       headers: { ...FORM, ...SAME_ORIGIN },
@@ -204,7 +209,10 @@ describe('account-deletion notices', () => {
 
   it('keeps notices for a service that has no binding yet', async () => {
     await deleteOwnAccount();
-    const result = await deliverDeletionNotices(envWith({ MCP_GATEWAY_EVENTS: undefined }), NOW);
+    const result = await deliverDeletionNotices(
+      envWith({ MCP_GATEWAY_EVENTS: undefined, PROMPTSHARE_EVENTS: undefined }),
+      NOW,
+    );
     expect(result).toEqual({ delivered: 0, failed: 0, waiting: SERVICES.length });
     expect(await count('deletion_notices')).toBe(SERVICES.length);
   });
@@ -213,12 +221,14 @@ describe('account-deletion notices', () => {
     await deleteOwnAccount();
     const gateway = fakeService();
     const result = await deliverDeletionNotices(
-      envWith({ MCP_GATEWAY_EVENTS: gateway.binding }),
+      envWith({ MCP_GATEWAY_EVENTS: gateway.binding, PROMPTSHARE_EVENTS: undefined }),
       NOW,
     );
     expect(result.delivered).toBe(1);
     expect(gateway.deleted).toEqual([userId]);
-    expect(await count('deletion_notices')).toBe(0);
+    expect(await count('deletion_notices', "service = 'mcp'")).toBe(0);
+    // Prompt share's notice waits for its binding.
+    expect(await count('deletion_notices', "service = 'promptshare'")).toBe(1);
     expect(await count('audit_events', "event = 'user.deletion_delivered'")).toBe(1);
     // The audit entry names the service, not the account.
     expect(await count('audit_events', 'detail LIKE ?', `%${userId}%`)).toBe(0);
@@ -242,9 +252,9 @@ describe('account-deletion notices', () => {
   });
 
   it('delivers over the real binding right after the deletion', async () => {
-    await deleteOwnAccount(env.MCP_GATEWAY_EVENTS);
+    await deleteOwnAccount({});
     expect(await count('deletion_notices')).toBe(0);
-    expect(await count('audit_events', "event = 'user.deletion_delivered'")).toBe(1);
+    expect(await count('audit_events', "event = 'user.deletion_delivered'")).toBe(SERVICES.length);
   });
 
   it('runs on the 15-minute cron trigger', async () => {

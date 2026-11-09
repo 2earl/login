@@ -17,6 +17,8 @@
     "GOOGLE_CLIENT_ID": "e2e-client.apps.googleusercontent.com",
     "LOGIN_LOCKED": "true",
     "MCP_RESOURCE": "https://mcp.2earl.com/mcp",
+    // Prompt share's website (phase P2): the audience of its sign-in tokens.
+    "PROMPTSHARE_RESOURCE": "https://promptshare.cc",
     "MFA_REQUIRED": "false",
   },
   "ratelimits": [

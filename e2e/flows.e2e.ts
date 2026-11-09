@@ -155,7 +155,7 @@ test('the owner’s whole journey', async ({ page }) => {
       response_type: 'code',
       client_id: clientId,
       redirect_uri: APP_REDIRECT,
-      scope: 'mcp:tools.read mcp:tools.invoke',
+      scope: 'mcp:tools.read mcp:promptshare.read',
       state: 'app-state',
       code_challenge: challenge,
       code_challenge_method: 'S256',

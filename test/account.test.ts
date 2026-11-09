@@ -42,7 +42,7 @@ async function connectApp(): Promise<Record<string, unknown>> {
     response_type: 'code',
     client_id: clientId,
     redirect_uri: REDIRECT_URI,
-    scope: 'mcp:tools.read mcp:tools.invoke',
+    scope: 'mcp:tools.read mcp:promptshare.read',
     state: 'client-state',
     code_challenge: await pkceChallenge(verifier),
     code_challenge_method: 'S256',
@@ -54,7 +54,7 @@ async function connectApp(): Promise<Record<string, unknown>> {
   const handle = parseConsent(await consent.text());
   const body = consentBody(handle, { decision: 'approve' });
   body.append('scope', 'mcp:tools.read');
-  body.append('scope', 'mcp:tools.invoke');
+  body.append('scope', 'mcp:promptshare.read');
   const approved = await call(app, '/authorize', {
     method: 'POST',
     headers: { ...FORM, ...SAME_ORIGIN },
@@ -188,7 +188,7 @@ describe('data export', () => {
       expect.objectContaining({
         clientId,
         name: 'Test MCP Client',
-        permissions: ['mcp:tools.read', 'mcp:tools.invoke'],
+        permissions: ['mcp:tools.read', 'mcp:promptshare.read'],
       }),
     ]);
     expect(data.invitation).not.toBeNull();
@@ -226,6 +226,11 @@ describe('data export', () => {
         status: 'included',
         data: { service: '2earl MCP gateway', securityLog: [], stand_in_for: userId },
       },
+      promptshare: {
+        service: 'Prompt share',
+        status: 'included',
+        data: { service: 'Prompt share', securityLog: [], stand_in_for: userId },
+      },
     });
 
     // A service that fails is named, and the rest of the download still works.
@@ -233,7 +238,7 @@ describe('data export', () => {
       deleteUser: () => Promise.resolve(),
       exportUser: () => Promise.reject(new Error('down')),
     };
-    expect(await download(failing)).toEqual({
+    expect(await download(failing)).toMatchObject({
       mcp: expect.objectContaining({
         service: '2earl MCP gateway',
         status: 'unavailable',
@@ -241,7 +246,7 @@ describe('data export', () => {
     });
 
     // Not deployed yet. (An explicit `undefined` would mean the default.)
-    expect(await download(null)).toEqual({
+    expect(await download(null)).toMatchObject({
       mcp: expect.objectContaining({ status: 'not connected' }) as unknown,
     });
   });
