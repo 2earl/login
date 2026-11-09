@@ -31,6 +31,7 @@
   --alert: #c8141b; /* 5.5:1 on --bg */
   --focus: #b23a0c; /* ≥ 3:1 against --bg */
   --button-fg: #1c1b1f; /* 5.1:1 on vermilion */
+  --danger-fg: #ffffff; /* 5.9:1 on --alert */
   --surface: #ffffff;
 
   --display: 'Readex Pro', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -48,6 +49,7 @@
     --link: #fbb03b; /* 10:1 */
     --alert: #ff7a6b; /* 7.3:1 */
     --focus: #fbb03b;
+    --danger-fg: #1c1b1f; /* 6.7:1 on --alert */
     --surface: #1c1b1f;
   }
 }
@@ -441,6 +443,96 @@ p {
   border-left: 3px solid var(--amber);
   background: var(--surface);
   font-size: 0.9375rem;
+}
+
+/* ---- Your data and deletion -------------------------------------------------------------- */
+
+.section-text {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+.data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.5rem;
+}
+
+.danger-link {
+  color: var(--alert);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.button.danger {
+  background: var(--alert);
+  color: var(--danger-fg);
+}
+
+.button.danger:hover {
+  filter: brightness(1.08);
+  text-decoration: none;
+}
+
+/* Two columns: what goes now, what stays for a while. Stacks on narrow screens. */
+.ledger {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem;
+  margin: 0 0 1.25rem;
+}
+
+.ledger section {
+  padding: 1rem 1.125rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.625rem;
+  background: var(--surface);
+}
+
+.ledger section:first-child {
+  border-top: 3px solid var(--alert);
+}
+
+.ledger section:last-child {
+  border-top: 3px solid var(--rule);
+}
+
+.ledger h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.ledger ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.9375rem;
+}
+
+.ledger li + li {
+  margin-top: 0.375rem;
+}
+
+.delete-form {
+  margin-top: 1.5rem;
+}
+
+.confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin: 0 0 1.25rem;
+  font-size: 0.9375rem;
+  cursor: pointer;
+}
+
+.confirm input {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0.15rem 0 0;
+  flex: none;
+  accent-color: var(--alert);
 }
 
 /* ---- Consent ------------------------------------------------------------------------------ */

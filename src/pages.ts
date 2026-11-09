@@ -161,6 +161,14 @@ export function accountPage(params: {
       `<dt>Member since</dt><dd>${formatDate(params.memberSince)}</dd>` +
       '</dl>' +
       '</section>' +
+      '<section class="section" aria-labelledby="data-heading">' +
+      '<h2 id="data-heading">Your data</h2>' +
+      '<p class="section-text">Download a copy of everything your account holds, as a JSON file.</p>' +
+      '<div class="data-actions">' +
+      '<a class="button secondary" href="/account/export" download>Download your data</a>' +
+      '<a class="danger-link" href="/account/delete">Delete account</a>' +
+      '</div>' +
+      '</section>' +
       '<div class="actions">' +
       '<form method="post" action="/logout"><button class="button secondary" type="submit">Sign out</button></form>' +
       '</div>',
@@ -236,6 +244,62 @@ export function consentPage(view: ConsentView): string {
   );
 }
 
+export function deleteAccountPage(params: {
+  email: string | null;
+  appCount: number;
+  invited: boolean;
+}): string {
+  const apps =
+    params.appCount === 0
+      ? 'Connected apps: none right now'
+      : `Access for your ${params.appCount === 1 ? 'connected app' : `${String(params.appCount)} connected apps`}`;
+  return page(
+    'Delete your account',
+    '<h1>Delete your 2earl account</h1>' +
+      '<p class="lede">Your account is deleted as soon as you confirm with Google. It can’t be restored.</p>' +
+      '<div class="ledger">' +
+      '<section aria-labelledby="deleted-heading">' +
+      '<h2 id="deleted-heading">Deleted now</h2>' +
+      '<ul>' +
+      `<li>Your name and email address${params.email ? ` (${escapeHtml(params.email)})` : ''}, and the link to your Google account</li>` +
+      `<li>${escapeHtml(apps)}</li>` +
+      '<li>Every signed-in browser, including this one</li>' +
+      (params.invited
+        ? '<li>Your invitation. While sign-up is closed, signing in again needs a new one</li>'
+        : '') +
+      '</ul>' +
+      '</section>' +
+      '<section aria-labelledby="kept-heading">' +
+      '<h2 id="kept-heading">Kept for a limited time</h2>' +
+      '<ul>' +
+      '<li>Security log entries, for up to 90 days, no longer linked to your name or email</li>' +
+      '<li>Database backups, for up to 30 days, used only to recover from failures</li>' +
+      '</ul>' +
+      '</section>' +
+      '</div>' +
+      '<p class="note">Want a copy first? <a href="/account/export" download>Download your data</a>.</p>' +
+      '<form method="post" action="/account/delete" class="delete-form">' +
+      '<label class="confirm"><input type="checkbox" name="confirm" value="on" required>' +
+      '<span>I understand my account and connected apps can’t be restored.</span></label>' +
+      '<div class="consent-actions">' +
+      '<button class="button danger" type="submit">Confirm with Google</button>' +
+      '<a class="button secondary" href="/account">Keep account</a>' +
+      '</div>' +
+      '</form>' +
+      '<p class="fine">Google will ask you to choose your account. Choose the one you sign in to 2earl with.</p>',
+  );
+}
+
+export function accountDeletedPage(): string {
+  return page(
+    'Account deleted',
+    '<h1>Your account is deleted</h1>' +
+      '<p class="lede">Your 2earl account, its link to Google and its sessions are gone, and connected apps no longer have access.</p>' +
+      '<p class="note">Google still lists 2earl among the apps you signed in to. You can remove it in your Google Account under Security → Your connections to third-party apps &amp; services.</p>' +
+      '<a class="button secondary" href="https://2earl.com">Go to 2earl.com</a>',
+  );
+}
+
 export interface Message {
   title: string;
   body: string;
@@ -281,6 +345,21 @@ export const MESSAGES = {
     title: 'This Google account can’t sign in yet',
     body: 'Sign-up isn’t open yet. If you were invited, use the Google account the invitation was for.',
     action: { href: '/login', label: 'Use a different Google account' },
+  },
+  deletionNotConfirmed: {
+    title: 'Your account was not deleted',
+    body: 'Google didn’t confirm it was you: the request expired, was cancelled, or you signed out in between. Nothing was deleted.',
+    action: { href: '/account/delete', label: 'Try again' },
+  },
+  deletionWrongAccount: {
+    title: 'Your account was not deleted',
+    body: 'You chose a different Google account from the one you sign in to 2earl with. Nothing was deleted.',
+    action: { href: '/account/delete', label: 'Try again' },
+  },
+  deletionFailed: {
+    title: 'Deletion didn’t finish',
+    body: 'Something went wrong on our side. Your apps may already be disconnected, but your account still exists. Try again in a minute.',
+    action: { href: '/account/delete', label: 'Try again' },
   },
 } satisfies Record<string, Message>;
 

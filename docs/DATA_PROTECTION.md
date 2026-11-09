@@ -58,6 +58,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | OAuth grants | 7 days idle / 90 days absolute, or until revoked |
 | Audit events | 90 days, then deleted (daily cron) |
 | Account data | Until the user deletes the account or the owner deletes it |
+| Invitations (allowlist) | Until the invitation is withdrawn or the invited user deletes their account |
 | After account deletion | Deleted immediately from D1 and KV. D1 point-in-time recovery may hold copies for up to 30 days **[verify the Time Travel window]**; not restored except for disaster recovery |
 
 ## 5. Recipients and processors
@@ -73,12 +74,12 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 
 | Right | Implementation |
 |---|---|
-| Access (Art. 15) | `/account` shows the data; `/account/export` downloads JSON of the user's rows and grants |
+| Access (Art. 15) | `/account` shows the data; `/account/export` downloads JSON: account, sign-in methods, sessions (shortened IP, user-agent hash), connected apps, invitation, the user's security log, and notes on what is not included (hashes of cookies and tokens) |
 | Rectification (Art. 16) | Name and email come from Google and update on next sign-in |
-| Erasure (Art. 17) | `/account/delete`, with Google re-authentication: revokes grants, deletes rows (DESIGN §6.3) |
+| Erasure (Art. 17) | `/account/delete`, confirmed through Google: revokes grants, deletes the account, sign-in link, sessions and invitation; the security log is re-keyed to a random ID and expires after 90 days (DESIGN §6.3) |
 | Restriction / objection | Owner can suspend an account on request |
 | Portability (Art. 20) | Same JSON export |
-| Withdraw approvals for apps | `/account/apps` → revoke |
+| Withdraw approvals for apps | `/account` → Connected apps → Disconnect |
 
 Requests can also be sent to the contact address on `https://2earl.com/privacy`.
 

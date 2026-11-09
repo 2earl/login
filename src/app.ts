@@ -7,6 +7,7 @@ import {
 } from '@cloudflare/workers-oauth-provider';
 import { Hono, type Context } from 'hono';
 import type { JWTVerifyGetKey } from 'jose';
+import { deleteAccount, exportAccount } from './account';
 import { audit } from './audit';
 import { pkceChallenge, sha256Hex } from './crypto';
 import { GoogleSignInError, buildGoogleAuthUrl, exchangeCode, verifyGoogleIdToken } from './google';
@@ -15,12 +16,15 @@ import { ipPrefix } from './net';
 import { SCOPES, authorizationServer, scopeLabel, type GrantProps } from './oauth';
 import {
   MESSAGES,
+  accountDeletedPage,
   accountPage,
   consentPage,
+  deleteAccountPage,
   messagePage,
   notFoundPage,
   signInPage,
   type ConnectedApp,
+  type Message,
 } from './pages';
 import { safeReturnTo } from './return-to';
 import { CONSENT_CSP, applySecurityHeaders } from './security-headers';
@@ -40,6 +44,8 @@ type AppContext = Context<AppEnv>;
 
 const SESSION_COOKIE = '__Host-session';
 const LOGIN_TX_COOKIE = '__Host-login_tx';
+/** The OAuth library's remembered-consent cookie (default `cookiePrefix`). */
+const CONSENT_APPROVALS_COOKIE = '__Host-oauth-approvals';
 
 function setCookie(c: AppContext, name: string, value: string, maxAge: number): void {
   c.header(
@@ -227,9 +233,24 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     clearCookie(c, LOGIN_TX_COOKIE);
     if (!tx) return fail('transaction_invalid');
 
-    if (c.req.query('error')) return fail('google_error');
+    // Re-authentication before deletion ends differently from a sign-in (DESIGN §6.3).
+    const deleting = tx.purpose === 'delete_account';
+    const stop = async (
+      reason: string,
+      message: Message = MESSAGES.deletionNotConfirmed,
+      status: 400 | 403 | 500 = 400,
+    ) => {
+      await audit(c.env.DB, now, 'account.deletion_stopped', {
+        actorUserId: tx.userId,
+        ipPrefix: ip,
+        detail: { reason },
+      });
+      return c.html(messagePage(message, 'Deletion stopped'), status);
+    };
+
+    if (c.req.query('error')) return deleting ? stop('google_error') : fail('google_error');
     const code = c.req.query('code');
-    if (!code) return fail('code_missing');
+    if (!code) return deleting ? stop('code_missing') : fail('code_missing');
 
     let identity;
     try {
@@ -247,7 +268,31 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         now,
       });
     } catch (error) {
-      return fail(error instanceof GoogleSignInError ? error.reason : 'unexpected');
+      const reason = error instanceof GoogleSignInError ? error.reason : 'unexpected';
+      return deleting ? stop(reason) : fail(reason);
+    }
+
+    if (deleting) {
+      // The same browser session that asked, and the Google account linked to it.
+      const session = c.get('session');
+      if (!session || session.user.id !== tx.userId) return stop('session_changed');
+      const linked = await c.env.DB.prepare(
+        "SELECT 1 AS ok FROM identities WHERE user_id = ? AND provider = 'google' AND subject = ?",
+      )
+        .bind(session.user.id, identity.subject)
+        .first<{ ok: number }>();
+      if (!linked) return stop('different_account', MESSAGES.deletionWrongAccount, 403);
+
+      const oauth = authorizationServer(c.env).getOAuthApi(c.env);
+      try {
+        await deleteAccount(c.env.DB, oauth, session.user.id, now, ip);
+      } catch (error) {
+        console.error('account deletion failed', error instanceof Error ? error.name : 'unknown');
+        return stop('deletion_error', MESSAGES.deletionFailed, 500);
+      }
+      clearCookie(c, SESSION_COOKIE);
+      clearCookie(c, CONSENT_APPROVALS_COOKIE);
+      return c.redirect('/account/deleted', 303);
     }
 
     // Locked launch: check before any account is created.
@@ -328,6 +373,86 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     });
     return c.redirect('/account?disconnected=1', 303);
   });
+
+  // ---- Data-subject rights (DATA_PROTECTION §6, DESIGN §4.5) ------------------------------
+
+  app.get('/account/export', async (c) => {
+    const session = c.get('session');
+    if (!session) return c.redirect('/login?return_to=%2Faccount%2Fexport', 303);
+    const now = deps.now();
+    const oauth = authorizationServer(c.env).getOAuthApi(c.env);
+    const data = await exportAccount(c.env.DB, oauth, session.user.id, session.idHash, now);
+    await audit(c.env.DB, now, 'account.exported', {
+      actorUserId: session.user.id,
+      ipPrefix: clientIp(c),
+    });
+    const date = new Date(now * 1000).toISOString().slice(0, 10);
+    return new Response(`${JSON.stringify(data, null, 2)}\n`, {
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Disposition': `attachment; filename="2earl-account-${date}.json"`,
+      },
+    });
+  });
+
+  app.get('/account/delete', async (c) => {
+    const session = c.get('session');
+    if (!session) return c.redirect('/login?return_to=%2Faccount%2Fdelete', 303);
+    const oauth = authorizationServer(c.env).getOAuthApi(c.env);
+    const { items } = await oauth.listUserGrants(session.user.id, { limit: 1000 });
+    const invited = await c.env.DB.prepare(
+      `SELECT 1 AS ok FROM allowlist a JOIN identities i
+         ON i.provider = 'google' AND a.kind = 'google_sub' AND a.value = i.subject
+       WHERE i.user_id = ?`,
+    )
+      .bind(session.user.id)
+      .first<{ ok: number }>();
+    return c.html(
+      deleteAccountPage({
+        email: session.user.primaryEmail,
+        appCount: items.length,
+        invited: Boolean(invited),
+      }),
+    );
+  });
+
+  app.post('/account/delete', async (c) => {
+    if (!isSameOrigin(c)) return c.json({ error: 'forbidden' }, 403);
+    if (!(await underRateLimit(c, 'delete'))) {
+      return c.html(messagePage(MESSAGES.tooManyAttempts, 'Deletion stopped'), 429);
+    }
+    const session = c.get('session');
+    if (!session) return c.redirect('/login?return_to=%2Faccount%2Fdelete', 303);
+    const form = await c.req.raw.formData();
+    if (form.get('confirm') !== 'on') return c.redirect('/account/delete', 303);
+
+    // Deletion happens only after Google confirms the linked account in this browser.
+    const now = deps.now();
+    const tx = await createLoginTx(c.env.DB, c.env.SESSION_PEPPER, now, null, {
+      purpose: 'delete_account',
+      userId: session.user.id,
+    });
+    setCookie(c, LOGIN_TX_COOKIE, tx.cookieValue, LOGIN_TX_TTL_SECONDS);
+    await audit(c.env.DB, now, 'account.deletion_started', {
+      actorUserId: session.user.id,
+      ipPrefix: clientIp(c),
+    });
+    return c.redirect(
+      buildGoogleAuthUrl({
+        clientId: c.env.GOOGLE_CLIENT_ID,
+        redirectUri: `${c.env.ISSUER}/callback/google`,
+        state: tx.state,
+        nonce: tx.nonce,
+        codeChallenge: await pkceChallenge(tx.pkceVerifier),
+        loginHint: session.user.primaryEmail,
+      }),
+      302,
+    );
+  });
+
+  app.get('/account/deleted', (c) =>
+    c.get('session') ? c.redirect('/account', 303) : c.html(accountDeletedPage()),
+  );
 
   // ---- OAuth authorization server (DESIGN §4.1, §4.3) ------------------------------------
 

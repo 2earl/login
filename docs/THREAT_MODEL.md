@@ -156,6 +156,7 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | R6 | No staging: first exposure of new code is production. | **Accepted**, mitigated by locked launch (D9) | — |
 | R7 | Library keeps the previous refresh token valid until the rotated one is used (retry safety). A stolen-and-raced refresh token may work once. | Accepted (library design) | Monitor via audit; consider DPoP later |
 | R8 | Old org-level secrets (`CLOUDFLARE_API_KEY`, Google pair) readable by every org repo. | **Resolved** 2026-11-08 (deleted) | — |
+| R9 | Account deletion is confirmed through Google, but Google cannot force a password re-entry. Someone at an unlocked computer that is signed in to both 2earl and Google can delete the account. A stolen 2earl session cookie alone cannot. | **Open** until phase 5 | Phase 5: require the second factor for deletion when one is enrolled |
 
 ## 6. Security review triggers
 

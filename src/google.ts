@@ -27,6 +27,8 @@ export function buildGoogleAuthUrl(params: {
   state: string;
   nonce: string;
   codeChallenge: string;
+  /** Pre-selects this account in Google's chooser (re-authentication before deletion). */
+  loginHint?: string | null;
 }): string {
   const url = new URL(GOOGLE_AUTH_URL);
   url.searchParams.set('response_type', 'code');
@@ -38,6 +40,7 @@ export function buildGoogleAuthUrl(params: {
   url.searchParams.set('code_challenge', params.codeChallenge);
   url.searchParams.set('code_challenge_method', 'S256');
   url.searchParams.set('prompt', 'select_account');
+  if (params.loginHint) url.searchParams.set('login_hint', params.loginHint);
   return url.toString();
 }
 

@@ -186,8 +186,20 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
 
 `/account` provides:
 - Connected apps: grants listed per client, with revoke.
-- Delete account: re-authentication with Google required, then a hard delete (§6.3).
-- Export my data: JSON download.
+- Export my data (`/account/export`): a JSON download of the account, sign-in methods, sessions,
+  connected apps, invitation and the user's security log. Hashes of cookies and tokens are not
+  included.
+- Delete account (`/account/delete`): a confirmation page that lists what is deleted and what is
+  kept, a required checkbox, then a round trip to Google (`prompt=select_account`, `login_hint`)
+  with its own sign-in transaction (`purpose = 'delete_account'`, bound to the user). The callback
+  deletes only if the browser still holds that user's session **and** Google returns the subject
+  linked to the account; it never creates a session. Then a hard delete (§6.3).
+  - **Limit:** Google does not support forced re-authentication ("Google does not support Google
+    Account reauth requests"), and `auth_time` is only returned to published, verified apps with
+    the security bundle enabled. The round trip therefore proves the browser holds the linked Google
+    session, not that the person re-entered a password. It stops a stolen `login.2earl.com` session
+    cookie on its own; it does not stop someone at an unlocked computer. Phase 5 adds: if the user
+    has a second factor, deletion requires it (THREAT_MODEL R9).
 
 ### 4.6 Admin
 
@@ -292,15 +304,16 @@ Scopes are opaque strings to `login`; their enforcement lives in the resource se
 ### 6.1 D1 (jurisdiction `eu`, fixed at creation)
 
 ```
-users            id (ulid PK), status (active|suspended), created_at, updated_at,
-                 display_name, primary_email, deleted_at NULL
+users            id (random UUID PK), status (active|suspended), created_at, updated_at,
+                 display_name, primary_email          (hard delete: no deleted_at)
 identities       id PK, user_id FK, provider ('google'), subject (provider's stable ID),
                  email, email_verified, created_at, last_login_at
                  UNIQUE(provider, subject)
 sessions         id_hash PK (HMAC-SHA-256 of cookie value, SESSION_PEPPER), user_id FK,
                  aal ('aal1'|'aal2'), aal2_at NULL, created_at, last_seen_at, expires_at,
                  ip_prefix, user_agent_hash
-login_tx         id_hash PK, state, nonce, pkce_verifier, auth_request (JSON), expires_at
+login_tx         id_hash PK, state, nonce, pkce_verifier, return_to, created_at, expires_at,
+                 purpose ('sign_in'|'delete_account'), user_id NULL (deletion only)
 mfa_factors      id PK, user_id FK, kind ('webauthn'|'totp'), label, created_at, last_used_at,
                  webauthn_credential_id UNIQUE NULL, webauthn_public_key NULL,
                  webauthn_sign_count NULL, totp_secret_enc NULL (AES-GCM, MFA_ENCRYPTION_KEY),
@@ -327,10 +340,22 @@ audit_events     id PK, at, actor_user_id NULL, event, client_id NULL, ip_prefix
 
 ### 6.3 Deletion
 
-Account deletion does all of the following in one operation:
-- revokes all of the user's grants (`listUserGrants` → `revokeGrant`);
-- deletes sessions, identities and the user row;
-- writes an audit event without personal data (`user.deleted`, with a random correlation ID).
+Account deletion (`src/account.ts`):
+1. revokes all of the user's grants with their tokens (`listUserGrants` → `revokeGrant`), first, so
+   no app keeps access if a later step fails;
+2. in one D1 batch (a transaction): re-keys the user's audit events to a random correlation ID
+   (`deleted:<uuid>`), deletes pending sign-in transactions, the invitation (allowlist entry),
+   sessions, identities and the user row, and writes `user.deleted` (detail: number of grants);
+3. sweeps grants again, for one created while step 2 ran (a consent submitted in another tab);
+4. clears the session cookie and the library's `__Host-oauth-approvals` cookie.
+
+Audit events about the deleted account stay linkable to each other, not to a person, and expire
+with the 90-day retention.
+
+**Backstop:** `tokenExchangeCallback` checks on every code exchange and refresh that the user
+exists and is `active`. If not, it revokes the grant, writes `grant.refused` and returns
+`invalid_grant`. This also cuts off a suspended user's apps within one access-token lifetime
+(15 min).
 
 Library maintenance (`purgeExpiredData()`) runs on a daily Cron Trigger.
 
