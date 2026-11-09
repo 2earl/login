@@ -20,6 +20,26 @@ export default defineConfig(async () => {
             MFA_ENCRYPTION_KEY: 'test-mfa-encryption-key',
             OWNER_GOOGLE_SUB: 'google-sub-owner',
           },
+          // A stand-in for the MCP gateway's AccountEvents entrypoint (wrangler.jsonc "services"),
+          // so the binding is a real RPC binding in tests. Tests that need other behaviour
+          // override MCP_GATEWAY_EVENTS per call.
+          workers: [
+            {
+              name: 'mcp',
+              modules: true,
+              compatibilityDate: '2026-11-01',
+              script: `
+                import { WorkerEntrypoint } from 'cloudflare:workers';
+                export class AccountEvents extends WorkerEntrypoint {
+                  async deleteUser(userId) {}
+                  async exportUser(userId) {
+                    return { service: '2earl MCP gateway', securityLog: [], stand_in_for: userId };
+                  }
+                }
+                export default { fetch: () => new Response('stand-in', { status: 404 }) };
+              `,
+            },
+          ],
         },
       }),
     ],

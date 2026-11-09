@@ -11,6 +11,8 @@ import { serviceById } from './services';
 /** What a service's `AccountEvents` entrypoint looks like through its binding. */
 export interface AccountEventsBinding {
   deleteUser(userId: string): Promise<void>;
+  /** The service's part of "Download your data" (src/service-exports.ts). */
+  exportUser(userId: string): Promise<unknown>;
 }
 
 export interface DeliveryResult {
@@ -22,7 +24,7 @@ export interface DeliveryResult {
 
 const BATCH = 100;
 
-function bindingFor(env: Env, name: string): AccountEventsBinding | null {
+export function accountEventsBinding(env: Env, name: string): AccountEventsBinding | null {
   const value = (env as unknown as Record<string, unknown>)[name];
   return value !== null &&
     typeof value === 'object' &&
@@ -41,7 +43,7 @@ export async function deliverDeletionNotices(env: Env, now: number): Promise<Del
 
   for (const notice of results) {
     const service = serviceById(notice.service);
-    const binding = service ? bindingFor(env, service.deletionBinding) : null;
+    const binding = service ? accountEventsBinding(env, service.deletionBinding) : null;
     if (!binding) {
       result.waiting += 1;
       continue;

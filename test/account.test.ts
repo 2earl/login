@@ -207,6 +207,45 @@ describe('data export', () => {
     ).toBe(1);
   });
 
+  it('includes what each 2earl service holds, asked of the service itself', async () => {
+    const REAL = Symbol('real binding');
+    const download = async (gateway: unknown = REAL) => {
+      const init = { cookies: { '__Host-session': session } };
+      const response = await call(
+        app,
+        '/account/export',
+        gateway === REAL ? init : { ...init, vars: { MCP_GATEWAY_EVENTS: gateway } },
+      );
+      return (await response.json<{ services: Record<string, unknown> }>()).services;
+    };
+
+    // The real binding, to the stand-in gateway in vitest.config.ts: asked for this user only.
+    expect(await download()).toEqual({
+      mcp: {
+        service: '2earl MCP gateway',
+        status: 'included',
+        data: { service: '2earl MCP gateway', securityLog: [], stand_in_for: userId },
+      },
+    });
+
+    // A service that fails is named, and the rest of the download still works.
+    const failing = {
+      deleteUser: () => Promise.resolve(),
+      exportUser: () => Promise.reject(new Error('down')),
+    };
+    expect(await download(failing)).toEqual({
+      mcp: expect.objectContaining({
+        service: '2earl MCP gateway',
+        status: 'unavailable',
+      }) as unknown,
+    });
+
+    // Not deployed yet. (An explicit `undefined` would mean the default.)
+    expect(await download(null)).toEqual({
+      mcp: expect.objectContaining({ status: 'not connected' }) as unknown,
+    });
+  });
+
   it('contains only the signed-in user’s data', async () => {
     await env.DB.prepare(
       "INSERT INTO allowlist (id, kind, value, added_by, created_at) VALUES ('other', 'email', 'other@example.com', 'test', 0)",

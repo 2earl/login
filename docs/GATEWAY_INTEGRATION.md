@@ -158,12 +158,16 @@ Worker's real entry point:
 
   - **Throw** if deletion did not finish; login retries every 15 minutes and shows failures in
     `/admin`. Don't swallow errors.
-  - **When the gateway is deployed:** a login PR adds the binding. Notices for deletions made
-    before then are waiting already and are delivered on the next run.
+  - **Required: export.** The same entrypoint has `exportUser(userId): Promise<unknown>`, returning
+    what the gateway holds about the user. "Download your data" includes it under
+    `services.mcp`; if it fails or takes over 10 s, the file says so and the rest is still
+    downloaded (`src/service-exports.ts`).
+  - **Binding** (done once the gateway was deployed). Notices for deletions made before it existed
+    were delivered on the next run.
 
     ```jsonc
     // login wrangler.jsonc
-    { "binding": "MCP_GATEWAY_EVENTS", "service": "<gateway worker name>", "entrypoint": "AccountEvents" }
+    { "binding": "MCP_GATEWAY_EVENTS", "service": "mcp", "entrypoint": "AccountEvents" }
     ```
 
 ## 6. Infrastructure constraints
@@ -190,7 +194,7 @@ Worker's real entry point:
 | Different gateway URL | `MCP_RESOURCE` in `wrangler.jsonc` | **Every existing grant becomes useless**: tokens are bound to the old resource. Users reconnect their apps |
 | Another service (any app that accepts 2earl tokens) | a new entry in `src/services.ts`: its own resource, scopes and deletion binding | Each service validates with its own resource and has its own permissions |
 | Email or profile for the gateway | `GrantProps`, `completeAuthorization`, privacy policy | Personal data crosses to the gateway; needs a privacy-policy change |
-| Deletion binding, when the gateway is deployed | `services` in `wrangler.jsonc` (§5) | Waiting notices are delivered |
+| Another service's deletion and export | its `AccountEvents` binding in `services` in `wrangler.jsonc` (§5) | Deletions reach it; "Download your data" includes it |
 
 ## 8. Developing and testing the gateway
 
@@ -216,8 +220,9 @@ Worker's real entry point:
    `"authorization_servers": ["https://login.2earl.com"]` and `"resource": "https://mcp.2earl.com/mcp"`.
 2. `POST /mcp` without a token gives `401` with `WWW-Authenticate` naming `resource_metadata` and
    `scope="mcp:tools.read"`.
-3. A token issued for another resource gives `401`, and a `tools/call` with a read-only token
-   gives `403 insufficient_scope` with `scope="mcp:tools.invoke"`.
+3. A token issued for another resource gives `401`, and a `tools/call` for a service's write
+   tool with only its read scope gives `403 insufficient_scope` naming that service's write scope
+   (gateway permissions: 2earl/mcp docs/DESIGN.md §4).
 4. After **Disconnect** on `login.2earl.com/account`, the app's next calls fail within about a
    minute.
 5. A real client (Claude, MCP Inspector) connects end to end: discovery, consent, tools.

@@ -9,6 +9,7 @@ import { Hono } from 'hono';
 import type { JWTVerifyGetKey } from 'jose';
 import { deleteAccount, exportAccount } from './account';
 import { deliverDeletionNotices } from './deletion-notices';
+import { exportFromServices } from './service-exports';
 import { audit } from './audit';
 import { hmacHex, pkceChallenge, sha256Hex, timingSafeEqual } from './crypto';
 import { GoogleSignInError, buildGoogleAuthUrl, exchangeCode, verifyGoogleIdToken } from './google';
@@ -384,7 +385,11 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     if (!session) return c.redirect('/login?return_to=%2Faccount%2Fexport', 303);
     const now = deps.now();
     const oauth = authorizationServer(c.env).getOAuthApi(c.env);
-    const data = await exportAccount(c.env.DB, oauth, session.user.id, session.idHash, now);
+    const [account, services] = await Promise.all([
+      exportAccount(c.env.DB, oauth, session.user.id, session.idHash, now),
+      exportFromServices(c.env, session.user.id),
+    ]);
+    const data = { ...account, services };
     await audit(c.env.DB, now, 'account.exported', {
       actorUserId: session.user.id,
       ipPrefix: clientIp(c),
