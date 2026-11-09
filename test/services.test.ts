@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { pkceChallenge, randomToken } from '../src/crypto';
 import { deliverDeletionNotices, type AccountEventsBinding } from '../src/deletion-notices';
 import { authorizationServer, setOAuthClock } from '../src/oauth';
-import { SERVICES, serviceForResource } from '../src/services';
+import { SERVICES, allResources, serviceForResource } from '../src/services';
 import {
   FakeGoogle,
   NOW,
@@ -97,12 +97,28 @@ describe('service registry', () => {
   it('keeps each service’s scopes under its own prefix, with unique ids, resources and bindings', () => {
     const ids = SERVICES.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(new Set(SERVICES.map((s) => s.resource(env))).size).toBe(SERVICES.length);
+    const resources = allResources(env);
+    expect(new Set(resources).size).toBe(resources.length);
     expect(new Set(SERVICES.map((s) => s.deletionBinding)).size).toBe(SERVICES.length);
     for (const service of SERVICES) {
       expect(Object.keys(service.scopes).length).toBeGreaterThan(0);
       for (const scope of Object.keys(service.scopes)) expect(scope).toMatch(`${service.id}:`);
+      // An endpoint offers only scopes its service has.
+      for (const endpoint of service.endpoints ?? []) {
+        for (const scope of endpoint.scopes) expect(service.scopes).toHaveProperty([scope]);
+      }
     }
+  });
+
+  it('finds Prompt share’s own MCP address, named and scoped as that address', () => {
+    const endpoint = serviceForResource(env, 'https://mcp.2earl.com/promptshare');
+    expect(endpoint).toMatchObject({ id: 'mcp', name: 'Prompt share' });
+    expect(Object.keys(endpoint?.scopes ?? {})).toEqual([
+      'mcp:promptshare.read',
+      'mcp:promptshare.write',
+      'mcp:promptshare.state',
+    ]);
+    expect(serviceForResource(env, 'https://mcp.2earl.com/promptshare/')).toBeUndefined();
   });
 
   it('finds the MCP gateway by its resource, and nothing for other URLs', () => {

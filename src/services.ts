@@ -23,6 +23,12 @@ export interface Service {
    * account is deleted, `exportUser(userId)` for "Download your data".
    */
   deletionBinding: string;
+  /**
+   * Narrower addresses of the same service, each its own resource with a subset of its scopes.
+   * The MCP gateway serves every 2earl service at `/mcp` and each one alone at `/<service>`
+   * (2earl/mcp docs/DESIGN.md §3): a token for one address is useless at another.
+   */
+  endpoints?: readonly { name: string; resource(env: Env): string; scopes: readonly string[] }[];
 }
 
 export const SERVICES: readonly Service[] = [
@@ -40,6 +46,14 @@ export const SERVICES: readonly Service[] = [
         'Save to and read your shared sessions in Prompt share, including ones other people can see',
     },
     deletionBinding: 'MCP_GATEWAY_EVENTS',
+    endpoints: [
+      {
+        // Prompt share's own MCP address, the one its directory listing uses.
+        name: 'Prompt share',
+        resource: (env) => `${new URL(env.MCP_RESOURCE).origin}/promptshare`,
+        scopes: ['mcp:promptshare.read', 'mcp:promptshare.write', 'mcp:promptshare.state'],
+      },
+    ],
   },
   {
     // Prompt share (2earl/promptshare). Its own data, so its own deletion and export. The scope
@@ -60,8 +74,36 @@ export const ALL_SCOPES: Readonly<Record<string, string>> = Object.assign(
   ...SERVICES.map((service) => service.scopes),
 ) as Record<string, string>;
 
+/**
+ * The service a resource belongs to. For one of its narrower endpoints: the same service, named
+ * and scoped as that endpoint, so consent offers and tokens carry only the endpoint's scopes.
+ */
 export function serviceForResource(env: Env, resource: string | undefined): Service | undefined {
-  return resource === undefined ? undefined : SERVICES.find((s) => s.resource(env) === resource);
+  if (resource === undefined) return undefined;
+  for (const service of SERVICES) {
+    if (service.resource(env) === resource) return service;
+    const endpoint = service.endpoints?.find((e) => e.resource(env) === resource);
+    if (endpoint) {
+      return {
+        id: service.id,
+        name: endpoint.name,
+        resource: (e: Env) => endpoint.resource(e),
+        scopes: Object.fromEntries(
+          endpoint.scopes.map((scope) => [scope, service.scopes[scope] ?? scope]),
+        ),
+        deletionBinding: service.deletionBinding,
+      };
+    }
+  }
+  return undefined;
+}
+
+/** Every resource tokens may be issued for: each service's, and each of its endpoints'. */
+export function allResources(env: Env): string[] {
+  return SERVICES.flatMap((s) => [
+    s.resource(env),
+    ...(s.endpoints ?? []).map((e) => e.resource(env)),
+  ]);
 }
 
 export function serviceById(id: string): Service | undefined {

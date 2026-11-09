@@ -4,7 +4,7 @@ import {
   OAuthError,
 } from '@cloudflare/workers-oauth-provider';
 import { audit } from './audit';
-import { ALL_SCOPES, SERVICES, scopeLabel } from './services';
+import { ALL_SCOPES, allResources, scopeLabel } from './services';
 import { isUserActive } from './users';
 
 /**
@@ -45,7 +45,7 @@ const servers = new Map<string, OAuthAuthorizationServer<Env>>();
 
 /** One server per issuer/resource configuration; built once per isolate. */
 export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
-  const resources = SERVICES.map((service) => service.resource(env));
+  const resources = allResources(env);
   const key = `${env.ISSUER}|${resources.join(' ')}`;
   let server = servers.get(key);
   if (!server) {
