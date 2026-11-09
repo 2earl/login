@@ -31,6 +31,8 @@ Production deploys run only from `main`, through the `deploy` workflow, after ow
 - [Threat model](docs/THREAT_MODEL.md): assets, trust boundaries, threats, mitigations, residual
   risks
 - [Data protection](docs/DATA_PROTECTION.md): GDPR notes: data inventory, retention, rights
+- [Gateway integration](docs/GATEWAY_INTEGRATION.md): what the MCP gateway needs from this service:
+  token validation over a Service Binding, scopes, constraints, open decisions
 
 ## Security
 

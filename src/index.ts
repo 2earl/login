@@ -27,6 +27,12 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
    * a token issued for any other audience is rejected by the library.
    */
   async validateToken(resource: string, token: string) {
+    // A resource this server doesn't issue tokens for is a misconfigured gateway, not a bad token:
+    // fail closed with an error (the gateway answers 503) rather than null (a 401 the client would
+    // answer by signing in again, forever). Checked here, so the error is an ordinary RPC exception.
+    if (resource !== this.env.MCP_RESOURCE) {
+      throw new Error('resource must name one registered protected resource');
+    }
     return authorizationServer(this.env).validateToken(resource, token, this.env) as Promise<{
       props: GrantProps;
       audience: string;
