@@ -16,7 +16,7 @@ jobs:
   verify:
     name: verify
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,6 +39,13 @@ jobs:
 
       - name: Test (Workers runtime)
         run: pnpm test
+
+      # A real Chromium runs the whole owner journey against `wrangler dev` (e2e/).
+      - name: Install Chromium for browser tests
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Browser tests
+        run: pnpm test:e2e
 
       - name: Bundle (dry-run deploy)
         run: pnpm build

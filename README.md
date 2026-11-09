@@ -16,6 +16,7 @@ Requires Node.js 24 and pnpm (version pinned in `package.json`).
 pnpm install
 pnpm dev         # local Worker on http://localhost:8787
 pnpm test        # tests run inside the Workers runtime
+pnpm test:e2e    # browser tests: Chromium against `wrangler dev` (see e2e/)
 pnpm typecheck   # also checks that worker-configuration.d.ts matches wrangler.jsonc
 pnpm lint
 ```
