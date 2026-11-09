@@ -139,6 +139,7 @@ a:hover {
 .content {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   padding: 2.5rem clamp(1.25rem, 6vw, 5.5rem) 2rem;
 }
 
@@ -677,6 +678,192 @@ p {
 
 h2 .tag {
   font-family: var(--body);
+}
+
+/* ---- Admin -------------------------------------------------------------------------------- */
+
+.main.main-wide {
+  max-width: 52rem;
+  /* Let wide children (the log table) shrink to the column and scroll inside their box. */
+  min-width: 0;
+}
+
+.row-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin: 0 0 2rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.tabs a {
+  margin-bottom: -1px;
+  padding: 0.5rem 0;
+  border-bottom: 3px solid transparent;
+  color: var(--muted);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.tabs a:hover {
+  color: var(--fg);
+}
+
+.tabs a[aria-current='page'] {
+  border-bottom-color: var(--vermilion);
+  color: var(--fg);
+}
+
+.admin-list {
+  margin: 0 0 1.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+  padding: 1rem 0;
+  border-top: 1px solid var(--rule);
+}
+
+.admin-row .app-main {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.admin-row code {
+  overflow-wrap: anywhere;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.row-actions form {
+  margin: 0;
+}
+
+.confirm-delete summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.25rem;
+  color: var(--alert);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.confirm-delete[open] {
+  flex-basis: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.625rem;
+  background: var(--surface);
+}
+
+.tag.tag-alert {
+  background: var(--alert);
+  color: var(--danger-fg);
+}
+
+.tag.tag-muted {
+  background: var(--rule);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0 0.75rem;
+  margin: 0 0 1.5rem;
+}
+
+.inline-form .field {
+  flex: 1 1 16rem;
+  max-width: 24rem;
+}
+
+.inline-form .button {
+  margin-bottom: 1rem;
+}
+
+.stack-form {
+  max-width: 32rem;
+  margin: 1rem 0 0;
+}
+
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.625rem;
+  background: var(--surface);
+  color: var(--fg);
+  font: 400 1rem/1.4 var(--body);
+}
+
+.field textarea {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.875rem;
+  resize: vertical;
+}
+
+/* The log scrolls sideways inside its box on narrow screens; the page never does. */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  border-radius: 0.625rem;
+  background: var(--surface);
+}
+
+.log {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.log th,
+.log td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+
+.log th {
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.log tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.clip {
+  max-width: 16rem;
+  overflow-wrap: anywhere;
 }
 
 /* ---- Consent ------------------------------------------------------------------------------ */

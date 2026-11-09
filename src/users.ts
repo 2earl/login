@@ -17,7 +17,8 @@ export async function allowlistMatch(
        ORDER BY CASE kind WHEN 'google_sub' THEN 0 ELSE 1 END
        LIMIT 1`,
     )
-    .bind(identity.subject, identity.email)
+    // Invitations are stored in lower case (admin.ts).
+    .bind(identity.subject, identity.email.toLowerCase())
     .first<{ kind: 'google_sub' | 'email' }>();
   return row?.kind ?? null;
 }

@@ -14,6 +14,7 @@ import { GoogleSignInError, buildGoogleAuthUrl, exchangeCode, verifyGoogleIdToke
 import { LOGIN_TX_TTL_SECONDS, consumeLoginTx, createLoginTx } from './login-tx';
 import { isStepUpFresh, listFactors, mfaGate, type MfaGate } from './mfa';
 import { registerMfaRoutes } from './mfa-routes';
+import { registerAdminRoutes } from './admin';
 import { SCOPES, authorizationServer, scopeLabel, type GrantProps } from './oauth';
 import {
   MESSAGES,
@@ -452,6 +453,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   );
 
   registerMfaRoutes(app, deps);
+  registerAdminRoutes(app, deps);
 
   // ---- OAuth authorization server (DESIGN §4.1, §4.3) ------------------------------------
 

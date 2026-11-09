@@ -55,12 +55,9 @@ export function mfaGate(env: Env, session: { aal: 'aal1' | 'aal2'; hasFactor: bo
 export function isStepUpFresh(
   session: { aal: 'aal1' | 'aal2'; aal2At: number | null },
   now: number,
+  maxAge = STEP_UP_MAX_AGE_SECONDS,
 ): boolean {
-  return (
-    session.aal === 'aal2' &&
-    session.aal2At !== null &&
-    now - session.aal2At <= STEP_UP_MAX_AGE_SECONDS
-  );
+  return session.aal === 'aal2' && session.aal2At !== null && now - session.aal2At <= maxAge;
 }
 
 // ---- Encryption of secrets at rest ------------------------------------------------------------

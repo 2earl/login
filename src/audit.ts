@@ -25,7 +25,17 @@ export type AuditEvent =
   | 'mfa.failed'
   | 'mfa.locked'
   | 'mfa.recovery_codes_created'
-  | 'mfa.recovery_code_used';
+  | 'mfa.recovery_code_used'
+  | 'admin.invitation_added'
+  | 'admin.invitation_removed'
+  | 'admin.user_suspended'
+  | 'admin.user_reactivated'
+  | 'admin.user_deleted'
+  | 'admin.mfa_reset'
+  | 'admin.client_trusted'
+  | 'admin.client_untrusted'
+  | 'admin.client_registered'
+  | 'admin.client_deleted';
 
 export async function audit(
   db: D1Database,

@@ -18,6 +18,7 @@ export default defineConfig(async () => {
             SESSION_PEPPER: 'test-session-pepper',
             CONSENT_REMEMBER_SECRET: 'test-consent-remember-secret-at-least-32-chars',
             MFA_ENCRYPTION_KEY: 'test-mfa-encryption-key',
+            OWNER_GOOGLE_SUB: 'google-sub-owner',
           },
         },
       }),

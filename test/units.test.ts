@@ -12,8 +12,11 @@ describe('safeReturnTo', () => {
     ['https://evil.example/', '/account'],
     ['//evil.example/', '/account'],
     ['/\\evil.example', '/account'],
-    ['/admin', '/account'],
-    ['/account/../admin', '/account'],
+    ['/admin/users', '/admin/users'],
+    // Normalised before the prefix check: the result is the path the browser would request.
+    ['/account/../admin', '/admin'],
+    ['/administrator', '/account'],
+    ['/oauth/token', '/account'],
     ['javascript:alert(1)', '/account'],
     ['/account\n', '/account'],
   ])('%s → %s', (input, expected) => {
