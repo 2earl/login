@@ -477,10 +477,15 @@ Library maintenance (`purgeExpiredData()`) runs on a daily Cron Trigger.
 
 ## 8. Abuse controls
 
-- Workers Rate Limiting binding, keyed by IP prefix:
-  - `/authorize`, `/callback/google` — 30/min
-  - `/oauth/token` — 60/min per client_id + IP prefix
-  - `/admin` — 30/min
+- Workers Rate Limiting bindings, keyed by IP prefix:
+  - `AUTH_RATE_LIMITER` (20/min): `/login`, `/callback/google`, account deletion, second factor,
+    `/admin`;
+  - `TOKEN_RATE_LIMITER` (1,000/min): `POST /oauth/token`. High on purpose: an AI assistant's
+    servers (Claude: Anthropic's `160.79.104.0/21`) refresh for all their users from a few
+    addresses, every 15 minutes per user. Guessing isn't possible there (codes need their PKCE
+    verifier; refresh tokens are long and random), so the limit only bounds load.
+- Zone rate-limit rule (Free plan, one rule, per address): `/authorize`, `/callback/google`,
+  `/login`; 30 per 10 s. Not `/oauth/token`, for the reason above.
 - Cloudflare WAF custom rules (Terraform):
   - block non-HTTPS;
   - restrict methods per path;

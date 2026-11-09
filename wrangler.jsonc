@@ -67,6 +67,13 @@
       "namespace_id": "1001",
       "simple": { "limit": 20, "period": 60 },
     },
+    // POST /oauth/token, per address (shortened). High, because AI assistants' servers share a
+    // few addresses for all their users (src/app.ts).
+    {
+      "name": "TOKEN_RATE_LIMITER",
+      "namespace_id": "1004",
+      "simple": { "limit": 1000, "period": 60 },
+    },
   ],
 
   // Created by Terraform (infra/storage.tf), both in the EU jurisdiction. IDs are not secrets.
