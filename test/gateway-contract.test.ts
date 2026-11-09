@@ -30,7 +30,11 @@ let userId: string;
 let clientId: string;
 
 /** authorize → consent (with the given scopes) → token. */
-async function accessToken(scopes: string[], resource: string = env.MCP_RESOURCE): Promise<string> {
+async function accessToken(
+  scopes: string[],
+  resource: string = env.MCP_RESOURCE,
+  extra: Record<string, string> = {},
+): Promise<string> {
   const verifier = randomToken(48);
   const query = new URLSearchParams({
     response_type: 'code',
@@ -41,6 +45,7 @@ async function accessToken(scopes: string[], resource: string = env.MCP_RESOURCE
     code_challenge: await pkceChallenge(verifier),
     code_challenge_method: 'S256',
     resource,
+    ...extra,
   });
   const consent = await call(app, `/authorize?${query.toString()}`, {
     cookies: { '__Host-session': session },
@@ -103,6 +108,57 @@ describe('a service’s own address on the gateway', () => {
   });
 });
 
+describe('an app requiring a recent second factor (acr_values)', () => {
+  const authorizeWithAcr = async () => {
+    const query = new URLSearchParams({
+      response_type: 'code',
+      client_id: clientId,
+      redirect_uri: REDIRECT_URI,
+      scope: 'promptshare:account',
+      state: 's',
+      code_challenge: await pkceChallenge(randomToken(48)),
+      code_challenge_method: 'S256',
+      resource: env.PROMPTSHARE_RESOURCE,
+      acr_values: 'urn:2earl:aal2',
+    });
+    return call(app, `/authorize?${query.toString()}`, { cookies: { '__Host-session': session } });
+  };
+  const markSession = (aal2At: number | null) =>
+    env.DB.prepare('UPDATE sessions SET aal = ?, aal2_at = ?')
+      .bind(aal2At === null ? 'aal1' : 'aal2', aal2At)
+      .run();
+
+  it('sends a user without a second factor to set one up, then back', async () => {
+    const response = await authorizeWithAcr();
+    expect(response.status).toBe(303);
+    expect(response.headers.get('Location')).toMatch(
+      /^\/account\/security\?return_to=%2Fauthorize%3F/,
+    );
+  });
+
+  it('asks again for a second factor verified too long ago', async () => {
+    await env.DB.prepare(
+      "INSERT INTO mfa_factors (id, user_id, kind, label, created_at, totp_secret_enc) VALUES ('f1', ?, 'totp', 'App', 0, 'not-used')",
+    )
+      .bind(userId)
+      .run();
+    await markSession(NOW - 3600);
+    const response = await authorizeWithAcr();
+    expect(response.headers.get('Location')).toMatch(/^\/mfa\?step_up=1&return_to=%2Fauthorize%3F/);
+  });
+
+  it('continues after a fresh second factor, and tells the app when it was', async () => {
+    await markSession(NOW - 60);
+    expect((await authorizeWithAcr()).status).toBe(200); // the consent page
+    const token = await accessToken(['promptshare:account'], env.PROMPTSHARE_RESOURCE, {
+      acr_values: 'urn:2earl:aal2',
+      scope: 'promptshare:account',
+    });
+    const result = await exports.default.validateToken(env.PROMPTSHARE_RESOURCE, token);
+    expect(result?.props).toEqual({ uid: userId, authTime: NOW, aal2At: NOW - 60 });
+  });
+});
+
 describe('validateToken over the Worker entry point (Service Binding)', () => {
   it('returns the user, client, scopes, audience and expiry for a valid token', async () => {
     const token = await accessToken(['mcp:tools.read', 'mcp:promptshare.read']);
@@ -114,10 +170,10 @@ describe('validateToken over the Worker entry point (Service Binding)', () => {
       userId,
       clientId,
       scope: ['mcp:tools.read', 'mcp:promptshare.read'],
-      props: { uid: userId, authTime: NOW },
+      props: { uid: userId, authTime: NOW, aal2At: null },
     });
-    // Only an internal ID and a time: no email or name crosses to the gateway.
-    expect(Object.keys(result?.props ?? {}).sort()).toEqual(['authTime', 'uid']);
+    // Only an internal ID and times: no email or name crosses to the gateway.
+    expect(Object.keys(result?.props ?? {}).sort()).toEqual(['aal2At', 'authTime', 'uid']);
     expect(result?.expiresAt).toBeGreaterThanOrEqual(before + ACCESS_TOKEN_TTL_SECONDS - 5);
     expect(result?.expiresAt).toBeLessThanOrEqual(before + ACCESS_TOKEN_TTL_SECONDS + 5);
   });

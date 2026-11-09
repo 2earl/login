@@ -31,7 +31,15 @@ export const GRANT_MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
 export interface GrantProps {
   uid: string;
   authTime: number;
+  /**
+   * When the user last verified a second factor in the session that approved this grant, or
+   * null. Apps that need a recent second factor (`acr_values=urn:2earl:aal2`) check it.
+   */
+  aal2At: number | null;
 }
+
+/** `acr_values` an app sends to require a recent second factor before login approves. */
+export const ACR_AAL2 = 'urn:2earl:aal2';
 
 /** Unix seconds. The same clock stamps `authTime` (app.ts) and checks it here. */
 let clock = (): number => Math.floor(Date.now() / 1000);
