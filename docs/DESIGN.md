@@ -212,6 +212,22 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
   - audit log view.
 - Every admin action is audited.
 
+**Implementation (phase 5b, `src/admin.ts`):**
+- Access: signed in, Google `sub` = `OWNER_GOOGLE_SUB`, a second factor enrolled and the session at
+  `aal2`. Anyone else gets the ordinary 404 page, so `/admin` doesn't reveal that it exists.
+- Changes (all POST): same-origin check, the `admin` rate-limit key, and a second-factor proof from
+  the last 15 minutes (otherwise `/mfa?step_up=1`).
+- Users: suspend (status `suspended`, sessions deleted, grants revoked; sign-in is refused
+  while suspended), reactivate, reset second factor (factors, recovery codes and lockout cleared,
+  sessions ended), delete (same path as self-deletion, §6.3; needs a confirmation box). The owner's
+  own account can't be changed here.
+- Invitations: add by email (stored in lower case; matching is case-insensitive), withdraw. The
+  owner's own invitation can't be withdrawn.
+- Apps: mark a client ID as verified (it must resolve: registered, or a fetchable CIMD document);
+  register a public client (PKCE, no secret; redirect URIs https or http on loopback, 1–10);
+  delete a registered client.
+- Security log: latest 200 events, filtered by a fixed list of event prefixes.
+
 ### 4.7 Second factor (MFA), behind a feature flag
 
 Google sign-in proves the Google account. A second factor proves the person at login.2earl.com

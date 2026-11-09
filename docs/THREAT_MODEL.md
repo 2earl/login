@@ -104,6 +104,9 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | TOTP secret theft from D1 | Encrypted with `MFA_ENCRYPTION_KEY` (AES-GCM); key only in Worker secrets |
 | Recovery-code guessing | 10 random 50-bit codes, stored as keyed hashes, single use; per-network rate limit and a per-user lockout (5 wrong answers → 15 minutes) |
 | TOTP code guessing | Same lockout: at most 480 attempts a day per user, about a 1 in 700 chance per day |
+| Admin area abused by a stolen owner session | `/admin` needs the owner's Google account, a second factor and `aal2`; every change needs the second factor from the last 15 minutes; same-origin check; all changes audited |
+| Owner locks themself out from `/admin` | The owner's own account and invitation can't be changed from `/admin` |
+| `/admin` probing by other users | Same 404 as an unknown page |
 | Stolen session adds the first factor (user had none) | First factor needs a Google sign-in from the last 10 minutes; otherwise `/login?reauth=1` |
 | Script injection on the passkey pages | The only script is a static file from this origin (`MFA_CSP`); no inline script, `connect-src 'self'` |
 | Attacker with a stolen session adds their own factor | Factor changes need a challenge ≤ 5 minutes old |

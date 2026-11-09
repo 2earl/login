@@ -46,6 +46,8 @@
       "CONSENT_REMEMBER_SECRET",
       // Encrypts authenticator-app secrets and keys recovery-code hashes (DESIGN §4.7).
       "MFA_ENCRYPTION_KEY",
+      // Google account ID of the only user who may open /admin (DESIGN §4.6).
+      "OWNER_GOOGLE_SUB",
     ],
   },
 

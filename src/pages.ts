@@ -58,7 +58,13 @@ const PANEL =
 export function page(
   title: string,
   main: string,
-  options: { passkeyScript?: boolean } = {},
+  options: {
+    passkeyScript?: boolean;
+    /** Wider content column (admin tables). */
+    wide?: boolean;
+    /** Label next to the logo. */
+    section?: string;
+  } = {},
 ): string {
   return (
     '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
@@ -72,8 +78,8 @@ export function page(
     '</head><body><div class="frame">' +
     PANEL +
     '<div class="content">' +
-    `<a class="brand" href="/">${MARK}<span class="brand-name">2earl</span><span class="brand-sub">Account</span></a>` +
-    `<main class="main">${main}</main>` +
+    `<a class="brand" href="/">${MARK}<span class="brand-name">2earl</span><span class="brand-sub">${escapeHtml(options.section ?? 'Account')}</span></a>` +
+    `<main class="main${options.wide ? ' main-wide' : ''}">${main}</main>` +
     LEGAL_LINKS +
     '</div></div></body></html>'
   );
@@ -92,7 +98,7 @@ export function signInPage(): string {
   );
 }
 
-function formatDate(unixSeconds: number): string {
+export function formatDate(unixSeconds: number): string {
   return new Intl.DateTimeFormat('en-GB', { dateStyle: 'long', timeZone: 'UTC' }).format(
     new Date(unixSeconds * 1000),
   );
