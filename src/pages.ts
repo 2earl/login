@@ -1,7 +1,7 @@
 /**
  * Server-rendered HTML. Every dynamic value goes through `escapeHtml`. No inline scripts; the
  * second-factor pages load /passkey.js (with MFA_CSP).
- * Styles, font and icon are static assets in /public; the mark and panel are inline markup.
+ * Styles, font and icon are static assets in /public; the mark is inline markup.
  */
 
 import { ASSET_URLS } from './assets.generated';
@@ -47,14 +47,6 @@ const MARK =
   '<path fill="#FBB03B" d="M100 50V85A15 15 0 0 1 85 100H50Z"/>' +
   '</svg>';
 
-const PANEL =
-  '<div class="panel" aria-hidden="true">' +
-  '<span class="facet facet-vermilion"></span>' +
-  '<span class="facet facet-orange"></span>' +
-  '<span class="facet facet-red"></span>' +
-  '<span class="facet facet-amber"></span>' +
-  '</div>';
-
 export function page(
   title: string,
   main: string,
@@ -75,13 +67,11 @@ export function page(
     `<link rel="preload" href="${ASSET_URLS.font}" as="font" type="font/woff2" crossorigin>` +
     `<link rel="stylesheet" href="${ASSET_URLS.appCss}">` +
     (options.passkeyScript ? `<script type="module" src="${ASSET_URLS.passkeyJs}"></script>` : '') +
-    '</head><body><div class="frame">' +
-    PANEL +
-    '<div class="content">' +
-    `<a class="brand" href="/">${MARK}<span class="brand-name">2earl</span><span class="brand-sub">${escapeHtml(options.section ?? 'Account')}</span></a>` +
+    `</head><body><div class="page${options.wide ? ' page-wide' : ''}">` +
+    `<header class="site"><a class="brand" href="/">${MARK}<span class="brand-name">2earl</span><span class="brand-sub">${escapeHtml(options.section ?? 'Account')}</span></a></header>` +
     `<main class="main${options.wide ? ' main-wide' : ''}">${main}</main>` +
     LEGAL_LINKS +
-    '</div></div></body></html>'
+    '</div></body></html>'
   );
 }
 

@@ -1,8 +1,9 @@
 /*
  * login.2earl.com
  * Colours come from the 2earl mark: red, vermilion, orange and amber facets cut at 45°.
- * The panel is the mark itself, extended to the height of the screen. That is the one bold
- * element; everything else stays neutral so the brand colours carry the page.
+ * The four facets run as one band along the top edge and the mark sits at its normal size in
+ * the header. Content is one centred column, narrow for sign-in and account pages so attention
+ * stays on the one thing to do; everything else stays neutral so the brand colours carry it.
  */
 
 @font-face {
@@ -90,57 +91,36 @@ a:hover {
   border-radius: 4px;
 }
 
-/* ---- Frame: the mark panel + content ------------------------------------------------------ */
+/* ---- Page: the mark's band + one centred column ------------------------------------------ */
 
-.frame {
-  display: grid;
-  min-height: 100vh;
-  min-height: 100dvh;
-  grid-template-columns: minmax(15rem, 34%) 1fr;
+/* The four facets in the mark's order, as one band along the top edge of every page. */
+body::before {
+  content: '';
+  display: block;
+  height: 0.375rem;
+  background: linear-gradient(
+    90deg,
+    var(--red) 0 25%,
+    var(--vermilion) 25% 50%,
+    var(--orange) 50% 75%,
+    var(--amber) 75%
+  );
 }
 
-/*
- * The mark, extended: the V-notch at the top is as deep as half the panel's width, the two
- * upper facets run down as bands, and the two lower facets meet at the bottom centre — all at
- * 45°, exactly as in the icon. Container units keep the angles true at any panel size.
- */
-.panel {
-  position: relative;
-  container-type: size;
-  overflow: hidden;
-}
-
-.facet {
-  position: absolute;
-  inset: 0;
-}
-
-.facet-vermilion {
-  background: var(--vermilion);
-  /* 1px past the centre so no hairline of the page shows between the two bands. */
-  clip-path: polygon(0 0, calc(50cqw + 1px) calc(50cqw + 1px), calc(50cqw + 1px) 100cqh, 0 100cqh);
-}
-
-.facet-orange {
-  background: var(--orange);
-  clip-path: polygon(100cqw 0, 50cqw 50cqw, 50cqw 100cqh, 100cqw 100cqh);
-}
-
-.facet-red {
-  background: var(--red);
-  clip-path: polygon(0 calc(100cqh - 50cqw), 50cqw 100cqh, 0 100cqh);
-}
-
-.facet-amber {
-  background: var(--amber);
-  clip-path: polygon(100cqw calc(100cqh - 50cqw), 50cqw 100cqh, 100cqw 100cqh);
-}
-
-.content {
+/* Header, main and footer share one column, so the brand lines up with what's below it. */
+.page {
   display: flex;
   flex-direction: column;
-  min-width: 0;
-  padding: 2.5rem clamp(1.25rem, 6vw, 5.5rem) 2rem;
+  min-height: calc(100vh - 0.375rem);
+  min-height: calc(100dvh - 0.375rem);
+  width: 100%;
+  max-width: calc(30rem + 2 * clamp(1.25rem, 5vw, 2rem));
+  margin: 0 auto;
+  padding: 1.5rem clamp(1.25rem, 5vw, 2rem) 2rem;
+}
+
+.page.page-wide {
+  max-width: calc(56rem + 2 * clamp(1.25rem, 5vw, 2rem));
 }
 
 .brand {
@@ -176,15 +156,17 @@ a:hover {
 
 .main {
   width: 100%;
-  max-width: 27rem;
   margin: auto 0;
-  padding: 3rem 0;
+  padding: clamp(2.5rem, 8vh, 4rem) 0;
 }
 
 .legal {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem 1.25rem;
+  margin-top: auto;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--rule);
   font-size: 0.875rem;
 }
 
@@ -683,7 +665,7 @@ h2 .tag {
 /* ---- Admin -------------------------------------------------------------------------------- */
 
 .main.main-wide {
-  max-width: 52rem;
+  margin: 0;
   /* Let wide children (the log table) shrink to the column and scroll inside their box. */
   min-width: 0;
 }
@@ -990,53 +972,12 @@ code {
   height: 1rem;
 }
 
-/* ---- Small screens: the mark's colours become a stripe across the top -------------------- */
+/* ---- Small screens ------------------------------------------------------------------------ */
 
 @media (max-width: 52rem) {
-  .frame {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
-  }
-
-  .panel {
-    container-type: normal;
-    display: flex;
-    height: 0.375rem;
-  }
-
-  .facet {
-    position: static;
-    flex: 1;
-    clip-path: none;
-  }
-
-  .facet-red {
-    order: 1;
-  }
-
-  .facet-vermilion {
-    order: 2;
-  }
-
-  .facet-orange {
-    order: 3;
-  }
-
-  .facet-amber {
-    order: 4;
-  }
-
-  .content {
-    padding-top: 1.75rem;
-  }
-
   .main {
     margin: 0;
     padding: 2.5rem 0;
-  }
-
-  .legal {
-    margin-top: auto;
   }
 }
 
@@ -1049,12 +990,8 @@ code {
     border: 1px solid ButtonText;
   }
 
-  .panel {
+  body::before {
     display: none;
-  }
-
-  .frame {
-    grid-template-columns: 1fr;
   }
 }
 
