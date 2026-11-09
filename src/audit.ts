@@ -13,7 +13,12 @@ export type AuditEvent =
   | 'consent.approved'
   | 'consent.denied'
   | 'consent.reused'
-  | 'grant.revoked';
+  | 'grant.revoked'
+  | 'grant.refused'
+  | 'account.exported'
+  | 'account.deletion_started'
+  | 'account.deletion_stopped'
+  | 'user.deleted';
 
 export async function audit(
   db: D1Database,

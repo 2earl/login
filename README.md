@@ -3,8 +3,9 @@
 Identity service and OAuth 2.1 authorization server for 2earl.com, served at
 `https://login.2earl.com`. Runs on Cloudflare Workers.
 
-**Status:** phase 4. Google sign-in, sessions, the account page and the OAuth 2.1
-authorization server for apps (MCP clients) are live, locked to allowlisted accounts.
+**Status:** phase 4. Google sign-in, sessions, the account page (connected apps, data export,
+account deletion) and the OAuth 2.1 authorization server for apps (MCP clients) are live, locked
+to allowlisted accounts.
 
 ## Development
 

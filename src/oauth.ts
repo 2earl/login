@@ -3,6 +3,8 @@ import {
   OAuthAuthorizationServer,
   OAuthError,
 } from '@cloudflare/workers-oauth-provider';
+import { audit } from './audit';
+import { isUserActive } from './users';
 
 /**
  * The OAuth 2.1 authorization server for apps (MCP clients). Built on
@@ -57,7 +59,17 @@ export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
       accessTokenTTL: ACCESS_TOKEN_TTL_SECONDS,
       refreshTokenTTL: REFRESH_TOKEN_TTL_SECONDS,
       refreshTokenIdleTTL: REFRESH_TOKEN_IDLE_TTL_SECONDS,
-      tokenExchangeCallback: ({ grantType, props }) => {
+      tokenExchangeCallback: async ({ grantType, props, userId, grantId, env }) => {
+        // Every code exchange and refresh checks that the account still exists and is active.
+        // Deletion and suspension revoke grants, but a grant created while that was running (a
+        // consent submitted in another tab) is caught here, at the latest 15 minutes later.
+        if (!(await isUserActive(env.DB, userId))) {
+          await authorizationServer(env).getOAuthApi(env).revokeGrant(grantId, userId);
+          await audit(env.DB, clock(), 'grant.refused', { detail: { reason: 'user_inactive' } });
+          throw new OAuthError('invalid_grant', {
+            description: 'This account is no longer active.',
+          });
+        }
         if (grantType !== GrantType.REFRESH_TOKEN) return;
         // Absolute grant lifetime: however often a grant is refreshed, it ends 90 days after
         // the user approved it, and the user signs in again.
