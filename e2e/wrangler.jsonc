@@ -28,6 +28,11 @@
       // One browser runs the whole flow from one address.
       "simple": { "limit": 1000, "period": 60 },
     },
+    {
+      "name": "TOKEN_RATE_LIMITER",
+      "namespace_id": "1004",
+      "simple": { "limit": 1000, "period": 60 },
+    },
   ],
   "d1_databases": [
     {

@@ -663,6 +663,21 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   });
 
   // Metadata, token endpoint and revocation belong to the library.
+  // The token endpoint's limit lives here, not in the zone's per-address rule: every Claude user
+  // refreshes from the same few Anthropic addresses (access tokens last 15 minutes), so a coarse
+  // per-address limit would lock them all out together. Guessing is not possible here (a code
+  // needs its PKCE verifier; refresh tokens are long and random), so this only bounds load.
+  app.post('/oauth/token', async (c) => {
+    const { success } = await c.env.TOKEN_RATE_LIMITER.limit({ key: clientIp(c) ?? 'unknown' });
+    if (!success) {
+      return c.json(
+        { error: 'temporarily_unavailable', error_description: 'Too many requests; retry shortly' },
+        429,
+        { 'Retry-After': '10' },
+      );
+    }
+    return authorizationServer(c.env).fetch(c.req.raw, c.env, workerCtx(c));
+  });
   app.all('/oauth/*', (c) => authorizationServer(c.env).fetch(c.req.raw, c.env, workerCtx(c)));
   app.get('/.well-known/*', (c) =>
     authorizationServer(c.env).fetch(c.req.raw, c.env, workerCtx(c)),

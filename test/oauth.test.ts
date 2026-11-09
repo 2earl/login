@@ -187,6 +187,33 @@ describe('authorization code flow', () => {
     ).rejects.toThrow();
   });
 
+  it('limits the token endpoint per address in the Worker, answering as OAuth expects', async () => {
+    const { body } = await authorizeAndExchange();
+    let key = '';
+    const response = await call(app, '/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      ip: '160.79.104.7',
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: String(body.refresh_token),
+        client_id: clientId,
+      }),
+      vars: {
+        TOKEN_RATE_LIMITER: {
+          limit: ({ key: k }: { key: string }) => {
+            key = k;
+            return Promise.resolve({ success: false });
+          },
+        },
+      },
+    });
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('10');
+    expect(await response.json()).toMatchObject({ error: 'temporarily_unavailable' });
+    expect(key).toBe('160.79.104.0/24');
+  });
+
   it('refreshes, rotating the refresh token', async () => {
     const { body } = await authorizeAndExchange();
     const response = await call(app, '/oauth/token', {

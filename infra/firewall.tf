@@ -33,8 +33,10 @@ resource "cloudflare_ruleset" "rate_limit" {
   rules = [
     {
       ref         = "login_auth_endpoints"
-      description = "login: coarse per-IP limit on sign-in and token endpoints"
-      expression  = "(http.request.uri.path in {\"/authorize\" \"/oauth/token\" \"/callback/google\" \"/login\"})"
+      description = "login: coarse per-IP limit on the browser sign-in endpoints"
+      # Not /oauth/token: AI assistants' servers share a few addresses for all their users, so a
+      # per-address edge limit would lock them out together. Its limit is in the Worker.
+      expression  = "(http.request.uri.path in {\"/authorize\" \"/callback/google\" \"/login\"})"
       action      = "block"
       enabled     = true
       ratelimit = {
