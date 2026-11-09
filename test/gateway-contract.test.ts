@@ -30,7 +30,7 @@ let userId: string;
 let clientId: string;
 
 /** authorize → consent (with the given scopes) → token. */
-async function accessToken(scopes: string[]): Promise<string> {
+async function accessToken(scopes: string[], resource: string = env.MCP_RESOURCE): Promise<string> {
   const verifier = randomToken(48);
   const query = new URLSearchParams({
     response_type: 'code',
@@ -40,7 +40,7 @@ async function accessToken(scopes: string[]): Promise<string> {
     state: 's',
     code_challenge: await pkceChallenge(verifier),
     code_challenge_method: 'S256',
-    resource: env.MCP_RESOURCE,
+    resource,
   });
   const consent = await call(app, `/authorize?${query.toString()}`, {
     cookies: { '__Host-session': session },
@@ -64,7 +64,7 @@ async function accessToken(scopes: string[]): Promise<string> {
       redirect_uri: REDIRECT_URI,
       client_id: clientId,
       code_verifier: verifier,
-      resource: env.MCP_RESOURCE,
+      resource,
     }),
   });
   return (await token.json<{ access_token: string }>()).access_token;
@@ -86,6 +86,21 @@ beforeEach(async () => {
         tokenEndpointAuthMethod: 'none',
       })
   ).clientId;
+});
+
+describe('a service’s own address on the gateway', () => {
+  const PROMPTSHARE = 'https://mcp.2earl.com/promptshare';
+
+  it('offers only that service’s scopes, and its tokens work only there', async () => {
+    const token = await accessToken(['mcp:tools.read', 'mcp:promptshare.read'], PROMPTSHARE);
+    const result = await exports.default.validateToken(PROMPTSHARE, token);
+    // mcp:tools.read was requested and ticked, but this address doesn't offer it.
+    expect(result).toMatchObject({ audience: PROMPTSHARE, scope: ['mcp:promptshare.read'] });
+    expect(await exports.default.validateToken(env.MCP_RESOURCE, token)).toBeNull();
+
+    const everything = await accessToken(['mcp:promptshare.read']);
+    expect(await exports.default.validateToken(PROMPTSHARE, everything)).toBeNull();
+  });
 });
 
 describe('validateToken over the Worker entry point (Service Binding)', () => {

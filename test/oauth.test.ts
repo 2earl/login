@@ -1,4 +1,4 @@
-import { ALL_SCOPES } from '../src/services';
+import { ALL_SCOPES, allResources } from '../src/services';
 import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { pkceChallenge, randomToken } from '../src/crypto';
@@ -135,7 +135,7 @@ describe('authorization server metadata', () => {
     expect(meta.client_id_metadata_document_supported).toBe(true);
     expect(meta.registration_endpoint).toBeUndefined();
     expect(meta.scopes_supported).toEqual(Object.keys(ALL_SCOPES));
-    expect(meta.protected_resources).toEqual([RESOURCE, env.PROMPTSHARE_RESOURCE]);
+    expect(meta.protected_resources).toEqual(allResources(env));
   });
 });
 
