@@ -149,6 +149,8 @@ describe('account page', () => {
     ).text();
     expect(html).toContain('href="/account/export"');
     expect(html).toContain('href="/account/delete"');
+    // Where the account is used.
+    expect(html).toContain('href="https://promptshare.cc"');
   });
 });
 

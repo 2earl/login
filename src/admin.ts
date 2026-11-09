@@ -78,6 +78,18 @@ function parseRedirectUris(text: string): string[] | null {
   return lines;
 }
 
+/** Whether `userId` is the owner: the account whose Google identity is OWNER_GOOGLE_SUB. */
+export async function isOwnerUser(env: Env, userId: string): Promise<boolean> {
+  const ownerSub: string = env.OWNER_GOOGLE_SUB;
+  if (ownerSub.length === 0) return false;
+  const row = await env.DB.prepare(
+    "SELECT 1 AS ok FROM identities WHERE user_id = ? AND provider = 'google' AND subject = ?",
+  )
+    .bind(userId, ownerSub)
+    .first<{ ok: number }>();
+  return row !== null;
+}
+
 export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
   /** The owner's session, or a response that ends the request. */
   async function owner(c: AppContext): Promise<Session | Response> {
@@ -86,15 +98,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
       const url = new URL(c.req.url);
       return c.redirect(`/login?return_to=${encodeURIComponent(url.pathname + url.search)}`, 303);
     }
-    const ownerSub: string = c.env.OWNER_GOOGLE_SUB;
-    const isOwner =
-      ownerSub.length > 0 &&
-      (await c.env.DB.prepare(
-        "SELECT 1 AS ok FROM identities WHERE user_id = ? AND provider = 'google' AND subject = ?",
-      )
-        .bind(session.user.id, ownerSub)
-        .first<{ ok: number }>()) !== null;
-    if (!isOwner) return c.html(notFoundPage(), 404);
+    if (!(await isOwnerUser(c.env, session.user.id))) return c.html(notFoundPage(), 404);
     if (!session.hasFactor) return c.html(adminNeedsFactorPage(), 403);
     // An aal1 session never gets here (the second-factor gate sends it to /mfa), but don't rely on it.
     if (session.aal !== 'aal2') return c.redirect('/mfa?return_to=%2Fadmin', 303);

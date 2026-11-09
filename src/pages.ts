@@ -144,6 +144,8 @@ export function accountPage(params: {
   apps: ConnectedApp[];
   factors: { kind: 'webauthn' | 'totp' }[];
   notice?: string;
+  /** The owner sees a link to /admin. */
+  isOwner?: boolean;
 }): string {
   const heading = params.name ?? 'Your account';
   return page(
@@ -153,6 +155,16 @@ export function accountPage(params: {
       `<div class="badge" aria-hidden="true">${escapeHtml(initial(params.name, params.email))}</div>` +
       `<div><h1>${escapeHtml(heading)}</h1><p>${escapeHtml(params.email ?? '')}</p></div>` +
       '</header>' +
+      '<section class="section" aria-labelledby="services-heading">' +
+      '<h2 id="services-heading">Use your account with</h2>' +
+      '<ul class="services">' +
+      '<li><a href="https://promptshare.cc"><span class="service-name">Prompt share</span><span class="service-what">Prompts and shared sessions for your assistants</span></a></li>' +
+      '<li><a href="https://promptshare.cc/connect"><span class="service-name">Claude and other assistants</span><span class="service-what">Add a 2earl connector, then allow it here</span></a></li>' +
+      (params.isOwner
+        ? '<li><a href="/admin"><span class="service-name">Admin</span><span class="service-what">Users, invitations, apps and the security log</span></a></li>'
+        : '') +
+      '</ul>' +
+      '</section>' +
       '<section class="section" aria-labelledby="apps-heading">' +
       '<h2 id="apps-heading">Connected apps</h2>' +
       connectedApps(params.apps) +
@@ -380,6 +392,7 @@ export function securityPage(params: {
       : '') +
       (params.notice ? `<p class="notice" role="status">${escapeHtml(params.notice)}</p>` : '') +
       (params.error ? `<p class="warning" role="alert">${escapeHtml(params.error)}</p>` : '') +
+      (params.mustEnrol ? '' : '<p class="crumb"><a href="/account">Your account</a></p>') +
       '<h1>Second factor</h1>' +
       '<p class="lede">After signing in with Google, you confirm it’s you with something only you have. ' +
       'Someone who gets into your Google account still can’t get into 2earl.</p>' +

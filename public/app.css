@@ -1000,3 +1000,52 @@ code {
     transition: none !important;
   }
 }
+
+/* ---- UX review: services, breadcrumb, readable security log ------------------------------ */
+
+.crumb {
+  margin: 0 0 0.75rem;
+  font-size: 0.9375rem;
+}
+
+/* The services the account opens, as rows you can click anywhere on. */
+.services {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 0.625rem;
+  background: var(--surface);
+}
+.services li + li {
+  border-top: 1px solid var(--rule);
+}
+.services a {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.75rem 1rem;
+  color: var(--fg);
+  text-decoration: none;
+}
+.services a:hover .service-name {
+  text-decoration: underline;
+  text-decoration-color: var(--vermilion);
+}
+.service-name {
+  font-weight: 600;
+}
+.service-what {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.log-alert {
+  color: var(--alert);
+  font-weight: 600;
+}
+.kv {
+  display: block;
+}
+.kv .k {
+  color: var(--muted);
+}

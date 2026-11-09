@@ -300,6 +300,13 @@ describe('security log', () => {
     expect(all).toContain('login.succeeded');
     expect(all).toContain('admin.invitation_added');
     expect(all).toContain(OWNER_EMAIL);
+    // Read as words, the event's own name on hover.
+    expect(all).toContain('<span title="login.succeeded">Signed in</span>');
+    expect(all).toContain('<span title="admin.invitation_added">Invitation added</span>');
+    // The owner's account page links here.
+    expect(await (await call(app, '/account', { cookies: as(owner) })).text()).toContain(
+      'href="/admin"',
+    );
 
     const adminOnly = await (
       await call(app, '/admin/log?event=admin.', { cookies: as(owner) })

@@ -16,7 +16,7 @@ import { GoogleSignInError, buildGoogleAuthUrl, exchangeCode, verifyGoogleIdToke
 import { LOGIN_TX_TTL_SECONDS, consumeLoginTx, createLoginTx } from './login-tx';
 import { isStepUpFresh, listFactors, mfaGate, type MfaGate } from './mfa';
 import { registerMfaRoutes } from './mfa-routes';
-import { registerAdminRoutes } from './admin';
+import { isOwnerUser, registerAdminRoutes } from './admin';
 import { ACR_AAL2, authorizationServer, type GrantProps } from './oauth';
 import { ALL_SCOPES, scopeLabel, scopesFor, serviceForResource, type Service } from './services';
 import {
@@ -354,6 +354,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         memberSince: session.user.createdAt,
         apps: await connectedApps(oauth, session.user.id),
         factors: await listFactors(c.env.DB, session.user.id),
+        isOwner: await isOwnerUser(c.env, session.user.id),
         ...(notice ? { notice } : {}),
       }),
     );

@@ -1,3 +1,4 @@
+import type { AuditEvent } from './audit';
 import type { PendingNotices } from './deletion-notices';
 import { escapeHtml, formatDate, page } from './pages';
 
@@ -315,6 +316,83 @@ export const LOG_FILTERS: [string, string][] = [
   ['admin.', 'Admin actions'],
 ];
 
+/** What each event means, in words; the event's own name stays on hover. */
+const EVENT_LABEL: Record<AuditEvent, string> = {
+  'login.started': 'Sign-in started',
+  'login.succeeded': 'Signed in',
+  'login.denied': 'Sign-in refused (not invited)',
+  'login.failed': 'Sign-in failed',
+  'allowlist.pinned': 'Invitation used',
+  'user.created': 'Account created',
+  logout: 'Signed out',
+  'consent.approved': 'App allowed',
+  'consent.denied': 'App refused by the user',
+  'consent.reused': 'App allowed (remembered)',
+  'grant.revoked': 'App disconnected',
+  'grant.refused': 'App access refused',
+  'account.exported': 'Data downloaded',
+  'account.deletion_started': 'Account deletion started',
+  'account.deletion_stopped': 'Account deletion stopped',
+  'user.deleted': 'Account deleted',
+  'user.deletion_delivered': 'Deletion delivered to a service',
+  'mfa.enrolled': 'Second factor added',
+  'mfa.removed': 'Second factor removed',
+  'mfa.verified': 'Second factor used',
+  'mfa.failed': 'Second factor failed',
+  'mfa.locked': 'Second factor locked after failures',
+  'mfa.recovery_codes_created': 'Recovery codes created',
+  'mfa.recovery_code_used': 'Recovery code used',
+  'admin.invitation_added': 'Invitation added',
+  'admin.invitation_removed': 'Invitation removed',
+  'admin.user_suspended': 'User suspended',
+  'admin.user_reactivated': 'User reactivated',
+  'admin.user_deleted': 'User deleted',
+  'admin.mfa_reset': 'Second factor reset',
+  'admin.client_trusted': 'App marked verified',
+  'admin.client_untrusted': 'App unmarked',
+  'admin.client_registered': 'App registered',
+  'admin.client_deleted': 'App removed',
+};
+
+/** Events worth a second look when scanning the log. */
+const ALERT_EVENTS = /\.(failed|denied|locked|refused)$|^admin\.(user_deleted|mfa_reset)$/;
+
+function eventCell(event: string): string {
+  const label = (EVENT_LABEL as Record<string, string | undefined>)[event] ?? event;
+  return `<span title="${escapeHtml(event)}"${ALERT_EVENTS.test(event) ? ' class="log-alert"' : ''}>${escapeHtml(label)}</span>`;
+}
+
+/** An app's client ID as its host (a URL for CIMD clients), the full ID on hover. */
+function appCell(clientId: string | null): string {
+  if (!clientId) return '–';
+  let shown = clientId;
+  try {
+    shown = new URL(clientId).host;
+  } catch {
+    // A pre-registered client's ID isn't a URL; show it as it is.
+  }
+  return `<span title="${escapeHtml(clientId)}">${escapeHtml(shown)}</span>`;
+}
+
+/** The detail JSON as `key: value` lines; anything else as written. */
+function detailCell(detail: string | null): string {
+  if (!detail) return '';
+  try {
+    const parsed = JSON.parse(detail) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return Object.entries(parsed as Record<string, unknown>)
+        .map(
+          ([key, value]) =>
+            `<span class="kv"><span class="k">${escapeHtml(key)}</span> ${escapeHtml(typeof value === 'string' ? value : JSON.stringify(value))}</span>`,
+        )
+        .join('');
+    }
+  } catch {
+    // Not JSON: shown below as written.
+  }
+  return `<code>${escapeHtml(detail)}</code>`;
+}
+
 export function adminLogPage(params: {
   events: AdminLogEvent[];
   filter: string;
@@ -329,11 +407,11 @@ export function adminLogPage(params: {
       (e) =>
         '<tr>' +
         `<td class="nowrap">${dateTime(e.at)}</td>` +
-        `<td><code>${escapeHtml(e.event)}</code></td>` +
+        `<td>${eventCell(e.event)}</td>` +
         `<td>${escapeHtml(e.account ?? '–')}</td>` +
-        `<td class="clip">${escapeHtml(e.clientId ?? '–')}</td>` +
+        `<td class="clip">${appCell(e.clientId)}</td>` +
         `<td class="nowrap">${escapeHtml(e.ipPrefix ?? '–')}</td>` +
-        `<td class="clip"><code>${escapeHtml(e.detail ?? '')}</code></td>` +
+        `<td class="clip">${detailCell(e.detail)}</td>` +
         '</tr>',
     )
     .join('');

@@ -61,3 +61,27 @@ describe('escapeHtml', () => {
     );
   });
 });
+
+describe('security log cells', () => {
+  it('shows an app by its host and detail as key: value', async () => {
+    const { adminLogPage } = await import('../src/admin-pages');
+    const html = adminLogPage({
+      events: [
+        {
+          at: 1,
+          event: 'mfa.failed',
+          account: 'a@example.com',
+          clientId: 'https://claude.ai/oauth/metadata.json',
+          ipPrefix: null,
+          detail: '{"factor":"totp","attempt":2}',
+        },
+      ],
+      filter: '',
+      limit: 100,
+    });
+    expect(html).toContain('title="https://claude.ai/oauth/metadata.json">claude.ai</span>');
+    expect(html).toContain('<span class="k">factor</span> totp');
+    expect(html).toContain('<span class="k">attempt</span> 2');
+    expect(html).toContain('class="log-alert">Second factor failed</span>');
+  });
+});
