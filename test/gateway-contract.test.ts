@@ -114,9 +114,12 @@ describe('validateToken over the Worker entry point (Service Binding)', () => {
   it('throws for a resource it does not serve: a misconfigured gateway fails closed', async () => {
     const token = await accessToken(['mcp:tools.read']);
     for (const resource of ['https://other.2earl.com/mcp', `${env.MCP_RESOURCE}/`]) {
-      await expect(exports.default.validateToken(resource, token)).rejects.toThrow(
-        'resource must name one registered protected resource',
+      // Handled on the RPC promise itself: Vitest's `.rejects` leaves the runtime reporting it.
+      const outcome = await exports.default.validateToken(resource, token).then(
+        () => 'resolved',
+        (error: unknown) => (error instanceof Error ? error.message : 'non-error'),
       );
+      expect(outcome).toBe('resource must name one registered protected resource');
     }
   });
 
