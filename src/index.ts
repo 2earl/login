@@ -6,6 +6,8 @@ import { authorizationServer, type GrantProps } from './oauth';
 import { deliverDeletionNotices } from './deletion-notices';
 import { serviceForResource } from './services';
 
+export { PromptshareDirectory } from './directory';
+
 const app = createApp({
   fetch: (input, init) => fetch(input, init),
   googleJwks: createRemoteJWKSet(new URL(GOOGLE_JWKS_URL)),

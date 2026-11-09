@@ -29,7 +29,7 @@ with German law on telemedia: TDDDG for cookies, DDG for the imprint **[verify]*
 | Data | Where | Source | Purpose |
 |---|---|---|---|
 | Google subject ID (`sub`) | D1 `identities` | Google ID token | Identify the account |
-| Email, `email_verified` | D1 `identities`, `users.primary_email` | Google | Show the account; contact on security issues |
+| Email, `email_verified` | D1 `identities`, `users.primary_email` | Google | Show the account; contact on security issues; let Prompt share find the account when someone shares a prompt with that address (only the user ID is returned) |
 | Display name | D1 `users` | Google | Show the account |
 | Session records (hashed ID, timestamps, IP prefix, user-agent hash) | D1 `sessions` | Request | Keep the user signed in; detect abuse |
 | Login transaction (`state`, `nonce`, PKCE verifier) | D1 `login_tx` | Generated | Secure the sign-in, ≤ 10 min |

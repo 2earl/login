@@ -318,6 +318,15 @@ Decided by the owner on 2026-11-09:
   notices until it has one. `user.deletion_delivered` is audited, naming the service only.
 - **Adding a service:** a registry entry, then (once deployed) its binding in `wrangler.jsonc`
   (docs/GATEWAY_INTEGRATION.md §5).
+- **Looking an account up by email (Prompt share only).** Decided by the owner on 2026-11-09, so
+  a prompt can be shared with someone by their address (Prompt share DESIGN §4.1). The named
+  entrypoint `PromptshareDirectory` (`src/directory.ts`) has one method, `uidForEmail(email)`:
+  - it returns the user ID of the one **active** account with that **Google-verified** address;
+  - it returns nothing for an unknown, unverified, suspended or ambiguous address;
+  - it never returns the address itself, a name or anything else.
+
+  Only Prompt share's `wrangler.jsonc` binds it. Prompt share limits how often an author may
+  try addresses that have no account, because the answer shows whether an address has one.
 
 ## 5. Protocol surface
 
