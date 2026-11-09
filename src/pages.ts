@@ -196,6 +196,8 @@ export function accountPage(params: {
 /** Everything the consent page shows comes from the library's validated description. */
 export interface ConsentView {
   handle: string;
+  /** The scopes offered on this page, signed and bound to the handle (app.ts offeredScopesMac). */
+  offeredMac: string;
   clientName: string;
   /** Verified domain of a CIMD client; absent for a pre-registered or self-registered client. */
   clientDomain: string | null;
@@ -250,6 +252,8 @@ export function consentPage(view: ConsentView): string {
       loopback +
       '<form method="post" action="/authorize" class="consent-form">' +
       `<input type="hidden" name="handle" value="${escapeHtml(view.handle)}">` +
+      `<input type="hidden" name="offered" value="${escapeHtml(view.scopes.map((s) => s.scope).join(' '))}">` +
+      `<input type="hidden" name="offered_mac" value="${escapeHtml(view.offeredMac)}">` +
       scopes +
       unavailable +
       '<label class="remember"><input type="checkbox" name="remember" value="on"> Don’t ask again for this app for 30 days</label>' +

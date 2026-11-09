@@ -77,8 +77,10 @@
     },
   ],
 
-  // Daily clean-up: expired OAuth records, sessions, sign-in transactions, old audit events.
+  // Every 15 minutes: account-deletion notices to the services (src/deletion-notices.ts).
+  // Daily at 03:17 UTC: expired OAuth records, sessions, sign-in transactions, old audit events
+  // (DAILY_CRON in src/index.ts).
   "triggers": {
-    "crons": ["17 3 * * *"],
+    "crons": ["*/15 * * * *", "17 3 * * *"],
   },
 }

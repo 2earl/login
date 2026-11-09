@@ -14,7 +14,7 @@ Specification: [MCP Authorization, revision 2026-07-28](https://modelcontextprot
 | Issuer | `https://login.2earl.com` |
 | AS metadata (RFC 8414) | `https://login.2earl.com/.well-known/oauth-authorization-server` |
 | The gateway's canonical resource | `https://mcp.2earl.com/mcp` (login's `MCP_RESOURCE`; the only audience tokens are issued for) |
-| Scopes | `mcp:tools.read` ("See which tools are available to you"), `mcp:tools.invoke` ("Use those tools on your behalf") |
+| Scopes | The gateway's own set (`src/services.ts`): `mcp:tools.read` ("See which tools are available to you"), `mcp:tools.invoke` ("Use those tools on your behalf"). Each 2earl service has its own; a token for one never carries another's |
 | Access tokens | **Opaque**, not JWTs. 15 minutes. Validated only through the Service Binding (§3) |
 | Refresh tokens | 30 days, lapse after 7 days unused, and every grant ends 90 days after the user approved it |
 | Client registration | Client ID Metadata Documents (an `https://` `client_id`), or public clients pre-registered by the owner in `/admin`. **No Dynamic Client Registration** |
@@ -138,16 +138,33 @@ Worker's real entry point:
 - Key everything per user by `props.uid`. It is stable for the life of the account. An account that
   is deleted and created again gets a new `uid`.
 - Key per-app state by `uid` + `clientId`.
-- **Open: account deletion.** When a user deletes their 2earl account, login removes its own data
-  and revokes all grants, but **does not notify the gateway**. Anything the gateway stores under
-  that `uid` would remain, against the privacy policy's promise. Choose one before the gateway
-  stores personal data:
-  1. The gateway stores nothing per user, or only data that expires on its own within the
-     retention the privacy policy states.
-  2. login calls the gateway on deletion (a Service Binding login → gateway with a
-     `deleteUser(uid)` RPC, retried by a queue). Needs a login PR.
-  3. The gateway sweeps `uid`s whose grants are all gone. Weakest: it can't tell "disconnected
-     every app" from "deleted the account".
+- **Required: account deletion.** Decided by the owner: when a user deletes their 2earl account,
+  every service deletes that user's data. login records a notice for the gateway in the same
+  transaction as the deletion and delivers it until the gateway confirms (DESIGN §4.8). The gateway
+  must expose a named entrypoint:
+
+  ```ts
+  import { WorkerEntrypoint } from 'cloudflare:workers';
+
+  /** Called by login only, over a Service Binding, when a 2earl account is deleted. */
+  export class AccountEvents extends WorkerEntrypoint<Env> {
+    async deleteUser(userId: string): Promise<void> {
+      // Delete everything stored under userId: KV, D1, R2, Durable Objects, caches, upstream
+      // credentials. Resolve only when it is gone. Must be idempotent: login may call it again
+      // for the same user after a timeout or retry, and for users the gateway never saw.
+    }
+  }
+  ```
+
+  - **Throw** if deletion did not finish; login retries every 15 minutes and shows failures in
+    `/admin`. Don't swallow errors.
+  - **When the gateway is deployed:** a login PR adds the binding. Notices for deletions made
+    before then are waiting already and are delivered on the next run.
+
+    ```jsonc
+    // login wrangler.jsonc
+    { "binding": "MCP_GATEWAY_EVENTS", "service": "<gateway worker name>", "entrypoint": "AccountEvents" }
+    ```
 
 ## 6. Infrastructure constraints
 
@@ -169,11 +186,11 @@ Worker's real entry point:
 
 | Change | Where in login | Effect |
 |---|---|---|
-| New or finer scopes | `SCOPES` in `src/oauth.ts` (with the consent-page wording) | Existing grants keep their old scopes; clients step up |
+| New or finer scopes | the gateway's entry in `src/services.ts` (scopes start with `mcp:`, with consent wording) | Existing grants keep their old scopes; clients step up |
 | Different gateway URL | `MCP_RESOURCE` in `wrangler.jsonc` | **Every existing grant becomes useless**: tokens are bound to the old resource. Users reconnect their apps |
-| A second MCP server | `resources` in `src/oauth.ts` | Each server validates with its own resource |
+| Another service (any app that accepts 2earl tokens) | a new entry in `src/services.ts`: its own resource, scopes and deletion binding | Each service validates with its own resource and has its own permissions |
 | Email or profile for the gateway | `GrantProps`, `completeAuthorization`, privacy policy | Personal data crosses to the gateway; needs a privacy-policy change |
-| Deletion hook | §5 option 2 | — |
+| Deletion binding, when the gateway is deployed | `services` in `wrangler.jsonc` (§5) | Waiting notices are delivered |
 
 ## 8. Developing and testing the gateway
 
@@ -206,9 +223,13 @@ Worker's real entry point:
 5. A real client (Claude, MCP Inspector) connects end to end: discovery, consent, tools.
 6. The app's metadata URL is marked as verified in `/admin` → Apps, if the owner has checked
    the publisher.
+7. login's `MCP_GATEWAY_EVENTS` binding is merged and deployed; `/admin` → Users shows no
+   deletion notices waiting for the gateway.
+8. The privacy policy describes the gateway's data and how long it keeps it.
 
-## 10. Open decisions for the owner
+## 10. Decisions (owner, 2026-11-09)
 
-1. Confirm the gateway URL `https://mcp.2earl.com/mcp`, before any user connects an app (§7).
-2. Account deletion propagation (§5).
-3. Whether two scopes are enough, or tools need finer ones (§7).
+1. The gateway URL is `https://mcp.2earl.com/mcp`.
+2. Deleting an account deletes the user's data in every service (§5).
+3. Each service has its own permission set. The gateway starts with the two scopes above; finer
+   ones are added to its registry entry when tools need them (§7).

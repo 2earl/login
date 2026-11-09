@@ -19,6 +19,7 @@ export type AuditEvent =
   | 'account.deletion_started'
   | 'account.deletion_stopped'
   | 'user.deleted'
+  | 'user.deletion_delivered'
   | 'mfa.enrolled'
   | 'mfa.removed'
   | 'mfa.verified'

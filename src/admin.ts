@@ -13,7 +13,15 @@ import {
 } from './admin-pages';
 import type { Deps } from './app';
 import { audit, type AuditEvent } from './audit';
-import { clientIp, isSameOrigin, underRateLimit, type AppContext, type AppEnv } from './http';
+import {
+  clientIp,
+  isSameOrigin,
+  underRateLimit,
+  workerCtx,
+  type AppContext,
+  type AppEnv,
+} from './http';
+import { deliverDeletionNotices, pendingNotices } from './deletion-notices';
 import { isStepUpFresh } from './mfa';
 import { authorizationServer } from './oauth';
 import { notFoundPage } from './pages';
@@ -157,7 +165,13 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
   app.get('/admin/users', async (c) => {
     const session = await owner(c);
     if (session instanceof Response) return session;
-    return c.html(adminUsersPage({ users: await listUsers(c), ...flash(c) }));
+    return c.html(
+      adminUsersPage({
+        users: await listUsers(c),
+        pending: await pendingNotices(c.env.DB),
+        ...flash(c),
+      }),
+    );
   });
 
   app.post('/admin/users', async (c) => {
@@ -167,7 +181,14 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const action = form.get('action');
     const userId = form.get('user');
     const fail = async (error: string) =>
-      c.html(adminUsersPage({ users: await listUsers(c), error }), 400);
+      c.html(
+        adminUsersPage({
+          users: await listUsers(c),
+          pending: await pendingNotices(c.env.DB),
+          error,
+        }),
+        400,
+      );
 
     if (typeof userId !== 'string') return fail('No user given.');
     if (userId === session.user.id) return fail('You can’t change your own account here.');
@@ -211,6 +232,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
       case 'delete':
         if (form.get('confirm') !== 'on') return fail('Tick the box to confirm the deletion.');
         await deleteAccount(c.env.DB, oauth(c), userId, now, clientIp(c));
+        workerCtx(c).waitUntil(deliverDeletionNotices(c.env, now));
         // The target's own events were re-keyed by deleteAccount; this one names no one.
         await record(c, session, 'admin.user_deleted', {});
         return c.redirect('/admin/users?done=deleted', 303);

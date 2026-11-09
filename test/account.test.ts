@@ -16,6 +16,8 @@ import {
   setCookies,
   signIdToken,
   signIn,
+  consentBody,
+  parseConsent,
 } from './helpers';
 
 const REDIRECT_URI = 'https://client.example/callback';
@@ -49,8 +51,8 @@ async function connectApp(): Promise<Record<string, unknown>> {
   const consent = await call(app, `/authorize?${query.toString()}`, {
     cookies: { '__Host-session': session },
   });
-  const handle = /name="handle" value="([^"]+)"/.exec(await consent.text())?.[1] ?? '';
-  const body = new URLSearchParams({ handle, decision: 'approve' });
+  const handle = parseConsent(await consent.text());
+  const body = consentBody(handle, { decision: 'approve' });
   body.append('scope', 'mcp:tools.read');
   body.append('scope', 'mcp:tools.invoke');
   const approved = await call(app, '/authorize', {

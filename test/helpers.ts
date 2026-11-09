@@ -89,10 +89,7 @@ export async function call(
   }
   headers.set('CF-Connecting-IP', init.ip ?? '192.0.2.1');
   const ctx = createExecutionContext();
-  // The overrides sit in front of the real env, so bindings stay reachable through the prototype.
-  const requestEnv = init.vars
-    ? (Object.assign(Object.create(env) as object, init.vars) as Env)
-    : env;
+  const requestEnv = init.vars ? envOverride(init.vars) : env;
   const response = await app.fetch(
     new Request(`${ORIGIN}${path}`, { ...init, headers }),
     requestEnv,
@@ -148,6 +145,7 @@ export async function signIn(
 
 export async function resetDatabase(): Promise<void> {
   await env.DB.batch([
+    env.DB.prepare('DELETE FROM deletion_notices'),
     env.DB.prepare('DELETE FROM mfa_pending'),
     env.DB.prepare('DELETE FROM recovery_codes'),
     env.DB.prepare('DELETE FROM mfa_factors'),
@@ -168,4 +166,42 @@ export async function count(table: string, where = '1 = 1', ...bind: unknown[]):
     .bind(...bind)
     .first<{ n: number }>();
   return row?.n ?? 0;
+}
+
+/**
+ * The test env with some values replaced, for one call. The overrides are own properties of a new
+ * object whose prototype is the real env, so bindings stay reachable. `defineProperty`, not
+ * assignment: assigning would run the env proxy's setter and change the shared env for every
+ * later test.
+ */
+export function envOverride(values: Record<string, unknown>): Env {
+  const overridden = Object.create(env) as object;
+  for (const [key, value] of Object.entries(values)) {
+    Object.defineProperty(overridden, key, { value, enumerable: true });
+  }
+  return overridden as Env;
+}
+
+/** Hidden fields of consent pages opened in this test run, by handle. */
+const consentHiddenFields = new Map<string, Record<string, string>>();
+
+/**
+ * Reads a consent page as a browser would: returns its handle and remembers every hidden field
+ * (handle, offered scopes and their signature), so a test can submit the form like the browser.
+ */
+export function parseConsent(html: string): string {
+  const fields: Record<string, string> = {};
+  for (const [, name, value] of html.matchAll(
+    /<input type="hidden" name="([^"]+)" value="([^"]*)">/g,
+  )) {
+    if (name !== undefined && value !== undefined) fields[name] = value.replace(/&amp;/g, '&');
+  }
+  const handle = fields.handle ?? '';
+  consentHiddenFields.set(handle, fields);
+  return handle;
+}
+
+/** The consent form's hidden fields for `handle`, plus `extra`, as the browser would post them. */
+export function consentBody(handle: string, extra: Record<string, string> = {}): URLSearchParams {
+  return new URLSearchParams({ ...(consentHiddenFields.get(handle) ?? { handle }), ...extra });
 }

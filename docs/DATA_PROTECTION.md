@@ -60,6 +60,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | Audit events | 90 days, then deleted (daily cron) |
 | Account data | Until the user deletes the account or the owner deletes it |
 | Invitations (allowlist) | Until the invitation is withdrawn or the invited user deletes their account |
+| Deletion notices (`deletion_notices`: a deleted account's internal ID, per service) | Until that service confirms it deleted the user's data; then nothing about the account is kept |
 | After account deletion | Deleted immediately from D1 and KV. D1 point-in-time recovery may hold copies for up to 30 days **[verify the Time Travel window]**; not restored except for disaster recovery |
 
 ## 5. Recipients and processors
