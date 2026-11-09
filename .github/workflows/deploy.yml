@@ -55,6 +55,7 @@ jobs:
             GOOGLE_CLIENT_SECRET
             SESSION_PEPPER
             CONSENT_REMEMBER_SECRET
+            MFA_ENCRYPTION_KEY
           command: |
             d1 migrations apply DB --remote
             deploy
@@ -62,6 +63,7 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           SESSION_PEPPER: ${{ secrets.SESSION_PEPPER }}
           CONSENT_REMEMBER_SECRET: ${{ secrets.CONSENT_REMEMBER_SECRET }}
+          MFA_ENCRYPTION_KEY: ${{ secrets.MFA_ENCRYPTION_KEY }}
 
       - name: Smoke test
         run: |

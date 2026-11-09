@@ -15,7 +15,11 @@ export interface SessionUser {
 
 export interface Session {
   idHash: string;
+  /** aal2 once a second factor was verified in this session (DESIGN §4.7). */
   aal: 'aal1' | 'aal2';
+  aal2At: number | null;
+  /** Whether the user has enrolled a second factor. */
+  hasFactor: boolean;
   createdAt: number;
   expiresAt: number;
   user: SessionUser;
@@ -69,14 +73,17 @@ export async function getSession(
 
   const row = await db
     .prepare(
-      `SELECT s.aal, s.created_at, s.last_seen_at, s.expires_at,
-              u.id AS user_id, u.status, u.display_name, u.primary_email, u.created_at AS user_created_at
+      `SELECT s.aal, s.aal2_at, s.created_at, s.last_seen_at, s.expires_at,
+              u.id AS user_id, u.status, u.display_name, u.primary_email, u.created_at AS user_created_at,
+              EXISTS (SELECT 1 FROM mfa_factors f WHERE f.user_id = u.id) AS has_factor
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.id_hash = ?`,
     )
     .bind(idHash)
     .first<{
       aal: 'aal1' | 'aal2';
+      aal2_at: number | null;
+      has_factor: number;
       created_at: number;
       last_seen_at: number;
       expires_at: number;
@@ -104,6 +111,8 @@ export async function getSession(
   return {
     idHash,
     aal: row.aal,
+    aal2At: row.aal2_at,
+    hasFactor: row.has_factor === 1,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     user: {

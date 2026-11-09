@@ -102,7 +102,10 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | TOTP phishing / relay | Passkeys are the primary factor (origin-bound); TOTP is a fallback |
 | TOTP code reuse | Last accepted time step stored; same or older step rejected |
 | TOTP secret theft from D1 | Encrypted with `MFA_ENCRYPTION_KEY` (AES-GCM); key only in Worker secrets |
-| Recovery-code guessing | 10 random codes, stored hashed, single use, rate-limited with the challenge endpoint |
+| Recovery-code guessing | 10 random 50-bit codes, stored as keyed hashes, single use; per-network rate limit and a per-user lockout (5 wrong answers → 15 minutes) |
+| TOTP code guessing | Same lockout: at most 480 attempts a day per user, about a 1 in 700 chance per day |
+| Stolen session adds the first factor (user had none) | First factor needs a Google sign-in from the last 10 minutes; otherwise `/login?reauth=1` |
+| Script injection on the passkey pages | The only script is a static file from this origin (`MFA_CSP`); no inline script, `connect-src 'self'` |
 | Attacker with a stolen session adds their own factor | Factor changes need a challenge ≤ 5 minutes old |
 | Owner's Google account taken over → full admin | `/admin` always requires the second factor, whatever `MFA_REQUIRED` says (D11) |
 | Admin MFA reset abused | Owner-only, audited; the user is notified by email (when email sending exists) |
@@ -156,7 +159,7 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | R6 | No staging: first exposure of new code is production. | **Accepted**, mitigated by locked launch (D9) | — |
 | R7 | Library keeps the previous refresh token valid until the rotated one is used (retry safety). A stolen-and-raced refresh token may work once. | Accepted (library design) | Monitor via audit; consider DPoP later |
 | R8 | Old org-level secrets (`CLOUDFLARE_API_KEY`, Google pair) readable by every org repo. | **Resolved** 2026-11-08 (deleted) | — |
-| R9 | Account deletion is confirmed through Google, but Google cannot force a password re-entry. Someone at an unlocked computer that is signed in to both 2earl and Google can delete the account. A stolen 2earl session cookie alone cannot. | **Open** until phase 5 | Phase 5: require the second factor for deletion when one is enrolled |
+| R9 | Account deletion is confirmed through Google, but Google cannot force a password re-entry. Someone at an unlocked computer that is signed in to both 2earl and Google can delete the account. A stolen 2earl session cookie alone cannot. | **Mitigated** 2026-11-09 for users with a second factor: deletion also needs it, used in the last 5 minutes. **Accepted** for users without one | Users who want this protection add a passkey |
 
 ## 6. Security review triggers
 

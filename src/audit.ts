@@ -18,7 +18,14 @@ export type AuditEvent =
   | 'account.exported'
   | 'account.deletion_started'
   | 'account.deletion_stopped'
-  | 'user.deleted';
+  | 'user.deleted'
+  | 'mfa.enrolled'
+  | 'mfa.removed'
+  | 'mfa.verified'
+  | 'mfa.failed'
+  | 'mfa.locked'
+  | 'mfa.recovery_codes_created'
+  | 'mfa.recovery_code_used';
 
 export async function audit(
   db: D1Database,

@@ -28,6 +28,22 @@ export const CONSENT_CSP = [
   "base-uri 'none'",
 ].join('; ');
 
+/**
+ * CSP for the second-factor pages, the only ones with a script: /passkey.js from this origin
+ * (WebAuthn needs the browser API), and fetch to this origin only.
+ */
+export const MFA_CSP = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "connect-src 'self'",
+  "style-src 'self'",
+  "img-src 'self'",
+  "font-src 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+].join('; ');
+
 export const BASE_HEADERS: Readonly<Record<string, string>> = {
   'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',
   // same-origin, not no-referrer: under no-referrer browsers send `Origin: null` on same-site

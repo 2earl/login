@@ -26,6 +26,7 @@ async function update(path, next) {
 
 const font = await fingerprint('public/fonts/readex-pro-latin.woff2');
 const favicon = await fingerprint('public/favicon.svg');
+const passkeyJs = await fingerprint('public/passkey.js');
 
 const css = await readFile('public/app.css', 'utf8');
 const versionedCss = css.replace(
@@ -43,6 +44,7 @@ export const ASSET_URLS = {
   appCss: '/app.css?v=${appCss}',
   font: '/fonts/readex-pro-latin.woff2?v=${font}',
   favicon: '/favicon.svg?v=${favicon}',
+  passkeyJs: '/passkey.js?v=${passkeyJs}',
 } as const;
 `,
 );

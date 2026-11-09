@@ -5,14 +5,15 @@ import {
   type AuthRequest,
   type OAuthHelpers,
 } from '@cloudflare/workers-oauth-provider';
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
 import type { JWTVerifyGetKey } from 'jose';
 import { deleteAccount, exportAccount } from './account';
 import { audit } from './audit';
 import { pkceChallenge, sha256Hex } from './crypto';
 import { GoogleSignInError, buildGoogleAuthUrl, exchangeCode, verifyGoogleIdToken } from './google';
 import { LOGIN_TX_TTL_SECONDS, consumeLoginTx, createLoginTx } from './login-tx';
-import { ipPrefix } from './net';
+import { isStepUpFresh, listFactors, mfaGate, type MfaGate } from './mfa';
+import { registerMfaRoutes } from './mfa-routes';
 import { SCOPES, authorizationServer, scopeLabel, type GrantProps } from './oauth';
 import {
   MESSAGES,
@@ -26,9 +27,23 @@ import {
   type ConnectedApp,
   type Message,
 } from './pages';
+import {
+  CONSENT_APPROVALS_COOKIE,
+  LOGIN_TX_COOKIE,
+  SESSION_COOKIE,
+  clearCookie,
+  clientIp,
+  isSameOrigin,
+  readCookie,
+  setCookie,
+  underRateLimit,
+  workerCtx,
+  type AppEnv,
+  type AppContext,
+} from './http';
 import { safeReturnTo } from './return-to';
 import { CONSENT_CSP, applySecurityHeaders } from './security-headers';
-import { createSession, deleteSession, getSession, type Session } from './sessions';
+import { createSession, deleteSession, getSession } from './sessions';
 import { allowlistMatch, isUserActive, pinAllowlistToSubject, upsertGoogleUser } from './users';
 
 /** External dependencies, injectable so tests can stand in for Google. */
@@ -39,59 +54,21 @@ export interface Deps {
   now: () => number;
 }
 
-type AppEnv = { Bindings: Env; Variables: { session: Session | null } };
-type AppContext = Context<AppEnv>;
-
-const SESSION_COOKIE = '__Host-session';
-const LOGIN_TX_COOKIE = '__Host-login_tx';
-/** The OAuth library's remembered-consent cookie (default `cookiePrefix`). */
-const CONSENT_APPROVALS_COOKIE = '__Host-oauth-approvals';
-
-function setCookie(c: AppContext, name: string, value: string, maxAge: number): void {
-  c.header(
-    'Set-Cookie',
-    `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${String(maxAge)}`,
-    { append: true },
-  );
-}
-
-function clearCookie(c: AppContext, name: string): void {
-  setCookie(c, name, '', 0);
-}
-
-function readCookie(header: string | undefined, name: string): string | undefined {
-  if (!header) return undefined;
-  for (const part of header.split(';')) {
-    const index = part.indexOf('=');
-    if (index > 0 && part.slice(0, index).trim() === name) return part.slice(index + 1).trim();
+/** Paths a session may use before its second-factor gate is passed (DESIGN §4.7). */
+function gateAllows(gate: Exclude<MfaGate, null>, path: string): boolean {
+  const always = ['/mfa', '/logout', '/login', '/callback/google', '/healthz', '/account/deleted'];
+  if (always.includes(path) || path.startsWith('/mfa/')) return true;
+  if (path.startsWith('/oauth/') || path.startsWith('/.well-known/')) return true;
+  if (gate === 'enrol') {
+    // Enrolling, and the data-protection rights, stay available without a factor.
+    return (
+      path === '/account/security' ||
+      path.startsWith('/account/security/') ||
+      path === '/account/export' ||
+      path === '/account/delete'
+    );
   }
-  return undefined;
-}
-
-/** Hono types its context more narrowly than the Workers runtime provides it. */
-function workerCtx(c: AppContext): ExecutionContext {
-  return c.executionCtx as unknown as ExecutionContext;
-}
-
-function clientIp(c: AppContext): string | null {
-  return ipPrefix(c.req.header('CF-Connecting-IP'));
-}
-
-/**
- * Requests that change state must come from our own pages (DESIGN §7). The Origin header must
- * match, and if the browser reports Sec-Fetch-Site it must say same-origin.
- */
-function isSameOrigin(c: AppContext): boolean {
-  const fetchSite = c.req.header('Sec-Fetch-Site');
-  if (fetchSite !== undefined && fetchSite !== 'same-origin') return false;
-  return c.req.header('Origin') === new URL(c.env.ISSUER).origin;
-}
-
-async function underRateLimit(c: AppContext, route: string): Promise<boolean> {
-  const { success } = await c.env.AUTH_RATE_LIMITER.limit({
-    key: `${route}:${clientIp(c) ?? 'unknown'}`,
-  });
-  return success;
+  return false;
 }
 
 /** How a resource reads on the consent page: what it is, then the host it lives on. */
@@ -177,6 +154,20 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     await next();
   });
 
+  // Second factor: a session that must pass a challenge, or enrol first, can do nothing else.
+  app.use('*', async (c, next) => {
+    const session = c.get('session');
+    const gate = session ? mfaGate(c.env, session) : null;
+    if (!gate || gateAllows(gate, c.req.path)) {
+      await next();
+      return;
+    }
+    if (c.req.method !== 'GET') return c.json({ error: 'second_factor_required' }, 403);
+    const url = new URL(c.req.url);
+    const target = gate === 'challenge' ? '/mfa' : '/account/security';
+    return c.redirect(`${target}?return_to=${encodeURIComponent(url.pathname + url.search)}`, 303);
+  });
+
   app.get('/', (c) => (c.get('session') ? c.redirect('/account', 303) : c.html(signInPage())));
 
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
@@ -187,7 +178,8 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     }
     const now = deps.now();
     const returnTo = safeReturnTo(c.req.query('return_to'));
-    if (c.get('session')) return c.redirect(returnTo, 303);
+    // reauth=1: sign in with Google again even though signed in (before adding a first factor).
+    if (c.get('session') && c.req.query('reauth') !== '1') return c.redirect(returnTo, 303);
 
     const tx = await createLoginTx(c.env.DB, c.env.SESSION_PEPPER, now, returnTo);
     setCookie(c, LOGIN_TX_COOKIE, tx.cookieValue, LOGIN_TX_TTL_SECONDS);
@@ -350,6 +342,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         name: session.user.displayName,
         memberSince: session.user.createdAt,
         apps: await connectedApps(oauth, session.user.id),
+        factors: await listFactors(c.env.DB, session.user.id),
         ...(notice ? { notice } : {}),
       }),
     );
@@ -425,6 +418,10 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     if (!session) return c.redirect('/login?return_to=%2Faccount%2Fdelete', 303);
     const form = await c.req.raw.formData();
     if (form.get('confirm') !== 'on') return c.redirect('/account/delete', 303);
+    // With a second factor, deletion also needs it, used in the last 5 minutes (THREAT_MODEL R9).
+    if (session.hasFactor && !isStepUpFresh(session, deps.now())) {
+      return c.redirect('/mfa?step_up=1&return_to=%2Faccount%2Fdelete', 303);
+    }
 
     // Deletion happens only after Google confirms the linked account in this browser.
     const now = deps.now();
@@ -453,6 +450,8 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.get('/account/deleted', (c) =>
     c.get('session') ? c.redirect('/account', 303) : c.html(accountDeletedPage()),
   );
+
+  registerMfaRoutes(app, deps);
 
   // ---- OAuth authorization server (DESIGN §4.1, §4.3) ------------------------------------
 

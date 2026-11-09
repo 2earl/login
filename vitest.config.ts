@@ -17,6 +17,7 @@ export default defineConfig(async () => {
             GOOGLE_CLIENT_SECRET: 'test-google-client-secret',
             SESSION_PEPPER: 'test-session-pepper',
             CONSENT_REMEMBER_SECRET: 'test-consent-remember-secret-at-least-32-chars',
+            MFA_ENCRYPTION_KEY: 'test-mfa-encryption-key',
           },
         },
       }),

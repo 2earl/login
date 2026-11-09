@@ -11,8 +11,23 @@ export default tseslint.config(
     },
   },
   {
-    files: ['eslint.config.js', 'scripts/**/*.mjs'],
+    files: ['eslint.config.js', 'scripts/**/*.mjs', 'public/**/*.js'],
     ...tseslint.configs.disableTypeChecked,
+  },
+  {
+    // Browser script served as a static asset (second-factor pages).
+    files: ['public/**/*.js'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: {
+        window: 'readonly',
+        document: 'readonly',
+        navigator: 'readonly',
+        fetch: 'readonly',
+        atob: 'readonly',
+        btoa: 'readonly',
+      },
+    },
   },
   {
     files: ['scripts/**/*.mjs'],
