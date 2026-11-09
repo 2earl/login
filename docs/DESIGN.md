@@ -289,6 +289,36 @@ whether the user passed 2-step verification, so we cannot rely on Google for thi
 
 ---
 
+### 4.8 Services: per-service permissions and account deletion
+
+Decided by the owner on 2026-11-09:
+- each service has its own permission set;
+- deleting an account must delete the user's data in every 2earl service.
+
+- **Registry (`src/services.ts`):** each service that accepts tokens declares:
+  - `id`, which is also its scope prefix;
+  - a display name;
+  - its canonical resource URL;
+  - its scopes with consent wording;
+  - the Service Binding that receives deletion notices.
+
+  The authorization server registers every service's resource. `validateToken` accepts only those.
+- **Per-service permissions:** `/authorize` resolves the service from `resource` and offers only
+  that service's scopes. The consent page carries the offered scopes, HMAC-signed and bound to the
+  single-use consent handle. `POST /authorize` grants only scopes that were offered **and** ticked.
+  This is needed because the library accepts any supported scope from the form.
+- **Deletion notices (`deletion_notices`, migration 0005):** `deleteAccount` writes one row per
+  service in the same D1 batch as the deletion (an outbox). `deliverDeletionNotices` calls each
+  service's `AccountEvents.deleteUser(userId)` over its binding and deletes the row when the call
+  returns. It runs:
+  - right after a deletion (`waitUntil`);
+  - every 15 minutes (cron).
+
+  Failures are retried, counted and shown in `/admin`. A service without a binding yet keeps its
+  notices until it has one. `user.deletion_delivered` is audited, naming the service only.
+- **Adding a service:** a registry entry, then (once deployed) its binding in `wrangler.jsonc`
+  (docs/GATEWAY_INTEGRATION.md §5).
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints

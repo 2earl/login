@@ -59,6 +59,8 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | Refresh token theft | Rotation on use; 7-day idle and 90-day absolute cap; revocation endpoint; grant revoke from `/account` | Protocol test |
 | Long-lived access token after client deletion | Library revokes asynchronously; **access TTL 15 min** bounds the gap | Config review |
 | Scope escalation | Consent lists each scope; user may reduce; `admin` never grantable to OAuth clients; new scope re-prompts | Unit test |
+| Scope escalation through an altered consent form (the library grants any supported scope the form submits) | The page carries its offered scopes, HMAC-signed and bound to the consent handle; only offered and ticked scopes of the requested service are granted | `test/services.test.ts` |
+| A service keeps a deleted user's data | Deletion notices to every service, written with the deletion, retried until confirmed, visible in `/admin` (DESIGN §4.8) | `test/services.test.ts` |
 | DCR abuse (mass client registration) | DCR disabled | Metadata test |
 
 ### B2/B4 — Client ID Metadata Documents

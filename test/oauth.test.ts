@@ -18,6 +18,8 @@ import {
   resetDatabase,
   setCookies,
   signIn,
+  consentBody,
+  parseConsent,
 } from './helpers';
 
 const REDIRECT_URI = 'https://client.example/callback';
@@ -55,7 +57,7 @@ async function authorizeUrl(overrides: Record<string, string | null> = {}) {
 async function openConsent(path: string, cookies: Record<string, string> = {}) {
   const response = await call(app, path, { cookies: { '__Host-session': session, ...cookies } });
   const html = await response.text();
-  const handle = /name="handle" value="([^"]+)"/.exec(html)?.[1] ?? '';
+  const handle = parseConsent(html);
   return { response, html, handle, cookies: { ...cookies, ...setCookies(response) } };
 }
 
@@ -65,7 +67,7 @@ async function submitConsent(
   fields: Record<string, string | string[]> = {},
   headers: Record<string, string> = SAME_ORIGIN,
 ) {
-  const body = new URLSearchParams({ handle });
+  const body = consentBody(handle);
   const all = { decision: 'approve', scope: ['mcp:tools.read', 'mcp:tools.invoke'], ...fields };
   for (const [key, value] of Object.entries(all)) {
     for (const v of Array.isArray(value) ? value : [value]) body.append(key, v);

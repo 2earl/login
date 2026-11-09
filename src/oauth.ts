@@ -4,6 +4,7 @@ import {
   OAuthError,
 } from '@cloudflare/workers-oauth-provider';
 import { audit } from './audit';
+import { ALL_SCOPES, SERVICES, scopeLabel } from './services';
 import { isUserActive } from './users';
 
 /**
@@ -13,11 +14,9 @@ import { isUserActive } from './users';
  * Worker owns /authorize, sign-in and consent.
  */
 
-/** Scopes this server can grant, with how they read on the consent page. `admin` is never one. */
-export const SCOPES: Readonly<Record<string, string>> = {
-  'mcp:tools.read': 'See which tools are available to you',
-  'mcp:tools.invoke': 'Use those tools on your behalf',
-};
+/** Every scope this server can grant, from the service registry (src/services.ts). */
+export const SCOPES = ALL_SCOPES;
+export { scopeLabel };
 
 /** DESIGN §5.2 */
 export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
@@ -46,12 +45,13 @@ const servers = new Map<string, OAuthAuthorizationServer<Env>>();
 
 /** One server per issuer/resource configuration; built once per isolate. */
 export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
-  const key = `${env.ISSUER}|${env.MCP_RESOURCE}`;
+  const resources = SERVICES.map((service) => service.resource(env));
+  const key = `${env.ISSUER}|${resources.join(' ')}`;
   let server = servers.get(key);
   if (!server) {
     server = new OAuthAuthorizationServer<Env>({
       issuer: env.ISSUER,
-      resources: [env.MCP_RESOURCE],
+      resources,
       scopesSupported: Object.keys(SCOPES),
       // MCP 2026-07-28 client registration. Needs the global_fetch_strictly_public flag
       // (wrangler.jsonc), which keeps metadata fetches off private and same-zone addresses.
@@ -90,9 +90,4 @@ export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
     servers.set(key, server);
   }
   return server;
-}
-
-/** Plain-language labels for a list of scopes; unknown scopes are shown as they are. */
-export function scopeLabel(scope: string): string {
-  return SCOPES[scope] ?? scope;
 }

@@ -1,3 +1,4 @@
+import type { PendingNotices } from './deletion-notices';
 import { escapeHtml, formatDate, page } from './pages';
 
 /** Server-rendered pages for /admin (DESIGN §4.6). Owner-only; every value is escaped. */
@@ -114,6 +115,7 @@ function userRow(user: AdminUser): string {
 
 export function adminUsersPage(params: {
   users: AdminUser[];
+  pending: PendingNotices[];
   notice?: string | undefined;
   error?: string | undefined;
 }): string {
@@ -121,8 +123,34 @@ export function adminUsersPage(params: {
     'users',
     'Users',
     `<p class="section-text">${String(params.users.length)} ${params.users.length === 1 ? 'account' : 'accounts'}. Suspending signs the user out everywhere and disconnects their apps; reactivating lets them sign in again.</p>` +
-      `<ul class="admin-list">${params.users.map(userRow).join('')}</ul>`,
+      `<ul class="admin-list">${params.users.map(userRow).join('')}</ul>` +
+      pendingSection(params.pending),
     params,
+  );
+}
+
+/** Deletion notices not yet confirmed by a service (DESIGN §4.8). Shown only when there are any. */
+function pendingSection(pending: PendingNotices[]): string {
+  if (pending.length === 0) return '';
+  const rows = pending
+    .map((p) => {
+      const state =
+        p.attempts === 0
+          ? 'not delivered yet: the service has no binding in login, or delivery is about to run'
+          : `${String(p.attempts)} failed ${p.attempts === 1 ? 'attempt' : 'attempts'}${p.lastError ? `, last error ${escapeHtml(p.lastError)}` : ''}`;
+      return (
+        '<li class="admin-row"><div class="app-main">' +
+        `<p class="app-name">${escapeHtml(p.name)}: ${String(p.count)} waiting</p>` +
+        `<p class="app-meta">Oldest from ${formatDate(p.oldest)} · ${state}</p>` +
+        '</div></li>'
+      );
+    })
+    .join('');
+  return (
+    '<section class="section" aria-labelledby="notices-heading">' +
+    '<h2 id="notices-heading">Deletion notices waiting</h2>' +
+    '<p class="section-text">Deleted accounts whose data a service hasn’t confirmed deleting yet. Delivery retries every 15 minutes.</p>' +
+    `<ul class="admin-list">${rows}</ul></section>`
   );
 }
 

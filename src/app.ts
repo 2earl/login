@@ -8,14 +8,16 @@ import {
 import { Hono } from 'hono';
 import type { JWTVerifyGetKey } from 'jose';
 import { deleteAccount, exportAccount } from './account';
+import { deliverDeletionNotices } from './deletion-notices';
 import { audit } from './audit';
-import { pkceChallenge, sha256Hex } from './crypto';
+import { hmacHex, pkceChallenge, sha256Hex, timingSafeEqual } from './crypto';
 import { GoogleSignInError, buildGoogleAuthUrl, exchangeCode, verifyGoogleIdToken } from './google';
 import { LOGIN_TX_TTL_SECONDS, consumeLoginTx, createLoginTx } from './login-tx';
 import { isStepUpFresh, listFactors, mfaGate, type MfaGate } from './mfa';
 import { registerMfaRoutes } from './mfa-routes';
 import { registerAdminRoutes } from './admin';
-import { SCOPES, authorizationServer, scopeLabel, type GrantProps } from './oauth';
+import { authorizationServer, type GrantProps } from './oauth';
+import { ALL_SCOPES, scopeLabel, scopesFor, serviceForResource, type Service } from './services';
 import {
   MESSAGES,
   accountDeletedPage,
@@ -72,13 +74,18 @@ function gateAllows(gate: Exclude<MfaGate, null>, path: string): boolean {
   return false;
 }
 
-/** How a resource reads on the consent page: what it is, then the host it lives on. */
-function resourceLabel(resource: string): string {
-  try {
-    return `2earl MCP gateway (${new URL(resource).host})`;
-  } catch {
-    return resource;
-  }
+/**
+ * The library grants whatever supported scopes the consent form submits. The page therefore
+ * carries the scopes it offered, keyed to its single-use handle, and only those can be approved:
+ * never more than the app asked for, never another service's.
+ */
+function offeredScopesMac(env: Env, handle: string, offered: readonly string[]): Promise<string> {
+  return hmacHex(env.SESSION_PEPPER, `consent-offered:${handle}:${offered.join(' ')}`);
+}
+
+/** How a service reads on the consent page: what it is, then the host it lives on. */
+function resourceLabel(service: Service, resource: string): string {
+  return `${service.name} (${new URL(resource).host})`;
 }
 
 /**
@@ -279,6 +286,8 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       const oauth = authorizationServer(c.env).getOAuthApi(c.env);
       try {
         await deleteAccount(c.env.DB, oauth, session.user.id, now, ip);
+        // Tell every service now; the cron retries whatever doesn't go through.
+        workerCtx(c).waitUntil(deliverDeletionNotices(c.env, now));
       } catch (error) {
         console.error('account deletion failed', error instanceof Error ? error.name : 'unknown');
         return stop('deletion_error', MESSAGES.deletionFailed, 500);
@@ -480,6 +489,14 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         302,
       );
     }
+    // Each service has its own permissions (src/services.ts): only that service's scopes count.
+    const service = serviceForResource(c.env, request.resource);
+    if (!service || request.resource === undefined) {
+      return c.redirect(
+        authorizationErrorRedirect(request, 'invalid_target', 'Unknown resource'),
+        302,
+      );
+    }
 
     const session = c.get('session');
     if (!session) {
@@ -493,7 +510,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         request,
         userId: session.user.id,
         metadata: {},
-        scope: request.scope.filter((s) => s in SCOPES),
+        scope: scopesFor(service, request.scope),
         props: { uid: session.user.id, authTime: deps.now() } satisfies GrantProps,
       });
       await audit(c.env.DB, deps.now(), 'consent.reused', {
@@ -515,18 +532,21 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       .bind(request.clientId)
       .first<{ t: number }>();
 
+    const offered = scopesFor(service, details.scope);
     const html = consentPage({
       handle: consent.handle,
+      offeredMac: await offeredScopesMac(c.env, consent.handle, offered),
       clientName: details.clientName,
       clientDomain: details.clientDomain ?? null,
       trusted: Boolean(trusted),
       redirectHost: details.redirectHost,
       redirectIsLoopback: details.redirectIsLoopback,
-      resource: resourceLabel(request.resource ?? c.env.MCP_RESOURCE),
-      scopes: details.scope
-        .filter((s) => s in SCOPES)
-        .map((scope) => ({ scope, label: scopeLabel(scope) })),
-      unavailable: details.scope.filter((s) => !(s in SCOPES)),
+      resource: resourceLabel(service, request.resource),
+      scopes: scopesFor(service, details.scope).map((scope) => ({
+        scope,
+        label: scopeLabel(scope),
+      })),
+      unavailable: details.scope.filter((s) => !Object.hasOwn(service.scopes, s)),
     });
 
     // The library's headers bind the consent form to this browser and forbid framing.
@@ -548,9 +568,21 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     if (typeof handle !== 'string') {
       return c.html(messagePage(MESSAGES.consentExpired, 'Approval stopped'), 400);
     }
+    const offeredField = form.get('offered');
+    const offered = typeof offeredField === 'string' ? offeredField.split(' ').filter(Boolean) : [];
+    const mac = form.get('offered_mac');
+    if (
+      typeof mac !== 'string' ||
+      !timingSafeEqual(mac, await offeredScopesMac(c.env, handle, offered))
+    ) {
+      return c.html(messagePage(MESSAGES.consentExpired, 'Approval stopped'), 400);
+    }
     const scope = form
       .getAll('scope')
-      .filter((s): s is string => typeof s === 'string' && s in SCOPES);
+      .filter(
+        (s): s is string =>
+          typeof s === 'string' && Object.hasOwn(ALL_SCOPES, s) && offered.includes(s),
+      );
 
     try {
       if (form.get('decision') !== 'approve' || scope.length === 0) {
@@ -571,18 +603,26 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         scope,
         ...(remember ? { remember } : {}),
       });
+      // The resource comes from server-side storage; a scope of another service never passes.
+      const approvedService = serviceForResource(c.env, approved.request.resource);
+      const approvedScope = approvedService
+        ? scopesFor(approvedService, approved.request.scope)
+        : [];
+      if (approvedScope.length === 0) {
+        return c.html(messagePage(MESSAGES.consentExpired, 'Approval stopped'), 400);
+      }
       const { redirectTo } = await oauth.completeAuthorization({
         request: approved.request, // from server-side storage, not from the form
         userId: session.user.id,
         metadata: {},
-        scope: approved.request.scope,
+        scope: approvedScope,
         props: { uid: session.user.id, authTime: deps.now() } satisfies GrantProps,
       });
       await audit(c.env.DB, deps.now(), 'consent.approved', {
         actorUserId: session.user.id,
         clientId: approved.request.clientId,
         ipPrefix: clientIp(c),
-        detail: { scope: approved.request.scope.join(' ') },
+        detail: { scope: approvedScope.join(' ') },
       });
       approved.headers.set('Location', redirectTo);
       return new Response(null, { status: 302, headers: approved.headers });

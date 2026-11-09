@@ -1,4 +1,5 @@
 import type { OAuthHelpers } from '@cloudflare/workers-oauth-provider';
+import { SERVICES } from './services';
 
 /**
  * The data-subject rights on /account (docs/DATA_PROTECTION.md §6): a copy of everything the
@@ -33,7 +34,7 @@ export async function revokeAllGrants(oauth: OAuthHelpers, userId: string): Prom
 /**
  * Deletes the account (DESIGN §6.3): grants first, so no app keeps access if a later step fails;
  * then, in one D1 transaction, the account rows and the invitation, with the user's audit events
- * re-keyed to a random correlation ID; then a second sweep for any grant created in between.
+ * re-keyed to a random correlation ID, and a deletion notice for every service; then a second sweep for any grant created in between.
  */
 export async function deleteAccount(
   db: D1Database,
@@ -70,6 +71,15 @@ export async function deleteAccount(
          VALUES (?, ?, 'user.deleted', ?, NULL, ?, ?)`,
       )
       .bind(crypto.randomUUID(), now, correlationId, ipPrefix, JSON.stringify({ grants: revoked })),
+    // Every service is told to delete its data too (deletion-notices.ts delivers these).
+    ...SERVICES.map((service) =>
+      db
+        .prepare(
+          `INSERT INTO deletion_notices (service, user_id, created_at) VALUES (?, ?, ?)
+           ON CONFLICT (service, user_id) DO NOTHING`,
+        )
+        .bind(service.id, userId, now),
+    ),
   ]);
 
   await revokeAllGrants(oauth, userId);

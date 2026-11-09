@@ -11,6 +11,8 @@ import {
   resetDatabase,
   setCookies,
   signIn,
+  consentBody,
+  parseConsent,
 } from './helpers';
 
 /**
@@ -43,8 +45,8 @@ async function accessToken(scopes: string[]): Promise<string> {
   const consent = await call(app, `/authorize?${query.toString()}`, {
     cookies: { '__Host-session': session },
   });
-  const handle = /name="handle" value="([^"]+)"/.exec(await consent.text())?.[1] ?? '';
-  const body = new URLSearchParams({ handle, decision: 'approve' });
+  const handle = parseConsent(await consent.text());
+  const body = consentBody(handle, { decision: 'approve' });
   for (const scope of scopes) body.append('scope', scope);
   const approved = await call(app, '/authorize', {
     method: 'POST',
