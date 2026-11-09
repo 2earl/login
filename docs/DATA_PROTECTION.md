@@ -76,7 +76,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 
 | Right | Implementation |
 |---|---|
-| Access (Art. 15) | `/account` shows the data; `/account/export` downloads JSON: account, sign-in methods, sessions (shortened IP, user-agent hash), connected apps, invitation, the user's security log, and notes on what is not included (hashes of cookies and tokens) |
+| Access (Art. 15) | `/account` shows the data; `/account/export` downloads JSON: account, sign-in methods, sessions (shortened IP, user-agent hash), connected apps, invitation, the user's security log, what each other 2earl service holds (asked of that service, e.g. the MCP gateway's security log), and notes on what is not included (hashes of cookies and tokens) |
 | Rectification (Art. 16) | Name and email come from Google and update on next sign-in |
 | Erasure (Art. 17) | `/account/delete`, confirmed through Google: revokes grants, deletes the account, sign-in link, sessions and invitation; the security log is re-keyed to a random ID and expires after 90 days (DESIGN §6.3) |
 | Restriction / objection | Owner can suspend an account on request |

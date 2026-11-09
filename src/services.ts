@@ -18,7 +18,10 @@ export interface Service {
   resource(env: Env): string;
   /** Scope → what the user is agreeing to, in their words. */
   scopes: Readonly<Record<string, string>>;
-  /** Service Binding that receives `deleteUser(userId)` when an account is deleted. */
+  /**
+   * Service Binding to the service's `AccountEvents` entrypoint: `deleteUser(userId)` when an
+   * account is deleted, `exportUser(userId)` for "Download your data".
+   */
   deletionBinding: string;
 }
 

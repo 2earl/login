@@ -223,6 +223,7 @@ export async function exportAccount(
       'browserFingerprint is a shortened SHA-256 hash of the browser’s user-agent string, not the string itself.',
       'Session cookies, access tokens, refresh tokens and authorization codes are stored only as hashes and are not included.',
       'Second-factor secrets are not included: passkey public keys, the encrypted authenticator-app secret and hashed recovery codes.',
+      'services lists what each other 2earl service (such as the MCP gateway) holds about you, as that service reports it.',
       'Security log entries are kept for 90 days. Sign-in attempts made before you were signed in are not linked to your account and are not included.',
     ],
   };

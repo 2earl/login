@@ -30,8 +30,8 @@ let app: ReturnType<typeof makeApp>;
 let session: string;
 let userId: string;
 
-/** The test env with a service's deletion binding in front of the real bindings. */
-function envWith(bindings: Record<string, AccountEventsBinding>): Env {
+/** The test env with a service's binding replaced (undefined: not deployed yet). */
+function envWith(bindings: Record<string, AccountEventsBinding | undefined>): Env {
   return envOverride(bindings);
 }
 
@@ -44,11 +44,16 @@ function fakeService(fail = false) {
       deleted.push(id);
       return Promise.resolve();
     },
+    exportUser: () => Promise.resolve(null),
   };
   return { deleted, binding };
 }
 
-async function deleteOwnAccount(): Promise<void> {
+/**
+ * Deletes the signed-in account. By default as if the gateway were not deployed yet, so the
+ * notices stay for the test to deliver; pass the real binding to deliver at once.
+ */
+async function deleteOwnAccount(gateway?: unknown): Promise<void> {
   const ip = freshIp();
   const start = await call(app, '/account/delete', {
     method: 'POST',
@@ -68,6 +73,7 @@ async function deleteOwnAccount(): Promise<void> {
         '__Host-session': session,
         '__Host-login_tx': setCookies(start)['__Host-login_tx'] ?? '',
       },
+      vars: { MCP_GATEWAY_EVENTS: gateway },
     },
   );
   expect(done.headers.get('Location')).toBe('/account/deleted');
@@ -198,7 +204,7 @@ describe('account-deletion notices', () => {
 
   it('keeps notices for a service that has no binding yet', async () => {
     await deleteOwnAccount();
-    const result = await deliverDeletionNotices(env, NOW);
+    const result = await deliverDeletionNotices(envWith({ MCP_GATEWAY_EVENTS: undefined }), NOW);
     expect(result).toEqual({ delivered: 0, failed: 0, waiting: SERVICES.length });
     expect(await count('deletion_notices')).toBe(SERVICES.length);
   });
@@ -235,6 +241,12 @@ describe('account-deletion notices', () => {
     expect(await count('deletion_notices')).toBe(0);
   });
 
+  it('delivers over the real binding right after the deletion', async () => {
+    await deleteOwnAccount(env.MCP_GATEWAY_EVENTS);
+    expect(await count('deletion_notices')).toBe(0);
+    expect(await count('audit_events', "event = 'user.deletion_delivered'")).toBe(1);
+  });
+
   it('runs on the 15-minute cron trigger', async () => {
     await env.DB.prepare(
       "INSERT INTO deletion_notices (service, user_id, created_at) VALUES ('mcp', 'gone-user', 0)",
@@ -244,10 +256,8 @@ describe('account-deletion notices', () => {
       scheduledTime: Date.now(),
       noRetry: () => undefined,
     });
-    // No binding in the test Worker: the notice waits, untouched, for the service to exist.
-    const row = await env.DB.prepare('SELECT attempts FROM deletion_notices').first<{
-      attempts: number;
-    }>();
-    expect(row?.attempts).toBe(0);
+    // Delivered over the Worker's own binding (to the stand-in gateway in vitest.config.ts).
+    expect(await count('deletion_notices')).toBe(0);
+    expect(await count('audit_events', "event = 'user.deletion_delivered'")).toBe(1);
   });
 });

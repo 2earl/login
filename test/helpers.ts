@@ -75,7 +75,7 @@ export async function call(
     cookies?: Record<string, string>;
     ip?: string;
     /** Worker variables to override for this request, e.g. { MFA_REQUIRED: 'true' }. */
-    vars?: Partial<Record<keyof Env, string>>;
+    vars?: Partial<Record<keyof Env, unknown>>;
   } = {},
 ): Promise<Response> {
   const headers = new Headers(init.headers);

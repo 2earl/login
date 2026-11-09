@@ -51,6 +51,12 @@
     ],
   },
 
+  // Each 2earl service's AccountEvents entrypoint (src/services.ts): account deletion and export.
+  // A binding can only be added once its Worker exists.
+  "services": [
+    { "binding": "MCP_GATEWAY_EVENTS", "service": "mcp", "entrypoint": "AccountEvents" },
+  ],
+
   // Per-IP limit on the sign-in endpoints, on top of the zone rate-limit rule (infra/firewall.tf).
   "ratelimits": [
     {
