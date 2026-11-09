@@ -362,12 +362,13 @@ There is **no registration endpoint** (`clientRegistrationEndpoint` unset).
 |---|---|---|
 | `https://mcp.2earl.com/mcp` | MCP gateway | `mcp:tools.read` |
 
-### 5.4 Scopes (draft, finalised in the gateway session)
+### 5.4 Scopes (the current set is `src/services.ts`)
 
 | Scope | Meaning | Grantable to |
 |---|---|---|
 | `mcp:tools.read` | List tools and resources on the gateway | any client |
-| `mcp:tools.invoke` | Call tools | any client |
+| `mcp:<service>.<permission>` | Use one service behind the gateway, e.g. `mcp:promptshare.read`, `.write`, `.state` | any client |
+| `promptshare:account` | Sign in to Prompt share's website (its own resource, `https://promptshare.cc`) | Prompt share's website |
 | `admin` | Administer the identity service | owner's first-party sessions only; never to OAuth clients |
 
 Scopes are opaque strings to `login`; their enforcement lives in the resource server.

@@ -32,6 +32,8 @@
     "LOGIN_LOCKED": "true",
     // The MCP gateway's canonical resource URL: the only audience tokens are issued for.
     "MCP_RESOURCE": "https://mcp.2earl.com/mcp",
+    // Prompt share's website (phase P2): the audience of its sign-in tokens.
+    "PROMPTSHARE_RESOURCE": "https://promptshare.cc",
     // Second factor (DESIGN §4.7). "true" makes every user enrol before using the account.
     // Users who enrolled are challenged either way, and /admin always requires it.
     "MFA_REQUIRED": "false",
@@ -55,6 +57,7 @@
   // A binding can only be added once its Worker exists.
   "services": [
     { "binding": "MCP_GATEWAY_EVENTS", "service": "mcp", "entrypoint": "AccountEvents" },
+    { "binding": "PROMPTSHARE_EVENTS", "service": "promptshare", "entrypoint": "AccountEvents" },
   ],
 
   // Per-IP limit on the sign-in endpoints, on top of the zone rate-limit rule (infra/firewall.tf).

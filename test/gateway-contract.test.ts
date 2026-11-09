@@ -36,7 +36,7 @@ async function accessToken(scopes: string[]): Promise<string> {
     response_type: 'code',
     client_id: clientId,
     redirect_uri: REDIRECT_URI,
-    scope: 'mcp:tools.read mcp:tools.invoke',
+    scope: 'mcp:tools.read mcp:promptshare.read',
     state: 's',
     code_challenge: await pkceChallenge(verifier),
     code_challenge_method: 'S256',
@@ -90,7 +90,7 @@ beforeEach(async () => {
 
 describe('validateToken over the Worker entry point (Service Binding)', () => {
   it('returns the user, client, scopes, audience and expiry for a valid token', async () => {
-    const token = await accessToken(['mcp:tools.read', 'mcp:tools.invoke']);
+    const token = await accessToken(['mcp:tools.read', 'mcp:promptshare.read']);
     const before = Math.floor(Date.now() / 1000);
     const result = await exports.default.validateToken(env.MCP_RESOURCE, token);
 
@@ -98,7 +98,7 @@ describe('validateToken over the Worker entry point (Service Binding)', () => {
       audience: env.MCP_RESOURCE,
       userId,
       clientId,
-      scope: ['mcp:tools.read', 'mcp:tools.invoke'],
+      scope: ['mcp:tools.read', 'mcp:promptshare.read'],
       props: { uid: userId, authTime: NOW },
     });
     // Only an internal ID and a time: no email or name crosses to the gateway.

@@ -1,3 +1,4 @@
+import { ALL_SCOPES } from '../src/services';
 import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { pkceChallenge, randomToken } from '../src/crypto';
@@ -41,7 +42,7 @@ async function authorizeUrl(overrides: Record<string, string | null> = {}) {
     response_type: 'code',
     client_id: clientId,
     redirect_uri: REDIRECT_URI,
-    scope: 'mcp:tools.read mcp:tools.invoke',
+    scope: 'mcp:tools.read mcp:promptshare.read',
     state: 'client-state-123',
     code_challenge: await pkceChallenge(verifier),
     code_challenge_method: 'S256',
@@ -68,7 +69,7 @@ async function submitConsent(
   headers: Record<string, string> = SAME_ORIGIN,
 ) {
   const body = consentBody(handle);
-  const all = { decision: 'approve', scope: ['mcp:tools.read', 'mcp:tools.invoke'], ...fields };
+  const all = { decision: 'approve', scope: ['mcp:tools.read', 'mcp:promptshare.read'], ...fields };
   for (const [key, value] of Object.entries(all)) {
     for (const v of Array.isArray(value) ? value : [value]) body.append(key, v);
   }
@@ -133,8 +134,8 @@ describe('authorization server metadata', () => {
     expect(meta.authorization_response_iss_parameter_supported).toBe(true);
     expect(meta.client_id_metadata_document_supported).toBe(true);
     expect(meta.registration_endpoint).toBeUndefined();
-    expect(meta.scopes_supported).toEqual(['mcp:tools.read', 'mcp:tools.invoke']);
-    expect(meta.protected_resources).toEqual([RESOURCE]);
+    expect(meta.scopes_supported).toEqual(Object.keys(ALL_SCOPES));
+    expect(meta.protected_resources).toEqual([RESOURCE, env.PROMPTSHARE_RESOURCE]);
   });
 });
 
@@ -158,7 +159,7 @@ describe('authorization code flow', () => {
     );
     expect(validated?.audience).toBe(RESOURCE);
     expect(validated?.clientId).toBe(clientId);
-    expect(validated?.scope).toEqual(['mcp:tools.read', 'mcp:tools.invoke']);
+    expect(validated?.scope).toEqual(['mcp:tools.read', 'mcp:promptshare.read']);
     const user = await env.DB.prepare('SELECT id FROM users').first<{ id: string }>();
     expect(validated?.props).toMatchObject({ uid: user?.id });
     expect(JSON.stringify(validated?.props)).not.toContain('@');
@@ -287,7 +288,7 @@ describe('consent page', () => {
     expect(html).toContain('This app named itself');
     expect(html).toContain('2earl MCP gateway (mcp.2earl.com)');
     expect(html).toContain('See which tools are available to you');
-    expect(html).toContain('Use those tools on your behalf');
+    expect(html).toContain('Read your prompts and public prompts in Prompt share');
   });
 
   it('cannot be framed and lets the approval redirect leave the site', async () => {

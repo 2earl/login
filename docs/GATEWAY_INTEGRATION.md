@@ -14,7 +14,7 @@ Specification: [MCP Authorization, revision 2026-07-28](https://modelcontextprot
 | Issuer | `https://login.2earl.com` |
 | AS metadata (RFC 8414) | `https://login.2earl.com/.well-known/oauth-authorization-server` |
 | The gateway's canonical resource | `https://mcp.2earl.com/mcp` (login's `MCP_RESOURCE`; the only audience tokens are issued for) |
-| Scopes | The gateway's own set (`src/services.ts`): `mcp:tools.read` ("See which tools are available to you"), `mcp:tools.invoke` ("Use those tools on your behalf"). Each 2earl service has its own; a token for one never carries another's |
+| Scopes | The gateway's set (`src/services.ts`): `mcp:tools.read` ("See which tools are available to you"), plus each service's behind it, `mcp:<service>.<permission>` (2earl/mcp docs/DESIGN.md §4). Each 2earl service has its own; a token for one never carries another's |
 | Access tokens | **Opaque**, not JWTs. 15 minutes. Validated only through the Service Binding (§3) |
 | Refresh tokens | 30 days, lapse after 7 days unused, and every grant ends 90 days after the user approved it |
 | Client registration | Client ID Metadata Documents (an `https://` `client_id`), or public clients pre-registered by the owner in `/admin`. **No Dynamic Client Registration** |
@@ -90,11 +90,12 @@ export default new OAuthResourceServer<Env, GrantProps>({
 
 | MCP operation | Needs |
 |---|---|
-| `initialize`, `tools/list` | `mcp:tools.read` |
-| `tools/call` | `mcp:tools.invoke` |
+| `initialize`, `tools/list` | `mcp:tools.read`, or any service scope |
+| `tools/call` | the tool's service scope: `read` for read-only tools, `write` otherwise, or a scope the tool names |
 
-- **Scope hierarchy:** treat `mcp:tools.invoke` as implying `mcp:tools.read`. The consent page lets
-  a user approve either one; MCP requires servers to honour hierarchies.
+- **Scope hierarchy:** a service's `write` implies its `read`; any service scope implies
+  `mcp:tools.read`. The consent page lets a user approve each one; MCP requires servers to honour
+  hierarchies.
 - When a token lacks a scope, answer `insufficientScope(ctx.auth, [...all scopes the operation
   needs])`: a `403` with `error="insufficient_scope"`, in one challenge, never one scope at a time.
 - `ctx.auth.scope` holds the approved scopes; `ctx.props` holds `GrantProps`.
