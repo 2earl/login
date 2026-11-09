@@ -1,0 +1,44 @@
+// Browser tests only: `wrangler dev` runs the real app (e2e/worker/index.ts) on http://localhost:8788
+// with local D1, KV and rate limiting. Never deployed: no account, routes or real IDs.
+// Secrets come from e2e/serve.mjs as test values.
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "login-e2e",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["global_fetch_strictly_public"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "../public",
+  },
+  "vars": {
+    "ISSUER": "http://localhost:8788",
+    "GOOGLE_CLIENT_ID": "e2e-client.apps.googleusercontent.com",
+    "LOGIN_LOCKED": "true",
+    "MCP_RESOURCE": "https://mcp.2earl.com/mcp",
+    "MFA_REQUIRED": "false",
+  },
+  "ratelimits": [
+    {
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "1001",
+      // One browser runs the whole flow from one address.
+      "simple": { "limit": 1000, "period": 60 },
+    },
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "login-e2e",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../migrations",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "00000000000000000000000000000000",
+    },
+  ],
+}
