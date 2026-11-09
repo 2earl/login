@@ -116,7 +116,7 @@ Worker's real entry point:
 
 | Situation | Result |
 |---|---|
-| Valid token for this resource | `{ props: { uid, authTime }, audience, expiresAt, scope, userId, clientId }`. `userId === props.uid` |
+| Valid token for this resource | `{ props: { uid, authTime, aal2At }, audience, expiresAt, scope, userId, clientId }`. `userId === props.uid`. `aal2At`: when the approving session last verified a second factor, or `null` |
 | Unknown, malformed, expired or revoked token | `null`, and the library answers `401` |
 | A `resource` login doesn't serve (typo, trailing slash, other host) | **Throws** `resource must name one registered protected resource`, and the library answers `503` on every request. If the gateway returns 503 for everything, compare its resource with login's `MCP_RESOURCE` first |
 | KV unavailable | Throws, so `503` (fails closed) |
@@ -133,6 +133,18 @@ Worker's real entry point:
   user-status check.
 - **Privacy:** `props` carries no email or name, on purpose (DATA_PROTECTION.md). If the gateway
   needs them, that's a change to login and to the privacy policy (§7).
+
+
+### 4.1 Requiring a recent second factor
+
+An app's admin area can ask login to verify the user's second factor before it approves: add
+`acr_values=urn:2earl:aal2` to `/authorize`.
+- A user with a second factor is asked for it unless it was verified in the last 5 minutes.
+- A user without one is sent to set one up first.
+
+login then continues to consent as usual. The app must still check `props.aal2At` itself, for
+example that it is within the last 15 minutes: the parameter is a request from the app, not a
+guarantee to it.
 
 ## 5. Users and their data in the gateway
 

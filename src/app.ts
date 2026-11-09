@@ -17,7 +17,7 @@ import { LOGIN_TX_TTL_SECONDS, consumeLoginTx, createLoginTx } from './login-tx'
 import { isStepUpFresh, listFactors, mfaGate, type MfaGate } from './mfa';
 import { registerMfaRoutes } from './mfa-routes';
 import { registerAdminRoutes } from './admin';
-import { authorizationServer, type GrantProps } from './oauth';
+import { ACR_AAL2, authorizationServer, type GrantProps } from './oauth';
 import { ALL_SCOPES, scopeLabel, scopesFor, serviceForResource, type Service } from './services';
 import {
   MESSAGES,
@@ -509,6 +509,21 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       return c.redirect(`/login?return_to=${encodeURIComponent(url.pathname + url.search)}`, 303);
     }
 
+    // An app can require a recent second factor, e.g. for its admin area. login asks for it
+    // first; the app checks `aal2At` in the grant's props, so this step is for the user, not the
+    // only check.
+    const requested = new URL(c.req.url);
+    const acr = (requested.searchParams.get('acr_values') ?? '').split(' ');
+    if (acr.includes(ACR_AAL2) && !isStepUpFresh(session, deps.now())) {
+      const back = encodeURIComponent(requested.pathname + requested.search);
+      return c.redirect(
+        session.hasFactor
+          ? `/mfa?step_up=1&return_to=${back}`
+          : `/account/security?return_to=${back}`,
+        303,
+      );
+    }
+
     const remember = { secret: c.env.CONSENT_REMEMBER_SECRET, subject: session.user.id };
     if (await oauth.isConsentRemembered(c.req.raw, request, remember)) {
       const { redirectTo } = await oauth.completeAuthorization({
@@ -516,7 +531,11 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         userId: session.user.id,
         metadata: {},
         scope: scopesFor(service, request.scope),
-        props: { uid: session.user.id, authTime: deps.now() } satisfies GrantProps,
+        props: {
+          uid: session.user.id,
+          authTime: deps.now(),
+          aal2At: session.aal === 'aal2' ? session.aal2At : null,
+        } satisfies GrantProps,
       });
       await audit(c.env.DB, deps.now(), 'consent.reused', {
         actorUserId: session.user.id,
@@ -621,7 +640,11 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         userId: session.user.id,
         metadata: {},
         scope: approvedScope,
-        props: { uid: session.user.id, authTime: deps.now() } satisfies GrantProps,
+        props: {
+          uid: session.user.id,
+          authTime: deps.now(),
+          aal2At: session.aal === 'aal2' ? session.aal2At : null,
+        } satisfies GrantProps,
       });
       await audit(c.env.DB, deps.now(), 'consent.approved', {
         actorUserId: session.user.id,
