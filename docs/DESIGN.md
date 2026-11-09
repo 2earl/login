@@ -180,7 +180,12 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
   `null`. A resource other than `MCP_RESOURCE` is rejected.
 - The gateway enforces per-tool scopes and returns `insufficientScope()` for step-up. It never
   forwards the token upstream.
-- Revocation is immediate: a disconnected app's next call fails validation.
+- Revocation takes effect at once where it was made and within about a minute elsewhere: grants
+  and tokens live in Workers KV, which is eventually consistent ("up to 60 seconds or more").
+  Access tokens expire after 15 minutes regardless.
+- A resource login doesn't serve makes `validateToken` throw (the gateway answers `503`), not
+  return `null`. The full contract, constraints and open decisions for the gateway:
+  [GATEWAY_INTEGRATION.md](GATEWAY_INTEGRATION.md).
 
 ### 4.5 Account page
 
