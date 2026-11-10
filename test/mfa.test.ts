@@ -354,11 +354,18 @@ describe('changing factors', () => {
     expect(await options.json()).toEqual({
       redirect: '/login?reauth=1&return_to=%2Faccount%2Fsecurity',
     });
-    // reauth=1 starts a Google sign-in even though the browser is signed in.
+    // reauth=1 asks a signed-in browser to sign in again, with the account's own methods.
     const reauth = await call(app, '/login?reauth=1&return_to=%2Faccount%2Fsecurity', {
       cookies: cookie(),
     });
-    expect(reauth.headers.get('Location')).toMatch(/^https:\/\/accounts\.google\.com\//);
+    const html = await reauth.text();
+    expect(html).toContain('Confirm it’s you');
+    expect(html).toContain('href="/login/google?return_to=%2Faccount%2Fsecurity&amp;reauth=1"');
+    expect(html).not.toContain('name="email" type="email"');
+    const google = await call(app, '/login/google?return_to=%2Faccount%2Fsecurity&reauth=1', {
+      cookies: cookie(),
+    });
+    expect(google.headers.get('Location')).toMatch(/^https:\/\/accounts\.google\.com\//);
   });
 
   it('needs a second-factor check from the last 5 minutes to add or remove one', async () => {

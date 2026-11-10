@@ -7,7 +7,7 @@ export const LOGIN_TX_TTL_SECONDS = 600;
  * Why the trip to Google was started. `delete_account` is the re-authentication before an
  * account is deleted (DESIGN §6.3); it never creates a session.
  */
-export type LoginPurpose = 'sign_in' | 'delete_account';
+export type LoginPurpose = 'sign_in' | 'delete_account' | 'link_google';
 
 export interface NewLoginTx {
   /** Value for the __Host-login_tx cookie. Only its HMAC is stored. */

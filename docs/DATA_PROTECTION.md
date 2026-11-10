@@ -30,7 +30,10 @@ with German law on telemedia: TDDDG for cookies, DDG for the imprint **[verify]*
 |---|---|---|---|
 | Google subject ID (`sub`) | D1 `identities` | Google ID token | Identify the account |
 | Email, `email_verified` | D1 `identities`, `users.primary_email` | Google | Show the account; contact on security issues; let Prompt share find the account when someone shares a prompt with that address (only the user ID is returned) |
-| Display name | D1 `users` | Google | Show the account |
+| Display name | D1 `users` | Google, or the user (`/welcome`, `/account/name`) | Show the account |
+| Email address of an email sign-in method | D1 `identities` (provider `email`), `users.primary_email` | User, verified with a code | Sign in; security notices |
+| Email codes in progress (address, HMACs of code, link and cookie, purpose, tries, IP prefix, times) | D1 `email_codes` | System | Verify the address; enforce send limits. Deleted 2 days after creation, and with the account |
+| Security notices sent by email (sign-in method or second factor changed, new recovery codes, first approval of an app, account deleted) | Cloudflare Email Service (not stored by us) | System | Tell the user about changes to their account (Art. 6(1)(b), (f)) |
 | Session records (hashed ID, timestamps, IP prefix, user-agent hash) | D1 `sessions` | Request | Keep the user signed in; detect abuse |
 | Login transaction (`state`, `nonce`, PKCE verifier) | D1 `login_tx` | Generated | Secure the sign-in, ≤ 10 min |
 | OAuth grants and tokens (hashed, encrypted props `{uid, authTime}`) | KV | Generated | Authorise apps the user approved |
@@ -55,6 +58,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | Data | Retention |
 |---|---|
 | Login transactions | 10 minutes, then deleted |
+| Email codes | Usable 10 minutes; the row is deleted 2 days after creation (send limits count it), or with the account |
 | Sessions | 12 h idle / 7 days absolute |
 | OAuth grants | 7 days idle / 90 days absolute, or until revoked |
 | Audit events | 90 days, then deleted (daily cron) |
@@ -68,6 +72,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | Party | Role | Notes |
 |---|---|---|
 | Cloudflare, Inc. | Processor (hosting, Workers, D1, KV, network) | Cloudflare's DPA applies through its terms **[verify that the account has accepted it]**. US company: transfers rely on the EU-US Data Privacy Framework and/or SCCs **[verify current status]**. D1 and KV data stay in the EU jurisdiction; request processing at the edge is global |
+| Cloudflare Email Service | Processor (part of Cloudflare, above) | Delivers sign-in codes and security notices from `noreply@2earl.com`. Receives the recipient address and the message |
 | Google | Independent controller for the user's Google account | We receive identity claims when the user chooses "Sign in with Google". Google's privacy terms apply to the user's Google account |
 | GitHub, HashiCorp | Not recipients of user data | Hold code, infrastructure state and secrets only. **Terraform state must not contain user data** |
 | OAuth clients (MCP apps) | Separate controllers | Receive only what the user approves. In v1 the gateway receives the internal user ID and scopes, not email or name |
@@ -77,8 +82,8 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | Right | Implementation |
 |---|---|
 | Access (Art. 15) | `/account` shows the data; `/account/export` downloads JSON: account, sign-in methods, sessions (shortened IP, user-agent hash), connected apps, invitation, the user's security log, what each other 2earl service holds (asked of that service, e.g. the MCP gateway's security log), and notes on what is not included (hashes of cookies and tokens) |
-| Rectification (Art. 16) | Name and email come from Google and update on next sign-in |
-| Erasure (Art. 17) | `/account/delete`, confirmed through Google: revokes grants, deletes the account, sign-in link, sessions and invitation; the security log is re-keyed to a random ID and expires after 90 days (DESIGN §6.3) |
+| Rectification (Art. 16) | Name: `/account/name`. Email: add the right address as a sign-in method, then remove the old one. A Google method's address follows Google |
+| Erasure (Art. 17) | `/account/delete`, confirmed through Google or a code to the account's address: revokes grants, deletes the account, sign-in link, sessions and invitation; the security log is re-keyed to a random ID and expires after 90 days (DESIGN §6.3) |
 | Restriction / objection | Owner can suspend an account on request |
 | Portability (Art. 20) | Same JSON export |
 | Withdraw approvals for apps | `/account` → Connected apps → Disconnect |
@@ -109,4 +114,6 @@ within 72 h where required (Art. 33). Notify users where there is high risk (Art
 4. Create a record of processing activities (Art. 30) — this document is a starting point.
 5. Google consent screen: privacy and terms links are set to `https://2earl.com/privacy` and
    `https://2earl.com/terms`. Publish the consent screen ("In production") only when sign-up opens;
-   until then it stays in Testing with the owner as test user.
+   until then it stays in Testing with the owner as test user. **Sign-up opens with phase 7
+   (2026-11-10): publish it now, or new Google sign-ups fail while email sign-up works.**
+6. Roll the credentials shared during setup (THREAT_MODEL R5b) before the phase 7 deploy.

@@ -227,6 +227,24 @@ describe('invitations', () => {
     ).toBe(303);
   });
 
+  it('switches sign-up open and closed without a deploy', async () => {
+    const page = await (await call(app, '/admin/invitations', { cookies: as(owner) })).text();
+    expect(page).toContain('<strong>By invitation.</strong>');
+    expect((await signIn(app, google, { claims: OTHER })).callback.status).toBe(403);
+
+    const opened = await post('/admin/invitations', { action: 'signup', mode: 'open' });
+    expect(opened.headers.get('Location')).toBe('/admin/invitations?done=signup_open');
+    expect(await count('audit_events', "event = 'admin.signup_changed'")).toBe(1);
+    const joined = await signIn(app, google, { claims: OTHER });
+    expect(joined.callback.headers.get('Location')).toBe('/welcome?return_to=%2Faccount');
+
+    await post('/admin/invitations', { action: 'signup', mode: 'invite' });
+    // An account made while sign-up was open keeps working; a new one needs an invitation.
+    expect((await signIn(app, google, { claims: OTHER })).callback.status).toBe(303);
+    const stranger = { sub: 'google-sub-stranger', email: 'stranger@example.com', name: 'S' };
+    expect((await signIn(app, google, { claims: stranger })).callback.status).toBe(403);
+  });
+
   it('rejects an invalid address', async () => {
     const response = await post('/admin/invitations', { action: 'add', email: 'not-an-email' });
     expect(response.status).toBe(400);

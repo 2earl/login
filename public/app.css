@@ -1049,3 +1049,68 @@ code {
 .kv .k {
   color: var(--muted);
 }
+
+/* ---- Sign-up and sign-in methods (DESIGN §4.9) ------------------------------------------- */
+
+.or {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.or::before,
+.or::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--rule);
+}
+
+.email-form .field {
+  margin-bottom: 0.75rem;
+}
+.field-error {
+  margin: -0.25rem 0 0.75rem;
+  color: var(--alert);
+  font-size: 0.9rem;
+}
+.optional {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.methods {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 0.625rem;
+  background: var(--surface);
+}
+.methods li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  padding: 0.75rem 1rem;
+}
+.methods li + li {
+  border-top: 1px solid var(--rule);
+}
+.method-name {
+  font-weight: 600;
+}
+.method-what {
+  color: var(--muted);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+.methods form {
+  margin-left: auto;
+}
+/* On the sign-in pages the email button is as wide as Google's above it. */
+.email-form .button.wide,
+.code-form .button.wide {
+  max-width: none;
+}

@@ -51,15 +51,24 @@ export async function deleteAccount(
       .prepare('UPDATE audit_events SET actor_user_id = ? WHERE actor_user_id = ?')
       .bind(correlationId, userId),
     db.prepare('DELETE FROM login_tx WHERE user_id = ?').bind(userId),
+    // Codes sent to the account's addresses, used or not: they hold the address.
+    db
+      .prepare(
+        `DELETE FROM email_codes WHERE user_id = ?1
+            OR email IN (SELECT subject FROM identities WHERE user_id = ?1 AND provider = 'email')`,
+      )
+      .bind(userId),
     // The invitation goes too: while sign-up is closed, signing in again needs a new one.
     db
       .prepare(
         `DELETE FROM allowlist
          WHERE (kind = 'google_sub'
                 AND value IN (SELECT subject FROM identities WHERE user_id = ? AND provider = 'google'))
-            OR (kind = 'email' AND value = (SELECT primary_email FROM users WHERE id = ?))`,
+            OR (kind = 'email' AND value = (SELECT primary_email FROM users WHERE id = ?))
+            OR (kind = 'email'
+                AND value IN (SELECT subject FROM identities WHERE user_id = ? AND provider = 'email'))`,
       )
-      .bind(userId, userId),
+      .bind(userId, userId, userId),
     db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM mfa_factors WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId),

@@ -23,37 +23,40 @@ function googleSignsInAs(identity: typeof OWNER): void {
 
 /**
  * Stands in for Google's sign-in page. Playwright can't intercept a request the browser makes by
- * following a redirect, so the two app requests that redirect to Google (/login and the deletion
+ * following a redirect, so the two app requests that redirect to Google (/login/google and the deletion
  * form) are fetched here as the browser would send them, and Google's answer is put in place of
  * the redirect: straight back to the callback with a code naming `googleIdentity`.
  */
 async function interceptGoogle(page: Page): Promise<void> {
-  await page.route(/^http:\/\/localhost:8788\/(login|account\/delete)(\?|$)/, async (route) => {
-    const response = await route.fetch({
-      maxRedirects: 0,
-      headers: await route.request().allHeaders(),
-    });
-    const location = response.headers().location ?? '';
-    if (!location.startsWith('https://accounts.google.com/')) {
-      await route.fulfill({ response });
-      return;
-    }
-    const auth = new URL(location);
-    const code = b64url(
-      JSON.stringify({
-        ...googleIdentity,
-        nonce: auth.searchParams.get('nonce'),
-        codeChallenge: auth.searchParams.get('code_challenge'),
-      }),
-    );
-    const back = new URL(auth.searchParams.get('redirect_uri') ?? '');
-    back.searchParams.set('code', code);
-    back.searchParams.set('state', auth.searchParams.get('state') ?? '');
-    await route.fulfill({
-      response,
-      headers: { ...response.headers(), location: back.toString() },
-    });
-  });
+  await page.route(
+    /^http:\/\/localhost:8788\/(login\/google|account\/delete)(\?|$)/,
+    async (route) => {
+      const response = await route.fetch({
+        maxRedirects: 0,
+        headers: await route.request().allHeaders(),
+      });
+      const location = response.headers().location ?? '';
+      if (!location.startsWith('https://accounts.google.com/')) {
+        await route.fulfill({ response });
+        return;
+      }
+      const auth = new URL(location);
+      const code = b64url(
+        JSON.stringify({
+          ...googleIdentity,
+          nonce: auth.searchParams.get('nonce'),
+          codeChallenge: auth.searchParams.get('code_challenge'),
+        }),
+      );
+      const back = new URL(auth.searchParams.get('redirect_uri') ?? '');
+      back.searchParams.set('code', code);
+      back.searchParams.set('state', auth.searchParams.get('state') ?? '');
+      await route.fulfill({
+        response,
+        headers: { ...response.headers(), location: back.toString() },
+      });
+    },
+  );
 }
 
 /** Chromium's built-in virtual authenticator: a platform passkey that always says yes. */
@@ -96,6 +99,9 @@ test('the owner’s whole journey', async ({ page }) => {
     googleSignsInAs(OWNER);
     await page.goto('/');
     await page.getByRole('link', { name: 'Continue with Google' }).click();
+    // A new account stops at the welcome page first.
+    await expect(page).toHaveURL('/welcome?return_to=%2Faccount');
+    await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page).toHaveURL('/account');
     await expect(page.getByText(OWNER.email).first()).toBeVisible();
     await expect(page.getByText('Second factor: off')).toBeVisible();

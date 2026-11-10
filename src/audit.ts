@@ -7,6 +7,11 @@ export type AuditEvent =
   | 'login.succeeded'
   | 'login.denied'
   | 'login.failed'
+  | 'login.code_sent'
+  | 'login.code_failed'
+  | 'login.code_refused'
+  | 'identity.added'
+  | 'identity.removed'
   | 'allowlist.pinned'
   | 'user.created'
   | 'logout'
@@ -36,7 +41,8 @@ export type AuditEvent =
   | 'admin.client_trusted'
   | 'admin.client_untrusted'
   | 'admin.client_registered'
-  | 'admin.client_deleted';
+  | 'admin.client_deleted'
+  | 'admin.signup_changed';
 
 export async function audit(
   db: D1Database,

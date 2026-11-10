@@ -21,6 +21,8 @@
     "PROMPTSHARE_RESOURCE": "https://promptshare.cc",
     "MFA_REQUIRED": "false",
   },
+  // Local simulation: wrangler dev keeps the emails instead of sending them.
+  "send_email": [{ "name": "MAILER", "allowed_sender_addresses": ["noreply@2earl.com"] }],
   "ratelimits": [
     {
       "name": "AUTH_RATE_LIMITER",

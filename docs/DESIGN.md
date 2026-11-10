@@ -39,12 +39,12 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
 | D1 | Public repo `2earl/login`, AGPL-3.0 | Owner |
 | D2 | Cloudflare Workers + D1 + KV; domain `2earl.com` already on Cloudflare | Owner |
 | D3 | Build on `@cloudflare/workers-oauth-provider` **1.2.x** (`OAuthAuthorizationServer` / `OAuthResourceServer`), not a hand-written OAuth implementation | Agreed |
-| D4 | Google is the only login method in v1 | Owner |
+| D4 | Google is the only login method in v1. **Superseded** 2026-11-10: Google or a one-time code by email (§4.9) | Owner |
 | D5 | No OIDC in v1; opaque access tokens | Owner, 2026-11-08 |
 | D6 | Production only for now; no staging environment | Owner |
 | D7 | Terraform state and runs in HCP Terraform, workspace `2earl-login-prod`, VCS-driven, manual apply | Owner |
 | D8 | One Cloudflare account API token used by both Terraform (HCP) and deploys (GitHub) | Owner (accepted risk, see THREAT_MODEL R2) |
-| D9 | Launch **locked**: only allowlisted Google accounts may sign in until phase 5 is complete | Confirmed (PR #1 merged) |
+| D9 | Launch **locked**: only allowlisted Google accounts may sign in until phase 5 is complete. **Opened** 2026-11-10 (§4.9): sign-up is open by default; the owner can close it on `/admin/invitations` without a deploy | Confirmed (PR #1 merged); owner, 2026-11-10 |
 | D10 | Second factor in our own service, controlled by a feature flag: optional when off, enforced when on (§4.7) | Owner, 2026-11-08 |
 | D11 | `/admin` always requires a second factor, regardless of the flag | Owner, 2026-11-08 |
 | D12 | KV namespace in the EU jurisdiction too (supported by the Cloudflare provider, verified in phase 3) | Phase 3 |
@@ -328,6 +328,59 @@ Decided by the owner on 2026-11-09:
   Only Prompt share's `wrangler.jsonc` binds it. Prompt share limits how often an author may
   try addresses that have no account, because the answer shows whether an address has one.
 
+### 4.9 Open sign-up and sign-in with an email code (phase 7)
+
+Decided by the owner on 2026-11-10: sign-up opens, with email verification, now that Cloudflare
+Email Service sends from `2earl.com` (Workers Paid).
+
+**Sign-in page (`/login`).** "Continue with Google" (`/login/google`) or an email address. The same
+page signs in and signs up. With `reauth=1` a signed-in user confirms it's them with the methods
+their account has.
+
+**Email code (`src/email-codes.ts`, `src/email-routes.ts`).**
+1. `POST /login/email`: the address is normalised (trimmed, lower case). The answer is the same
+   whether or not it has an account: a code is sent either way.
+2. A 6-digit code (uniform, rejection sampling) and a 32-byte link token are created. Only HMACs
+   are stored (`email_codes`, keyed by the HMAC of the `__Host-email_code` cookie, which binds the
+   code to this browser). 10 minutes, 5 wrong tries, single use (`used_at` set in one statement).
+3. The email (`src/mail.ts`, plain text, from `noreply@2earl.com`) has the code and a link. The
+   link opens a page with a button: mail scanners open links, and only the POST signs in. The link
+   works only in the browser that asked; elsewhere the page says to type the code instead.
+4. On success: the account with this email method, or a new one. A new one needs sign-up to be
+   open, or an invitation naming the address (`allowlist` kind `email`). New accounts go to
+   `/welcome` (a name; a nudge to add a second factor) before `return_to`.
+5. **Send limits** (counted in `email_codes`, kept 2 days): 5 per address per hour and 10 a day, 20
+   per network (/24, /48) per hour, 2,000 a day for the service. Plus `AUTH_RATE_LIMITER` and the
+   zone rule on the paths.
+
+**One account per address.** Accounts are never joined by address (THREAT_MODEL B3). An email
+sign-in with an address that a Google account already uses is refused and pointed to Google; a new
+Google sign-in with an address that already signs in by email is refused and pointed to email.
+Joining happens only while signed in to both:
+
+**Sign-in methods on `/account`.** "Add Google" (a trip to Google with `login_tx.purpose =
+'link_google'`, bound to the session) and "Add an email address" (a code with purpose
+`link_email`). Whether another account has the address is told only after the code proves it's
+the user's. A method can be removed if another remains; the owner's Google account (`OWNER_GOOGLE_SUB`)
+can't be. Adding or removing needs a recent proof, as for second factors (`changeCheck`: a second
+factor in the last 5 minutes, or a sign-in in the last 10). Removing the method that carried the
+account's address moves it to a remaining one.
+
+**Deletion and re-authentication.** An account that signs in by email confirms deletion with a code
+sent to that address (purpose `delete_account`, bound to the session and the account), instead of
+Google. Accounts with both choose.
+
+**Profile.** The name is the user's (`/account/name`, `/welcome`); Google's name fills in only a
+missing one. The account's address follows Google only when the account has no email method.
+
+**Security notices by email** (`notify`, sent after the response): a sign-in method or second
+factor added or removed, new recovery codes, the first approval of an app, and the account's
+deletion (to the address it had). Nothing marketing; nothing else.
+
+**Sign-up switch.** `settings.signup` (`open` | `invite`) on `/admin/invitations`, audited as
+`admin.signup_changed`. Without a saved setting, `LOGIN_LOCKED` decides (`"false"` = open, the
+default from this phase). Closing sign-up stops new accounts only; existing ones keep working.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -391,7 +444,8 @@ Scopes are opaque strings to `login`; their enforcement lives in the resource se
 ```
 users            id (random UUID PK), status (active|suspended), created_at, updated_at,
                  display_name, primary_email          (hard delete: no deleted_at)
-identities       id PK, user_id FK, provider ('google'), subject (provider's stable ID),
+identities       id PK, user_id FK, provider ('google'|'email'), subject (Google's stable ID, or
+                 the address in lower case for 'email'),
                  email, email_verified, created_at, last_login_at
                  UNIQUE(provider, subject)
 sessions         id_hash PK (HMAC-SHA-256 of cookie value, SESSION_PEPPER), user_id FK,
@@ -410,6 +464,10 @@ mfa_pending      (session_hash FK sessions, purpose) PK, value, expires_at
 users            + mfa_failed_attempts, mfa_locked_until (migration 0004)
 allowlist        id PK, kind ('google_sub'|'email'), value, added_by, created_at
 trusted_clients  client_id PK, note, created_at
+email_codes      id_hash PK (HMAC of the cookie), email, code_hash, link_hash, purpose
+                 ('sign_in'|'delete_account'|'link_email'), user_id NULL, return_to, attempts,
+                 ip_prefix, created_at, expires_at, used_at          (§4.9; kept 2 days)
+settings         key PK, value, updated_at                           ('signup': open|invite)
 audit_events     id PK, at, actor_user_id NULL, event, client_id NULL, ip_prefix, detail (JSON)
 ```
 
@@ -583,8 +641,9 @@ fine-grained limits are in the Worker (§8).
 
 ## 11. Open questions
 
-1. **Sign-up policy after unlock.** Proposal: any Google account may create an account; no
-   privileged scopes; owner-only `admin`. The allowlist stays as a kill switch.
+1. ~~Sign-up policy after unlock.~~ Resolved 2026-11-10 (§4.9): anyone may create an account with
+   Google or an email code; no privileged scopes; owner-only `admin`. The sign-up switch and the
+   allowlist stay as the kill switch.
 2. **Gateway hostname** — `mcp.2earl.com`?
 3. **Legal pages** — postal address still to come (DATA_PROTECTION.md §8). Name and contact email
    are set as environment variables, not in the repo.
@@ -605,6 +664,7 @@ Resolved:
 | 4 | MVP deployed **locked**: Google sign-in, authorization, token, CIMD, consent, revocation, account deletion, legal pages |
 | 5 | Protocol test suite complete, audit log, purge cron, **second factor behind `MFA_REQUIRED`** (§4.7); optional OpenID conformance tests for the Google client side → **unlock** |
 | 6 | `GATEWAY_INTEGRATION.md`: handoff to the gateway session |
+| 7 | **Open sign-up** (§4.9): email codes, sign-in methods, welcome page, security notices by email, sign-up switch |
 
 ## References
 

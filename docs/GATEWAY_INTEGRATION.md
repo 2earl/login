@@ -19,7 +19,7 @@ Specification: [MCP Authorization, revision 2026-07-28](https://modelcontextprot
 | Refresh tokens | 30 days, lapse after 7 days unused, and every grant ends 90 days after the user approved it |
 | Client registration | Client ID Metadata Documents (an `https://` `client_id`), or public clients pre-registered by the owner in `/admin`. **No Dynamic Client Registration** |
 | Required of clients | PKCE `S256`, an explicit `resource` on `/authorize` and `/oauth/token`, `iss` checked (RFC 9207, `authorization_response_iss_parameter_supported: true`) |
-| Users | Google sign-in; a second factor when the user has one (always for the owner); currently invite-only (`LOGIN_LOCKED`) |
+| Users | Google sign-in or a one-time code by email; a second factor when the user has one (always for the owner); sign-up open, switchable to invitation-only on `/admin/invitations` |
 
 ## 2. Architecture
 
