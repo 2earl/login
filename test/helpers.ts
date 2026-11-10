@@ -115,7 +115,7 @@ export function rawSetCookie(response: Response, name: string): string | undefin
 
 /** Starts a sign-in and returns what the browser would hold on the way back from Google. */
 export async function startLogin(app: App, ip: string, query = '') {
-  const response = await call(app, `/login${query}`, { ip });
+  const response = await call(app, `/login/google${query}`, { ip });
   const location = new URL(response.headers.get('Location') ?? 'about:blank');
   return {
     response,

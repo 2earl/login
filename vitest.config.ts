@@ -41,6 +41,9 @@ export default defineConfig(async () => {
             CONSENT_REMEMBER_SECRET: 'test-consent-remember-secret-at-least-32-chars',
             MFA_ENCRYPTION_KEY: 'test-mfa-encryption-key',
             OWNER_GOOGLE_SUB: 'google-sub-owner',
+            // Tests start invite-only, as the service launched; open sign-up is tested by
+            // switching it (the settings table or a per-call override).
+            LOGIN_LOCKED: 'true',
           },
           workers: [standIn('mcp', '2earl MCP gateway'), standIn('promptshare', 'Prompt share')],
         },

@@ -1,0 +1,89 @@
+import { deleteAccount } from './account';
+import { audit } from './audit';
+import { sha256Hex } from './crypto';
+import { deliverDeletionNotices } from './deletion-notices';
+import {
+  CONSENT_APPROVALS_COOKIE,
+  SESSION_COOKIE,
+  clearCookie,
+  clientIp,
+  setCookie,
+  workerCtx,
+  type AppContext,
+} from './http';
+import { notify, sendMail, noticeMail, type Notice } from './mail';
+import { authorizationServer } from './oauth';
+import { MESSAGES, messagePage, type Message } from './pages';
+import { safeReturnTo } from './return-to';
+import { createSession, deleteSession } from './sessions';
+
+/**
+ * What every way of signing in shares (DESIGN §4.2, §4.9): a fresh session, and the end of a
+ * deletion once the user has proved it's them.
+ */
+
+/** A fresh session for `userId`; any session the browser already had is ended. */
+export async function startSession(
+  c: AppContext,
+  now: number,
+  userId: string,
+  returnTo: string | null,
+  options: { welcome?: boolean } = {},
+): Promise<Response> {
+  const ip = clientIp(c);
+  const previous = c.get('session');
+  if (previous) await deleteSession(c.env.DB, previous.idHash);
+  const userAgent = c.req.header('User-Agent');
+  const session = await createSession(c.env.DB, c.env.SESSION_PEPPER, now, userId, {
+    ipPrefix: ip,
+    userAgentHash: userAgent ? (await sha256Hex(userAgent)).slice(0, 16) : null,
+  });
+  setCookie(c, SESSION_COOKIE, session.cookieValue, session.expiresAt - now);
+  await audit(c.env.DB, now, 'login.succeeded', { actorUserId: userId, ipPrefix: ip });
+  // A new account stops at the welcome page first (a name, a second factor), then goes on.
+  return c.redirect(
+    options.welcome
+      ? `/welcome?return_to=${encodeURIComponent(safeReturnTo(returnTo))}`
+      : safeReturnTo(returnTo),
+    303,
+  );
+}
+
+/** Deletes the signed-in account after the user confirmed it (DESIGN §6.3). */
+export async function finishDeletion(
+  c: AppContext,
+  now: number,
+  userId: string,
+  stop: (reason: string, message?: Message, status?: 400 | 403 | 500) => Promise<Response>,
+): Promise<Response> {
+  const address = await c.env.DB.prepare('SELECT primary_email FROM users WHERE id = ?')
+    .bind(userId)
+    .first<{ primary_email: string | null }>();
+  const oauth = authorizationServer(c.env).getOAuthApi(c.env);
+  try {
+    await deleteAccount(c.env.DB, oauth, userId, now, clientIp(c));
+    // Tell every service now; the cron retries whatever doesn't go through.
+    workerCtx(c).waitUntil(deliverDeletionNotices(c.env, now));
+  } catch (error) {
+    console.error('account deletion failed', error instanceof Error ? error.name : 'unknown');
+    return stop('deletion_error', MESSAGES.deletionFailed, 500);
+  }
+  // The account is gone, so the address is taken from before; this is the last email.
+  if (address?.primary_email) {
+    const mail = noticeMail({ kind: 'account_deleted' });
+    workerCtx(c).waitUntil(sendMail(c.env, address.primary_email, mail.subject, mail.lines));
+  }
+  clearCookie(c, SESSION_COOKIE);
+  clearCookie(c, CONSENT_APPROVALS_COOKIE);
+  return c.redirect('/account/deleted', 303);
+}
+
+/** Sends a security notice after the response. */
+export function notifyLater(c: AppContext, userId: string, notice: Notice): void {
+  workerCtx(c).waitUntil(notify(c.env, userId, notice));
+}
+
+/** A message page with its status, for the many ways sign-in can stop. */
+export function stopped(c: AppContext, message: Message, status: 400 | 403 | 429 | 500 = 400) {
+  return c.html(messagePage(message), status);
+}

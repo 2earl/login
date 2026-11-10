@@ -71,6 +71,8 @@ export interface AdminUser {
   createdAt: number;
   lastSignInAt: number | null;
   factors: number;
+  /** 'email', 'google': how the account signs in. */
+  methods: string[];
   isOwner: boolean;
 }
 
@@ -79,6 +81,9 @@ function userRow(user: AdminUser): string {
   const meta = [
     user.name ? escapeHtml(user.name) : null,
     `Joined ${formatDate(user.createdAt)}`,
+    user.methods.length
+      ? `signs in with ${user.methods.map((m) => (m === 'google' ? 'Google' : 'email code')).join(' and ')}`
+      : null,
     user.lastSignInAt ? `last sign-in ${dateTime(user.lastSignInAt)} UTC` : 'never signed in',
     user.factors > 0 ? `second factor: ${String(user.factors)}` : 'no second factor',
   ]
@@ -163,6 +168,8 @@ export interface AdminInvitation {
   value: string;
   /** For a pinned invitation: the email of the account that used it. */
   accountEmail: string | null;
+  /** Someone signed in with it. */
+  used: boolean;
   createdAt: number;
   isOwner: boolean;
 }
@@ -177,7 +184,7 @@ export function adminInvitationsPage(params: {
     .map((inv) => {
       const label =
         inv.kind === 'email'
-          ? `${escapeHtml(inv.value)}<span class="tag tag-muted">Not signed in yet</span>`
+          ? `${escapeHtml(inv.value)}<span class="tag tag-muted">${inv.used ? 'Signed in with email' : 'Not signed in yet'}</span>`
           : `${escapeHtml(inv.accountEmail ?? `Google account ${inv.value}`)}<span class="tag tag-muted">Signed in</span>`;
       return (
         '<li class="admin-row">' +
@@ -193,14 +200,24 @@ export function adminInvitationsPage(params: {
   return adminPage(
     'invitations',
     'Invitations',
-    `<p class="section-text">${
-      params.locked
-        ? 'Sign-up is closed: only these Google accounts can sign in. At the first sign-in an email invitation is pinned to that Google account.'
-        : 'Sign-up is open, so invitations are not checked right now. They apply again when sign-up is closed.'
-    } Withdrawing an invitation doesn’t sign anyone out; suspend the user for that.</p>` +
+    '<section class="section" aria-labelledby="signup-heading">' +
+      '<h2 id="signup-heading">Sign-up</h2>' +
+      `<p class="section-text">${
+        params.locked
+          ? '<strong>By invitation.</strong> New accounts need an invitation below. Accounts that already exist keep working.'
+          : '<strong>Open.</strong> Anyone can create an account with Google or an email code. Invitations below are not checked.'
+      }</p>` +
+      actionForm(
+        '/admin/invitations',
+        { action: 'signup', mode: params.locked ? 'open' : 'invite' },
+        params.locked ? 'Open sign-up' : 'Close sign-up (invitation only)',
+      ) +
+      '</section>' +
+      '<h2>Invitations</h2>' +
+      '<p class="section-text">An invitation names a Google account’s address, or an address that signs in with email codes. At the first Google sign-in it is pinned to that Google account. Withdrawing one doesn’t sign anyone out; suspend the user for that.</p>' +
       '<form method="post" action="/admin/invitations" class="inline-form">' +
       '<input type="hidden" name="action" value="add">' +
-      '<label class="field"><span>Invite a Google account by email</span>' +
+      '<label class="field"><span>Invite by email address</span>' +
       '<input name="email" type="email" required maxlength="254" autocomplete="off" spellcheck="false"></label>' +
       '<button class="button primary" type="submit">Invite</button></form>' +
       `<ul class="admin-list">${rows}</ul>`,
@@ -322,6 +339,11 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'login.succeeded': 'Signed in',
   'login.denied': 'Sign-in refused (not invited)',
   'login.failed': 'Sign-in failed',
+  'login.code_sent': 'Email code sent',
+  'login.code_failed': 'Wrong email code',
+  'login.code_refused': 'Email code not sent (limit)',
+  'identity.added': 'Sign-in method added',
+  'identity.removed': 'Sign-in method removed',
   'allowlist.pinned': 'Invitation used',
   'user.created': 'Account created',
   logout: 'Signed out',
@@ -352,10 +374,12 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'admin.client_untrusted': 'App unmarked',
   'admin.client_registered': 'App registered',
   'admin.client_deleted': 'App removed',
+  'admin.signup_changed': 'Sign-up switched',
 };
 
 /** Events worth a second look when scanning the log. */
-const ALERT_EVENTS = /\.(failed|denied|locked|refused)$|^admin\.(user_deleted|mfa_reset)$/;
+const ALERT_EVENTS =
+  /\.(failed|denied|locked|refused|code_refused|code_failed)$|^admin\.(user_deleted|mfa_reset|signup_changed)$/;
 
 function eventCell(event: string): string {
   const label = (EVENT_LABEL as Record<string, string | undefined>)[event] ?? event;

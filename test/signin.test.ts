@@ -66,7 +66,7 @@ describe('GET /login', () => {
   it('rate-limits repeated attempts from one address', async () => {
     const ip = freshIp();
     const statuses: number[] = [];
-    for (let i = 0; i < 25; i++) statuses.push((await call(app, '/login', { ip })).status);
+    for (let i = 0; i < 25; i++) statuses.push((await call(app, '/login/google', { ip })).status);
     expect(statuses).toContain(429);
   });
 });
@@ -75,7 +75,8 @@ describe('GET /callback/google', () => {
   it('signs the owner in and creates the account', async () => {
     const { callback, session } = await signIn(app, google);
     expect(callback.status).toBe(303);
-    expect(callback.headers.get('Location')).toBe('/account');
+    // A new account stops at the welcome page, then goes on.
+    expect(callback.headers.get('Location')).toBe('/welcome?return_to=%2Faccount');
     expect(session).toBeTruthy();
     expect(await count('users')).toBe(1);
     expect(await count('identities', "provider = 'google' AND subject = 'google-sub-owner'")).toBe(
@@ -219,7 +220,7 @@ describe('GET /callback/google', () => {
     const { callback } = await signIn(app, google, {
       query: '?return_to=' + encodeURIComponent('https://evil.example/steal'),
     });
-    expect(callback.headers.get('Location')).toBe('/account');
+    expect(callback.headers.get('Location')).toBe('/welcome?return_to=%2Faccount');
   });
 
   it('records events without the email address', async () => {

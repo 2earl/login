@@ -7,11 +7,10 @@ import {
 } from '@cloudflare/workers-oauth-provider';
 import { Hono } from 'hono';
 import type { JWTVerifyGetKey } from 'jose';
-import { deleteAccount, exportAccount } from './account';
-import { deliverDeletionNotices } from './deletion-notices';
+import { exportAccount } from './account';
 import { exportFromServices } from './service-exports';
 import { audit } from './audit';
-import { hmacHex, pkceChallenge, sha256Hex, timingSafeEqual } from './crypto';
+import { hmacHex, pkceChallenge, timingSafeEqual } from './crypto';
 import { GoogleSignInError, buildGoogleAuthUrl, exchangeCode, verifyGoogleIdToken } from './google';
 import { LOGIN_TX_TTL_SECONDS, consumeLoginTx, createLoginTx } from './login-tx';
 import { isStepUpFresh, listFactors, mfaGate, type MfaGate } from './mfa';
@@ -32,7 +31,6 @@ import {
   type Message,
 } from './pages';
 import {
-  CONSENT_APPROVALS_COOKIE,
   LOGIN_TX_COOKIE,
   SESSION_COOKIE,
   clearCookie,
@@ -47,8 +45,21 @@ import {
 } from './http';
 import { safeReturnTo } from './return-to';
 import { CONSENT_CSP, applySecurityHeaders } from './security-headers';
-import { createSession, deleteSession, getSession } from './sessions';
-import { allowlistMatch, isUserActive, pinAllowlistToSubject, upsertGoogleUser } from './users';
+import { deleteSession, getSession } from './sessions';
+import { registerEmailRoutes, sendCode } from './email-routes';
+import { registerMethodRoutes } from './method-routes';
+import { signupMode } from './settings';
+import { finishDeletion, notifyLater, startSession } from './sign-in';
+import {
+  accountWithEmail,
+  addGoogleIdentity,
+  allowlistMatch,
+  isUserActive,
+  listIdentities,
+  pinAllowlistToSubject,
+  upsertGoogleUser,
+  userForGoogle,
+} from './users';
 
 /** External dependencies, injectable so tests can stand in for Google. */
 export interface Deps {
@@ -61,7 +72,7 @@ export interface Deps {
 /** Paths a session may use before its second-factor gate is passed (DESIGN §4.7). */
 function gateAllows(gate: Exclude<MfaGate, null>, path: string): boolean {
   const always = ['/mfa', '/logout', '/login', '/callback/google', '/healthz', '/account/deleted'];
-  if (always.includes(path) || path.startsWith('/mfa/')) return true;
+  if (always.includes(path) || path.startsWith('/mfa/') || path.startsWith('/login/')) return true;
   if (path.startsWith('/oauth/') || path.startsWith('/.well-known/')) return true;
   if (gate === 'enrol') {
     // Enrolling, and the data-protection rights, stay available without a factor.
@@ -177,11 +188,33 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     return c.redirect(`${target}?return_to=${encodeURIComponent(url.pathname + url.search)}`, 303);
   });
 
-  app.get('/', (c) => (c.get('session') ? c.redirect('/account', 303) : c.html(signInPage())));
+  app.get('/', async (c) =>
+    c.get('session')
+      ? c.redirect('/account', 303)
+      : c.html(signInPage({ mode: await signupMode(c.env) })),
+  );
 
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
 
+  // Sign in or sign up: Google, or a code by email (DESIGN §4.9). reauth=1: a signed-in user
+  // proves it's them again, with the methods their account has.
   app.get('/login', async (c) => {
+    const returnTo = c.req.query('return_to') ? safeReturnTo(c.req.query('return_to')) : null;
+    const session = c.get('session');
+    const reauth = c.req.query('reauth') === '1';
+    if (session && !reauth) return c.redirect(safeReturnTo(returnTo), 303);
+    let methods: { google: boolean; email: string | null } | null = null;
+    if (session && reauth) {
+      const identities = await listIdentities(c.env, session.user.id);
+      methods = {
+        google: identities.some((i) => i.provider === 'google'),
+        email: identities.find((i) => i.provider === 'email')?.email ?? null,
+      };
+    }
+    return c.html(signInPage({ returnTo, mode: await signupMode(c.env), reauth: methods }));
+  });
+
+  app.get('/login/google', async (c) => {
     if (!(await underRateLimit(c, 'login'))) {
       return c.html(messagePage(MESSAGES.tooManyAttempts), 429);
     }
@@ -283,27 +316,60 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         .bind(session.user.id, identity.subject)
         .first<{ ok: number }>();
       if (!linked) return stop('different_account', MESSAGES.deletionWrongAccount, 403);
-
-      const oauth = authorizationServer(c.env).getOAuthApi(c.env);
-      try {
-        await deleteAccount(c.env.DB, oauth, session.user.id, now, ip);
-        // Tell every service now; the cron retries whatever doesn't go through.
-        workerCtx(c).waitUntil(deliverDeletionNotices(c.env, now));
-      } catch (error) {
-        console.error('account deletion failed', error instanceof Error ? error.name : 'unknown');
-        return stop('deletion_error', MESSAGES.deletionFailed, 500);
-      }
-      clearCookie(c, SESSION_COOKIE);
-      clearCookie(c, CONSENT_APPROVALS_COOKIE);
-      return c.redirect('/account/deleted', 303);
+      return finishDeletion(c, now, session.user.id, stop);
     }
 
-    // Locked launch: check before any account is created.
-    const locked: string = c.env.LOGIN_LOCKED;
-    if (locked !== 'false') {
+    // Adding Google to the signed-in account (DESIGN §4.9): the same browser session that asked.
+    if (tx.purpose === 'link_google') {
+      const session = c.get('session');
+      if (!session || session.user.id !== tx.userId) {
+        return c.html(messagePage(MESSAGES.linkNotConfirmed, 'Nothing changed'), 400);
+      }
+      const owner = await userForGoogle(c.env.DB, identity.subject);
+      if (owner && owner !== session.user.id) {
+        return c.html(messagePage(MESSAGES.googleTaken, 'Nothing changed'), 409);
+      }
+      // An address that signs in to another account by email code stays that account's (B3).
+      const clash = owner
+        ? null
+        : await accountWithEmail(c.env.DB, identity.email, session.user.id);
+      if (clash?.provider === 'email') {
+        return c.html(messagePage(MESSAGES.emailTaken, 'Nothing changed'), 409);
+      }
+      if (!owner) {
+        await addGoogleIdentity(c.env.DB, now, session.user.id, identity);
+        await audit(c.env.DB, now, 'identity.added', {
+          actorUserId: session.user.id,
+          ipPrefix: ip,
+          detail: { provider: 'google' },
+        });
+        notifyLater(c, session.user.id, {
+          kind: 'method_added',
+          method: `the Google account ${identity.email}`,
+        });
+      }
+      return c.redirect('/account?added=google', 303);
+    }
+
+    // A new account: sign-up must be open, or the account invited; and an address that already
+    // signs in with an email code stays that account's (no joining by address, THREAT_MODEL B3).
+    const known = await userForGoogle(c.env.DB, identity.subject);
+    if (!known) {
+      const clash = await accountWithEmail(c.env.DB, identity.email);
+      if (clash?.provider === 'email') {
+        await audit(c.env.DB, now, 'login.denied', {
+          ipPrefix: ip,
+          detail: { reason: 'email_has_account' },
+        });
+        return c.html(messagePage(MESSAGES.emailHasAccount), 409);
+      }
+    }
+    if ((await signupMode(c.env)) === 'invite') {
       const match = await allowlistMatch(c.env.DB, identity);
-      if (!match) return fail('not_allowlisted', 403);
-      if (match === 'email') {
+      if (!match && !known) return fail('not_allowlisted', 403);
+      if (!match && known) {
+        // An account made while sign-up was open keeps working after it closes.
+      } else if (match === 'email') {
         await pinAllowlistToSubject(c.env.DB, now, identity);
         await audit(c.env.DB, now, 'allowlist.pinned', { ipPrefix: ip });
       }
@@ -314,18 +380,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
 
     if (!(await isUserActive(c.env.DB, userId))) return fail('user_suspended', 403);
 
-    // A fresh session on every sign-in; any session the browser already had is ended.
-    const previous = c.get('session');
-    if (previous) await deleteSession(c.env.DB, previous.idHash);
-    const userAgent = c.req.header('User-Agent');
-    const session = await createSession(c.env.DB, c.env.SESSION_PEPPER, now, userId, {
-      ipPrefix: ip,
-      userAgentHash: userAgent ? (await sha256Hex(userAgent)).slice(0, 16) : null,
-    });
-    setCookie(c, SESSION_COOKIE, session.cookieValue, session.expiresAt - now);
-    await audit(c.env.DB, now, 'login.succeeded', { actorUserId: userId, ipPrefix: ip });
-
-    return c.redirect(safeReturnTo(tx.returnTo), 303);
+    return startSession(c, now, userId, tx.returnTo, { welcome: created });
   });
 
   app.post('/logout', async (c) => {
@@ -346,7 +401,19 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     const session = c.get('session');
     if (!session) return c.redirect('/login?return_to=%2Faccount', 303);
     const oauth = authorizationServer(c.env).getOAuthApi(c.env);
-    const notice = c.req.query('disconnected') === '1' ? 'App disconnected.' : undefined;
+    const notices: Record<string, string> = {
+      disconnected: 'App disconnected.',
+      google: 'You can now sign in with Google too.',
+      email: 'You can now sign in with a code sent to that address too.',
+      removed: 'Sign-in method removed.',
+      name: 'Name saved.',
+    };
+    const key =
+      c.req.query('disconnected') === '1'
+        ? 'disconnected'
+        : (c.req.query('added') ??
+          (c.req.query('removed') === '1' ? 'removed' : c.req.query('saved')));
+    const notice = key ? notices[key] : undefined;
     return c.html(
       accountPage({
         email: session.user.primaryEmail,
@@ -355,6 +422,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         apps: await connectedApps(oauth, session.user.id),
         factors: await listFactors(c.env.DB, session.user.id),
         isOwner: await isOwnerUser(c.env, session.user.id),
+        methods: await listIdentities(c.env, session.user.id),
         ...(notice ? { notice } : {}),
       }),
     );
@@ -416,11 +484,16 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     )
       .bind(session.user.id)
       .first<{ ok: number }>();
+    const identities = await listIdentities(c.env, session.user.id);
     return c.html(
       deleteAccountPage({
         email: session.user.primaryEmail,
         appCount: items.length,
         invited: Boolean(invited),
+        confirmWith: {
+          google: identities.some((i) => i.provider === 'google'),
+          email: identities.find((i) => i.provider === 'email')?.email ?? null,
+        },
       }),
     );
   });
@@ -439,8 +512,24 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       return c.redirect('/mfa?step_up=1&return_to=%2Faccount%2Fdelete', 303);
     }
 
-    // Deletion happens only after Google confirms the linked account in this browser.
     const now = deps.now();
+    const identities = await listIdentities(c.env, session.user.id);
+    const emailMethod = identities.find((i) => i.provider === 'email')?.email ?? null;
+    const hasGoogle = identities.some((i) => i.provider === 'google');
+    // With a code to the account's own address, when that's how it signs in (DESIGN §4.9).
+    if (emailMethod && (form.get('method') === 'email' || !hasGoogle)) {
+      await audit(c.env.DB, now, 'account.deletion_started', {
+        actorUserId: session.user.id,
+        ipPrefix: clientIp(c),
+      });
+      return sendCode(c, now, {
+        email: emailMethod,
+        purpose: 'delete_account',
+        userId: session.user.id,
+      });
+    }
+
+    // Deletion happens only after Google confirms the linked account in this browser.
     const tx = await createLoginTx(c.env.DB, c.env.SESSION_PEPPER, now, null, {
       purpose: 'delete_account',
       userId: session.user.id,
@@ -467,6 +556,8 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     c.get('session') ? c.redirect('/account', 303) : c.html(accountDeletedPage()),
   );
 
+  registerEmailRoutes(app, deps);
+  registerMethodRoutes(app, deps);
   registerMfaRoutes(app, deps);
   registerAdminRoutes(app, deps);
 
@@ -636,6 +727,9 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       if (approvedScope.length === 0) {
         return c.html(messagePage(MESSAGES.consentExpired, 'Approval stopped'), 400);
       }
+      // A notice by email the first time an app is allowed, not on every later sign-in with it.
+      const earlier = await oauth.listUserGrants(session.user.id, { limit: 1000 });
+      const firstTime = !earlier.items.some((g) => g.clientId === approved.request.clientId);
       const { redirectTo } = await oauth.completeAuthorization({
         request: approved.request, // from server-side storage, not from the form
         userId: session.user.id,
@@ -653,6 +747,15 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         ipPrefix: clientIp(c),
         detail: { scope: approvedScope.join(' ') },
       });
+      if (firstTime) {
+        let app = 'An app';
+        try {
+          app = (await oauth.lookupClient(approved.request.clientId))?.clientName ?? app;
+        } catch {
+          // The app's details can't be loaded now; the notice still goes out.
+        }
+        notifyLater(c, session.user.id, { kind: 'app_connected', app });
+      }
       approved.headers.set('Location', redirectTo);
       return new Response(null, { status: 302, headers: approved.headers });
     } catch (error) {

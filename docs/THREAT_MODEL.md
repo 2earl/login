@@ -95,6 +95,21 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | Google account compromise | Out of our control. Mitigation: user can revoke all grants; owner can suspend the user. Owner account must use Google 2-step verification / passkey |
 | Google client secret leak (A5) | Stored only as GitHub environment secret and Worker secret. Leak alone does not bypass redirect-URI matching. **Rotate** — it was shared in plain text during setup (R5) |
 
+### B3 — Sign-in with an email code (DESIGN §4.9, phase 7)
+
+| Threat | Mitigation |
+|---|---|
+| Guessing a code | 6 digits, 5 tries per code, then it stops; codes need the cookie of the browser that asked, so an attacker can't try codes for someone else's request. Per-address and per-network send limits bound how many codes exist |
+| Login CSRF: a victim is signed in to the attacker's account by opening the attacker's link | The link works only with the `__Host-email_code` cookie of the browser that asked |
+| Mail scanners "clicking" the link, signing in or burning it | Opening the link shows a button; only the POST uses the code |
+| Code leaked from the database | Only HMACs (`SESSION_PEPPER`) of the code, the link token and the cookie are stored |
+| Account enumeration through the form | The same answer for addresses with and without an account; a code is sent either way |
+| Using the form to flood someone's inbox, or our sender's reputation | 5 codes per address per hour (10 a day), 20 per network per hour, 2,000 a day overall; `AUTH_RATE_LIMITER`; zone rate rule on the paths |
+| Takeover of a Google user's account by someone with access to the same inbox | No joining by address: an email sign-in never reaches an account that signs in with Google, and vice versa. Methods are added only while signed in, after a recent proof |
+| Compromised inbox | Equals account access for accounts that sign in by email (as for any passwordless email sign-in). Mitigations: security notices on every change, second factor offered at sign-up and enforced once enrolled |
+| Stolen session adds the attacker's method | Adding or removing a method needs a recent second factor or sign-in (`changeCheck`), and the account's address gets a notice |
+| Owner locked out of `/admin` by removing their Google account | The owner's Google method can't be removed |
+
 ### B1/B3 — Second factor (DESIGN §4.7, phase 5)
 
 | Threat | Mitigation |
@@ -161,10 +176,10 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | R4 | GitHub org members without 2FA. Not the same as MFA in this service (DESIGN §4.7). | **Resolved** 2026-11-08 (org requires 2FA, verified via API) | — |
 | R5a | Cloudflare Global API Key (`cfk_…`) was pasted into chat. It has full control of the Cloudflare account and cannot be scoped. | **Accepted** by owner, against recommendation | Roll it in the Cloudflare dashboard if it is ever needed again or exposure is suspected |
 | R5b | Cloudflare account token and Google client secret were pasted into chat. | **Deferred** by owner (2026-11-08); must be done before sign-up opens | Roll the Cloudflare token (same permissions) and update it in both GitHub `production` and HCP; add a new Google client secret, update GitHub, disable the old one. HCP team token: revoked 2026-11-08 |
-| R6 | No staging: first exposure of new code is production. | **Accepted**, mitigated by locked launch (D9) | — |
+| R6 | No staging: first exposure of new code is production. | **Accepted**, mitigated by locked launch (D9) until 2026-11-10; since sign-up opened, by the sign-up switch on `/admin/invitations` (close it without a deploy) | — |
 | R7 | Library keeps the previous refresh token valid until the rotated one is used (retry safety). A stolen-and-raced refresh token may work once. | Accepted (library design) | Monitor via audit; consider DPoP later |
 | R8 | Old org-level secrets (`CLOUDFLARE_API_KEY`, Google pair) readable by every org repo. | **Resolved** 2026-11-08 (deleted) | — |
-| R9 | Account deletion is confirmed through Google, but Google cannot force a password re-entry. Someone at an unlocked computer that is signed in to both 2earl and Google can delete the account. A stolen 2earl session cookie alone cannot. | **Mitigated** 2026-11-09 for users with a second factor: deletion also needs it, used in the last 5 minutes. **Accepted** for users without one | Users who want this protection add a passkey |
+| R9 | Account deletion is confirmed through Google (or, for accounts that sign in by email, a code to that address), but neither forces a password re-entry. Someone at an unlocked computer that is signed in to both 2earl and Google can delete the account. A stolen 2earl session cookie alone cannot. | **Mitigated** 2026-11-09 for users with a second factor: deletion also needs it, used in the last 5 minutes. **Accepted** for users without one | Users who want this protection add a passkey |
 
 ## 6. Security review triggers
 

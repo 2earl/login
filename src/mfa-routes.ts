@@ -10,6 +10,7 @@ import type { Hono } from 'hono';
 import { renderSVG } from 'uqr';
 import type { Deps } from './app';
 import { audit } from './audit';
+import { notifyLater } from './sign-in';
 import { base64url } from './crypto';
 import { clientIp, isSameOrigin, underRateLimit, type AppContext, type AppEnv } from './http';
 import {
@@ -92,7 +93,16 @@ function cleanLabel(value: unknown, fallback: string): string {
  * most 5 minutes old. Without one: only within 10 minutes of signing in with Google, so a session
  * cookie stolen later can't attach the thief's own factor.
  */
-function changeCheck(session: Session, now: number, returnTo: string): string | null {
+/** "A passkey", "An authenticator app": how a notice names a factor kind. */
+function factorName(kind: string): string {
+  return kind === 'webauthn'
+    ? 'A passkey'
+    : kind === 'totp'
+      ? 'An authenticator app'
+      : 'A second factor';
+}
+
+export function changeCheck(session: Session, now: number, returnTo: string): string | null {
   if (session.hasFactor) {
     return isStepUpFresh(session, now)
       ? null
@@ -117,6 +127,7 @@ export function registerMfaRoutes(app: Hono<AppEnv>, deps: Deps): void {
       ipPrefix: clientIp(c),
       detail: { kind },
     });
+    notifyLater(c, session.user.id, { kind: 'factor_added', factor: factorName(kind) });
     if (session.hasFactor) return '/account/security?done=added';
     await markSessionAal2(c.env.DB, session.idHash, now);
     const codes = await regenerateRecoveryCodes(
@@ -338,6 +349,7 @@ export function registerMfaRoutes(app: Hono<AppEnv>, deps: Deps): void {
         ipPrefix: clientIp(c),
         detail: { kind: kind ?? null },
       });
+      notifyLater(c, session.user.id, { kind: 'factor_removed', factor: factorName(kind ?? '') });
     }
     return c.redirect('/account/security?done=removed', 303);
   });
@@ -371,6 +383,7 @@ export function registerMfaRoutes(app: Hono<AppEnv>, deps: Deps): void {
       actorUserId: session.user.id,
       ipPrefix: clientIp(c),
     });
+    notifyLater(c, session.user.id, { kind: 'recovery_codes' });
     return c.redirect('/account/security/recovery-codes', 303);
   });
 

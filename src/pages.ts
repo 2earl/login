@@ -5,6 +5,8 @@
  */
 
 import { ASSET_URLS } from './assets.generated';
+import type { SignupMode } from './settings';
+import type { Identity } from './users';
 
 export function escapeHtml(value: string): string {
   return value
@@ -75,16 +77,212 @@ export function page(
   );
 }
 
-export function signInPage(): string {
+/** Hidden return_to, so each way of signing in comes back to where the user was going. */
+function returnField(returnTo: string | null): string {
+  return returnTo ? `<input type="hidden" name="return_to" value="${escapeHtml(returnTo)}">` : '';
+}
+
+function withReturn(path: string, returnTo: string | null, extra = ''): string {
+  const query = [returnTo ? `return_to=${encodeURIComponent(returnTo)}` : '', extra]
+    .filter(Boolean)
+    .join('&');
+  return query ? `${path}?${query}` : path;
+}
+
+/**
+ * Sign in or sign up (DESIGN §4.9): with Google, or with a code sent by email. `reauth` asks a
+ * signed-in user to prove it's them again, with the methods their account has.
+ */
+export function signInPage(
+  params: {
+    returnTo?: string | null;
+    mode?: SignupMode;
+    reauth?: { google: boolean; email: string | null } | null;
+    error?: string;
+    email?: string;
+  } = {},
+): string {
+  const returnTo = params.returnTo ?? null;
+  const reauth = params.reauth ?? null;
+  const google = !reauth || reauth.google;
+  const fixedEmail = reauth?.email ?? null;
+  const showEmail = !reauth || fixedEmail !== null;
+  const emailForm = showEmail
+    ? '<form method="post" action="/login/email" class="email-form" novalidate>' +
+      returnField(returnTo) +
+      (reauth ? '<input type="hidden" name="reauth" value="1">' : '') +
+      (fixedEmail
+        ? `<input type="hidden" name="email" value="${escapeHtml(fixedEmail)}">` +
+          `<p class="section-text">We’ll send a code to <strong>${escapeHtml(fixedEmail)}</strong>.</p>`
+        : '<label class="field"><span>Email address</span>' +
+          `<input name="email" type="email" autocomplete="email" inputmode="email" required maxlength="254" value="${escapeHtml(params.email ?? '')}"${params.error ? ' aria-invalid="true" aria-describedby="email-error"' : ''}></label>` +
+          (params.error
+            ? `<p class="field-error" id="email-error">${escapeHtml(params.error)}</p>`
+            : '')) +
+      `<button class="button ${google ? 'secondary' : 'primary'} wide" type="submit">${fixedEmail ? 'Send me a code' : 'Continue with email'}</button>` +
+      '</form>'
+    : '';
+  const googleButton = google
+    ? `<a class="gsi" href="${escapeHtml(withReturn('/login/google', returnTo, reauth ? 'reauth=1' : ''))}">${GOOGLE_G}<span>Continue with Google</span></a>`
+    : '';
+  const invite = params.mode === 'invite';
   return page(
-    'Sign in',
-    '<h1>Sign in to your 2earl account</h1>' +
-      '<p class="lede">One account for 2earl services, and one place to decide which apps may act for you.</p>' +
-      `<a class="gsi" href="/login">${GOOGLE_G}<span>Continue with Google</span></a>` +
-      '<p class="note">Sign-up isn’t open yet. Only invited Google accounts can sign in.</p>' +
-      '<p class="fine">By continuing, you agree to the ' +
-      '<a href="https://2earl.com/terms">Terms of service</a> and acknowledge the ' +
-      '<a href="https://2earl.com/privacy">Privacy policy</a>.</p>',
+    reauth ? 'Confirm it’s you' : 'Sign in',
+    (reauth
+      ? '<h1>Confirm it’s you</h1>' +
+        '<p class="lede">Sign in again to continue. It keeps someone who finds your browser signed in from changing your account.</p>'
+      : '<h1>Sign in or create your account</h1>' +
+        '<p class="lede">One 2earl account for every 2earl service, and one place to decide which apps may act for you.</p>') +
+      googleButton +
+      (googleButton && emailForm ? '<p class="or" role="separator"><span>or</span></p>' : '') +
+      emailForm +
+      (reauth
+        ? ''
+        : invite
+          ? '<p class="note">Sign-up is by invitation for now. Use the Google account or the address you were invited with.</p>'
+          : '<p class="note">New here? The same buttons create your account. With email, there’s no password: we send you a code each time.</p>') +
+      (reauth
+        ? ''
+        : '<p class="fine">By continuing, you agree to the ' +
+          '<a href="https://2earl.com/terms">Terms of service</a> and acknowledge the ' +
+          '<a href="https://2earl.com/privacy">Privacy policy</a>.</p>'),
+  );
+}
+
+/** "Check your email": the code field, and what to do if it doesn't arrive. */
+export function emailCodePage(params: {
+  email: string;
+  purpose: 'sign_in' | 'delete_account' | 'link_email';
+  error?: string;
+  resent?: boolean;
+}): string {
+  const title =
+    params.purpose === 'delete_account'
+      ? 'Confirm deleting your account'
+      : params.purpose === 'link_email'
+        ? 'Confirm your address'
+        : 'Check your email';
+  const button =
+    params.purpose === 'delete_account'
+      ? '<button class="button danger wide" type="submit">Delete my account</button>'
+      : `<button class="button primary wide" type="submit">${params.purpose === 'link_email' ? 'Add this address' : 'Continue'}</button>`;
+  return page(
+    title,
+    `<h1>${escapeHtml(title)}</h1>` +
+      `<p class="lede">We sent a 6-digit code to <strong>${escapeHtml(params.email)}</strong>. It works for 10 minutes.</p>` +
+      (params.resent
+        ? '<p class="notice" role="status">We sent a new code. Earlier ones no longer work.</p>'
+        : '') +
+      '<form method="post" action="/login/email/code" class="code-form">' +
+      '<label class="field"><span>Code</span>' +
+      `<input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required autofocus${params.error ? ' aria-invalid="true" aria-describedby="code-error"' : ''}></label>` +
+      (params.error
+        ? `<p class="field-error" id="code-error">${escapeHtml(params.error)}</p>`
+        : '') +
+      button +
+      '</form>' +
+      '<details class="manual"><summary>Didn’t get it?</summary>' +
+      '<p class="note">Check your spam folder, and that the address is right. Codes can take a minute.</p>' +
+      '<form method="post" action="/login/email/resend"><button class="button secondary small" type="submit">Send a new code</button></form>' +
+      (params.purpose === 'sign_in'
+        ? '<p class="note"><a href="/login">Use a different address, or Google</a></p>'
+        : '') +
+      '</details>',
+  );
+}
+
+/** The link from the email opens this; the button does the sign-in (scanners only open links). */
+export function emailLinkPage(token: string, purpose: string): string {
+  const label =
+    purpose === 'delete_account'
+      ? 'Delete my account'
+      : purpose === 'link_email'
+        ? 'Add this address'
+        : 'Continue to 2earl';
+  return page(
+    'Continue',
+    '<h1>One more step</h1>' +
+      '<p class="lede">Continue in this browser.</p>' +
+      '<form method="post" action="/login/email/link">' +
+      `<input type="hidden" name="token" value="${escapeHtml(token)}">` +
+      `<button class="button ${purpose === 'delete_account' ? 'danger' : 'primary'} wide" type="submit">${escapeHtml(label)}</button>` +
+      '</form>',
+  );
+}
+
+/** First stop after a new account is created: a name, and a nudge towards a passkey. */
+export function welcomePage(params: { email: string | null; returnTo: string | null }): string {
+  return page(
+    'Welcome',
+    '<h1>Your account is ready</h1>' +
+      `<p class="lede">You signed up as <strong>${escapeHtml(params.email ?? '')}</strong>.</p>` +
+      '<form method="post" action="/welcome" class="code-form">' +
+      returnField(params.returnTo) +
+      '<label class="field"><span>Your name <span class="optional">optional, shown on your account and to people you share with</span></span>' +
+      '<input name="name" type="text" autocomplete="name" maxlength="80"></label>' +
+      '<button class="button primary wide" type="submit">Continue</button>' +
+      '</form>' +
+      '<section class="section" aria-labelledby="protect-heading">' +
+      '<h2 id="protect-heading">Protect your account</h2>' +
+      '<p class="section-text">Add a passkey or an authenticator app as a second factor. Then nobody can use your account with your email alone.</p>' +
+      '<a class="button secondary" href="/account/security">Add a second factor</a>' +
+      '</section>',
+  );
+}
+
+/** Changing the name shown on the account. */
+export function namePage(name: string | null): string {
+  return page(
+    'Your name',
+    '<p class="crumb"><a href="/account">Your account</a></p>' +
+      '<h1>Your name</h1>' +
+      '<form method="post" action="/account/name" class="code-form">' +
+      '<label class="field"><span>Name <span class="optional">leave empty to show only your address</span></span>' +
+      `<input name="name" type="text" autocomplete="name" maxlength="80" value="${escapeHtml(name ?? '')}"></label>` +
+      '<div class="consent-actions"><button class="button primary" type="submit">Save</button>' +
+      '<a class="button secondary" href="/account">Cancel</a></div>' +
+      '</form>',
+  );
+}
+
+/** Adding an address as a way to sign in. */
+export function addEmailPage(params: { error?: string; email?: string }): string {
+  return page(
+    'Add an email address',
+    '<p class="crumb"><a href="/account">Your account</a></p>' +
+      '<h1>Sign in with an email address</h1>' +
+      '<p class="lede">We send a code to the address to check it’s yours. After that, you can sign in with a code sent there.</p>' +
+      '<form method="post" action="/account/methods/email" class="email-form" novalidate>' +
+      '<label class="field"><span>Email address</span>' +
+      `<input name="email" type="email" autocomplete="email" required maxlength="254" value="${escapeHtml(params.email ?? '')}"${params.error ? ' aria-invalid="true" aria-describedby="email-error"' : ''}></label>` +
+      (params.error
+        ? `<p class="field-error" id="email-error">${escapeHtml(params.error)}</p>`
+        : '') +
+      '<div class="consent-actions"><button class="button primary" type="submit">Send a code</button>' +
+      '<a class="button secondary" href="/account">Cancel</a></div>' +
+      '</form>',
+  );
+}
+
+function methodsList(methods: Identity[]): string {
+  const removable = methods.length > 1;
+  return (
+    '<ul class="methods">' +
+    methods
+      .map(
+        (m) =>
+          '<li>' +
+          `<span class="method-name">${m.provider === 'google' ? 'Google' : 'Email code'}</span>` +
+          `<span class="method-what">${escapeHtml(m.email ?? '')}</span>` +
+          (removable && !m.isOwner
+            ? '<form method="post" action="/account/methods/remove">' +
+              `<input type="hidden" name="identity" value="${escapeHtml(m.id)}">` +
+              '<button class="link-button danger" type="submit">Remove</button></form>'
+            : '') +
+          '</li>',
+      )
+      .join('') +
+    '</ul>'
   );
 }
 
@@ -146,8 +344,11 @@ export function accountPage(params: {
   notice?: string;
   /** The owner sees a link to /admin. */
   isOwner?: boolean;
+  methods?: Identity[];
 }): string {
   const heading = params.name ?? 'Your account';
+  const methods = params.methods ?? [];
+  const hasGoogle = methods.some((m) => m.provider === 'google');
   return page(
     'Your account',
     (params.notice ? `<p class="notice" role="status">${escapeHtml(params.notice)}</p>` : '') +
@@ -169,6 +370,16 @@ export function accountPage(params: {
       '<h2 id="apps-heading">Connected apps</h2>' +
       connectedApps(params.apps) +
       '</section>' +
+      '<section class="section" aria-labelledby="methods-heading">' +
+      '<h2 id="methods-heading">How you sign in</h2>' +
+      methodsList(methods) +
+      '<div class="data-actions">' +
+      (hasGoogle
+        ? ''
+        : '<form method="post" action="/account/methods/google"><button class="button secondary" type="submit">Add Google</button></form>') +
+      '<a class="button secondary" href="/account/methods/email">Add an email address</a>' +
+      '</div>' +
+      '</section>' +
       '<section class="section" aria-labelledby="security-heading">' +
       '<h2 id="security-heading">Security</h2>' +
       `<p class="section-text">${escapeHtml(factorSummary(params.factors))}</p>` +
@@ -177,7 +388,7 @@ export function accountPage(params: {
       '<section class="section" aria-labelledby="details-heading">' +
       '<h2 id="details-heading">Account details</h2>' +
       '<dl class="details">' +
-      '<dt>Signs in with</dt><dd>Google</dd>' +
+      `<dt>Name</dt><dd>${escapeHtml(params.name ?? 'Not set')} · <a href="/account/name">Change</a></dd>` +
       `<dt>Member since</dt><dd>${formatDate(params.memberSince)}</dd>` +
       '</dl>' +
       '</section>' +
@@ -272,7 +483,10 @@ export function deleteAccountPage(params: {
   email: string | null;
   appCount: number;
   invited: boolean;
+  /** How the user can confirm: the account's methods. Defaults to Google. */
+  confirmWith?: { google: boolean; email: string | null };
 }): string {
+  const confirmWith = params.confirmWith ?? { google: true, email: null };
   const apps =
     params.appCount === 0
       ? 'Connected apps: none right now'
@@ -280,12 +494,12 @@ export function deleteAccountPage(params: {
   return page(
     'Delete your account',
     '<h1>Delete your 2earl account</h1>' +
-      '<p class="lede">Your account is deleted as soon as you confirm with Google. It can’t be restored.</p>' +
+      `<p class="lede">Your account is deleted as soon as you confirm ${confirmWith.google ? 'with Google' : 'with a code we email you'}. It can’t be restored.</p>` +
       '<div class="ledger">' +
       '<section aria-labelledby="deleted-heading">' +
       '<h2 id="deleted-heading">Deleted now</h2>' +
       '<ul>' +
-      `<li>Your name and email address${params.email ? ` (${escapeHtml(params.email)})` : ''}, and the link to your Google account</li>` +
+      `<li>Your name and email address${params.email ? ` (${escapeHtml(params.email)})` : ''}, and how you sign in</li>` +
       `<li>${escapeHtml(apps)}</li>` +
       '<li>Every signed-in browser, including this one</li>' +
       (params.invited
@@ -306,7 +520,12 @@ export function deleteAccountPage(params: {
       '<label class="confirm"><input type="checkbox" name="confirm" value="on" required>' +
       '<span>I understand my account and connected apps can’t be restored.</span></label>' +
       '<div class="consent-actions">' +
-      '<button class="button danger" type="submit">Confirm with Google</button>' +
+      (confirmWith.google
+        ? '<button class="button danger" type="submit" name="method" value="google">Confirm with Google</button>'
+        : '') +
+      (confirmWith.email
+        ? `<button class="button ${confirmWith.google ? 'secondary' : 'danger'}" type="submit" name="method" value="email">Confirm with an email code</button>`
+        : '') +
       '<a class="button secondary" href="/account">Keep account</a>' +
       '</div>' +
       '</form>' +
@@ -328,7 +547,7 @@ export function accountDeletedPage(): string {
 
 function factorSummary(factors: { kind: 'webauthn' | 'totp' }[]): string {
   if (factors.length === 0) {
-    return 'Second factor: off. Adding a passkey protects your account even if someone gets into your Google account.';
+    return 'Second factor: off. Adding a passkey protects your account even if someone gets into your Google account or your inbox.';
   }
   const passkeys = factors.filter((f) => f.kind === 'webauthn').length;
   const parts = [];
@@ -565,9 +784,54 @@ export const MESSAGES = {
     body: 'Approval pages work once, for ten minutes, in the browser that opened them. Return to the app and connect again.',
   },
   notInvited: {
-    title: 'This Google account can’t sign in yet',
-    body: 'Sign-up isn’t open yet. If you were invited, use the Google account the invitation was for.',
-    action: { href: '/login', label: 'Use a different Google account' },
+    title: 'This account can’t sign in yet',
+    body: 'Sign-up is by invitation for now. If you were invited, use the Google account or the address the invitation was for.',
+    action: { href: '/login', label: 'Try another account' },
+  },
+  emailHasAccount: {
+    title: 'This address already has an account',
+    body: 'An account that signs in with an email code uses this address. Sign in with email, then add Google on your account page, so both work.',
+    action: { href: '/login', label: 'Sign in with email' },
+  },
+  googleHasAccount: {
+    title: 'This address already has an account',
+    body: 'An account that signs in with Google uses this address. Continue with Google, then add email sign-in on your account page if you like.',
+    action: { href: '/login/google', label: 'Continue with Google' },
+  },
+  codeExpired: {
+    title: 'That code no longer works',
+    body: 'Codes work once, for 10 minutes, in the browser that asked for them, and stop after 5 wrong tries. Ask for a new one.',
+    action: { href: '/login', label: 'Get a new code' },
+  },
+  linkOtherBrowser: {
+    title: 'Open the link where you asked for it',
+    body: 'For your safety, the link works only in the browser where you asked for the code. Go back to that browser and open the link there, or type the 6-digit code from the email.',
+    action: { href: '/login', label: 'Start again here' },
+  },
+  tooManyCodes: {
+    title: 'Too many codes for now',
+    body: 'We’ve sent several codes recently, so we’re pausing for a while to protect the inbox. Use the newest code you got, or try again in an hour.',
+    action: { href: '/login', label: 'Back to sign-in' },
+  },
+  emailNotSent: {
+    title: 'We couldn’t send the email',
+    body: 'Something went wrong on our side, and no code was sent. Try again in a minute, or continue with Google.',
+    action: { href: '/login', label: 'Back to sign-in' },
+  },
+  googleTaken: {
+    title: 'That Google account belongs to another 2earl account',
+    body: 'A Google account can sign in to one 2earl account only. Nothing was changed.',
+    action: { href: '/account', label: 'Back to your account' },
+  },
+  emailTaken: {
+    title: 'That address belongs to another 2earl account',
+    body: 'An address can sign in to one 2earl account only. Nothing was changed.',
+    action: { href: '/account', label: 'Back to your account' },
+  },
+  linkNotConfirmed: {
+    title: 'Nothing was added',
+    body: 'The confirmation expired, was cancelled, or you signed out in between. Try again from your account page.',
+    action: { href: '/account', label: 'Back to your account' },
   },
   deletionNotConfirmed: {
     title: 'Your account was not deleted',

@@ -28,8 +28,10 @@
     "ISSUER": "https://login.2earl.com",
     // Google OAuth client ID. Public by design: it appears in every sign-in URL.
     "GOOGLE_CLIENT_ID": "862466313467-kgrf9bd3j96b0peeujk8h5j3ak49ugou.apps.googleusercontent.com",
-    // Locked launch (DESIGN D9): only allowlisted accounts may sign in. "false" opens sign-up.
-    "LOGIN_LOCKED": "true",
+    // Sign-up (DESIGN D9, §4.9): "false" lets anyone create an account; "true" admits only
+    // invited ones. The owner can switch it on /admin/invitations without a deploy; that setting
+    // wins over this default.
+    "LOGIN_LOCKED": "false",
     // The MCP gateway's canonical resource URL: the only audience tokens are issued for.
     "MCP_RESOURCE": "https://mcp.2earl.com/mcp",
     // Prompt share's website (phase P2): the audience of its sign-in tokens.
@@ -59,6 +61,10 @@
     { "binding": "MCP_GATEWAY_EVENTS", "service": "mcp", "entrypoint": "AccountEvents" },
     { "binding": "PROMPTSHARE_EVENTS", "service": "promptshare", "entrypoint": "AccountEvents" },
   ],
+
+  // Sign-in codes and security notices (src/mail.ts), from noreply@2earl.com only. Sending to
+  // any address needs Workers Paid and 2earl.com onboarded to Cloudflare Email Service.
+  "send_email": [{ "name": "MAILER", "allowed_sender_addresses": ["noreply@2earl.com"] }],
 
   // Per-IP limit on the sign-in endpoints, on top of the zone rate-limit rule (infra/firewall.tf).
   "ratelimits": [

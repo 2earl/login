@@ -23,6 +23,7 @@ import {
 } from './http';
 import { deliverDeletionNotices, pendingNotices } from './deletion-notices';
 import { isStepUpFresh } from './mfa';
+import { setSignupMode, signupMode } from './settings';
 import { authorizationServer } from './oauth';
 import { notFoundPage } from './pages';
 import type { Session } from './sessions';
@@ -48,6 +49,8 @@ const NOTICES: Record<string, string> = {
   trusted: 'App marked as verified.',
   untrusted: 'Verification removed.',
   unregistered: 'App deleted and its access revoked.',
+  signup_open: 'Sign-up is open. Anyone can create an account.',
+  signup_invite: 'Sign-up is closed. New accounts need an invitation.',
 };
 
 function isLoopback(url: URL): boolean {
@@ -140,9 +143,11 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
   async function listUsers(c: AppContext): Promise<AdminUser[]> {
     const { results } = await c.env.DB.prepare(
       `SELECT u.id, u.status, u.display_name, u.primary_email, u.created_at,
-              i.subject, i.last_login_at,
+              (SELECT subject FROM identities WHERE user_id = u.id AND provider = 'google') AS subject,
+              (SELECT MAX(last_login_at) FROM identities WHERE user_id = u.id) AS last_login_at,
+              (SELECT GROUP_CONCAT(provider) FROM identities WHERE user_id = u.id) AS methods,
               (SELECT COUNT(*) FROM mfa_factors f WHERE f.user_id = u.id) AS factors
-       FROM users u LEFT JOIN identities i ON i.user_id = u.id AND i.provider = 'google'
+       FROM users u
        ORDER BY u.created_at LIMIT 1000`,
     ).all<{
       id: string;
@@ -152,6 +157,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
       created_at: number;
       subject: string | null;
       last_login_at: number | null;
+      methods: string | null;
       factors: number;
     }>();
     return results.map((row) => ({
@@ -162,6 +168,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
       createdAt: row.created_at,
       lastSignInAt: row.last_login_at,
       factors: row.factors,
+      methods: (row.methods ?? '').split(',').filter(Boolean).sort(),
       isOwner: row.subject === c.env.OWNER_GOOGLE_SUB,
     }));
   }
@@ -251,7 +258,8 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const { results } = await c.env.DB.prepare(
       `SELECT a.id, a.kind, a.value, a.created_at, u.primary_email
        FROM allowlist a
-       LEFT JOIN identities i ON a.kind = 'google_sub' AND i.provider = 'google' AND i.subject = a.value
+       LEFT JOIN identities i ON (a.kind = 'google_sub' AND i.provider = 'google' AND i.subject = a.value)
+                              OR (a.kind = 'email' AND i.provider = 'email' AND i.subject = a.value)
        LEFT JOIN users u ON u.id = i.user_id
        ORDER BY a.created_at`,
     ).all<{
@@ -266,6 +274,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
       kind: row.kind,
       value: row.value,
       accountEmail: row.primary_email,
+      used: row.primary_email !== null,
       createdAt: row.created_at,
       isOwner: row.kind === 'google_sub' && row.value === c.env.OWNER_GOOGLE_SUB,
     }));
@@ -274,7 +283,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
   const invitationsHtml = async (c: AppContext, extra: { notice?: string; error?: string }) =>
     adminInvitationsPage({
       invitations: await listInvitations(c),
-      locked: (c.env.LOGIN_LOCKED as string) !== 'false',
+      locked: (await signupMode(c.env)) === 'invite',
       ...extra,
     });
 
@@ -290,6 +299,15 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
     if (session instanceof Response) return session;
     const form = await c.req.raw.formData();
     const action = form.get('action');
+
+    // The sign-up switch (DESIGN §4.9): takes effect at the next sign-in, no deploy needed.
+    if (action === 'signup') {
+      const mode = form.get('mode');
+      if (mode !== 'open' && mode !== 'invite') return c.redirect('/admin/invitations', 303);
+      await setSignupMode(c.env.DB, deps.now(), mode);
+      await record(c, session, 'admin.signup_changed', { mode });
+      return c.redirect(`/admin/invitations?done=signup_${mode}`, 303);
+    }
 
     if (action === 'add') {
       const raw = form.get('email');
