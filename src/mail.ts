@@ -1,10 +1,13 @@
 /**
  * Email from login.2earl.com (DESIGN §4.9): sign-in codes and security notices. Sent with
- * Cloudflare Email Service (the MAILER binding, wrangler.jsonc), plain text only: nothing to
- * render, nothing to track. Sending never throws; a failure is logged by its code only.
+ * Cloudflare Email Service (the MAILER binding, wrangler.jsonc) as plain text with a matching,
+ * minimal HTML part, as Cloudflare's deliverability guidance asks: no images, no remote content,
+ * nothing to track. Replies reach a person. Sending never throws; a failure is logged by its
+ * code only.
  */
 
 const SENDER = { email: 'noreply@2earl.com', name: '2earl' };
+const REPLY_TO = 'legal@2earl.com';
 const FOOTER = [
   '',
   '—',
@@ -12,14 +15,47 @@ const FOOTER = [
   'Your account: https://login.2earl.com/account',
 ];
 
+const escapeHtml = (value: string) =>
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** Our own https links become links; everything else is text. */
+const linkify = (escaped: string) =>
+  escaped.replace(
+    /https:\/\/(?:[a-z0-9-]+\.)*2earl\.com[^\s<]*/g,
+    (url) => `<a href="${url}" style="color:#b23a0c">${url}</a>`,
+  );
+
+/** The same lines as HTML: paragraphs, the code (an indented line) set large. */
+export function mailHtml(lines: string[]): string {
+  const body = lines
+    .map((line) => {
+      if (line === '') return '';
+      if (line === '—') return '<hr style="border:0;border-top:1px solid #e2e1e5;margin:24px 0">';
+      if (/^\s{4}\S+$/.test(line)) {
+        return `<p style="font-size:28px;font-weight:600;letter-spacing:4px;margin:8px 0 16px">${escapeHtml(line.trim())}</p>`;
+      }
+      return `<p style="margin:0 0 12px">${linkify(escapeHtml(line))}</p>`;
+    })
+    .join('\n');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body style="margin:0;padding:24px;background:#ffffff;font:16px/1.5 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#1c1b1f"><div style="max-width:560px">\n${body}\n</div></body></html>`;
+}
+
 export async function sendMail(
   env: Env,
   to: string,
   subject: string,
   lines: string[],
 ): Promise<boolean> {
+  const all = [...lines, ...FOOTER];
   try {
-    await env.MAILER.send({ to, from: SENDER, subject, text: [...lines, ...FOOTER].join('\n') });
+    await env.MAILER.send({
+      to,
+      from: SENDER,
+      replyTo: REPLY_TO,
+      subject,
+      text: all.join('\n'),
+      html: mailHtml(all),
+    });
     return true;
   } catch (error) {
     const code = (error as { code?: unknown }).code;

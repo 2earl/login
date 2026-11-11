@@ -343,7 +343,8 @@ their account has.
 2. A 6-digit code (uniform, rejection sampling) and a 32-byte link token are created. Only HMACs
    are stored (`email_codes`, keyed by the HMAC of the `__Host-email_code` cookie, which binds the
    code to this browser). 10 minutes, 5 wrong tries, single use (`used_at` set in one statement).
-3. The email (`src/mail.ts`, plain text, from `noreply@2earl.com`) has the code and a link. The
+3. The email (`src/mail.ts`, plain text plus the same lines as minimal HTML with no images or remote
+   content, from `noreply@2earl.com`, replies to `legal@2earl.com`) has the code and a link. The
    link opens a page with a button: mail scanners open links, and only the POST signs in. The link
    works only in the browser that asked; elsewhere the page says to type the code instead.
 4. On success: the account with this email method, or a new one. A new one needs sign-up to be
