@@ -19,6 +19,7 @@ import { isOwnerUser, registerAdminRoutes } from './admin';
 import { ACR_AAL2, authorizationServer, type GrantProps } from './oauth';
 import { pairwiseSubject, sectorFor } from './oidc';
 import { registerOidcRoutes, withIdToken } from './oidc-routes';
+import { registerIntrospection } from './introspection';
 import { ALL_SCOPES, scopeLabel, scopesFor, serviceForResource, type Service } from './services';
 import {
   MESSAGES,
@@ -143,6 +144,8 @@ async function grantProps(
     uid: session.user.id,
     authTime: now,
     aal2At: session.aal === 'aal2' ? session.aal2At : null,
+    signedInAt: session.createdAt,
+    method: session.method,
   };
   if (scope.includes('openid')) {
     props.oidc = {
@@ -153,8 +156,6 @@ async function grantProps(
         sectorFor(request.clientId, request.redirectUri),
       ),
       nonce,
-      signedInAt: session.createdAt,
-      method: session.method,
     };
   }
   return props;
@@ -949,6 +950,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       response,
     );
   });
+  registerIntrospection(app, deps);
   app.all('/oauth/*', (c) => authorizationServer(c.env).fetch(c.req.raw, c.env, workerCtx(c)));
   registerOidcRoutes(app, deps);
   app.get('/.well-known/*', (c) =>

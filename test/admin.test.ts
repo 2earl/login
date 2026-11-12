@@ -339,3 +339,41 @@ describe('security log', () => {
     expect(odd).toContain('login.succeeded');
   });
 });
+
+describe('resource servers (DESIGN §4.12)', () => {
+  it('creates credentials shown once, stores only a hash, and revokes them', async () => {
+    await giveOwnerAFactor();
+    const created = await post('/admin/apps', {
+      action: 'rs_create',
+      name: 'Backup server',
+      resource: env.MCP_RESOURCE,
+    });
+    expect(created.status).toBe(200);
+    const html = await created.text();
+    const id = /ID <code>(rs_[A-Za-z0-9_-]+)<\/code><\/p>/.exec(html)?.[1] ?? '';
+    const secret = /Secret <code>([A-Za-z0-9_-]{43})<\/code>/.exec(html)?.[1] ?? '';
+    expect(id).not.toBe('');
+    expect(secret).not.toBe('');
+    const row = await env.DB.prepare('SELECT secret_hash FROM resource_servers WHERE id = ?')
+      .bind(id)
+      .first<{ secret_hash: string }>();
+    expect(row?.secret_hash).not.toContain(secret);
+    expect(await count('audit_events', "event = 'admin.resource_server_created'")).toBe(1);
+
+    // Shown once: the list never shows the secret again.
+    const list = await (await call(app, '/admin/apps', { cookies: as(owner) })).text();
+    expect(list).toContain('Backup server');
+    expect(list).not.toContain(secret);
+
+    const unknown = await post('/admin/apps', {
+      action: 'rs_create',
+      name: 'Elsewhere',
+      resource: 'https://evil.example/mcp',
+    });
+    expect(unknown.status).toBe(400);
+
+    const revoked = await post('/admin/apps', { action: 'rs_delete', id });
+    expect(revoked.headers.get('Location')).toBe('/admin/apps?done=rs_deleted');
+    expect(await count('resource_servers')).toBe(0);
+  });
+});

@@ -116,16 +116,33 @@ function bearerError(
   });
 }
 
+/**
+ * The authorization server metadata (RFC 8414): the library's, plus what login adds around it
+ * (introspection, DESIGN §4.12).
+ */
+async function serverMetadata(c: AppContext): Promise<Record<string, unknown>> {
+  const meta = await authorizationServer(c.env)
+    .fetch(
+      new Request(`${c.env.ISSUER}/.well-known/oauth-authorization-server`),
+      c.env,
+      workerCtx(c),
+    )
+    .then((r) => r.json<Record<string, unknown>>());
+  return {
+    ...meta,
+    introspection_endpoint: `${c.env.ISSUER}/oauth/introspect`,
+    introspection_endpoint_auth_methods_supported: ['client_secret_basic'],
+  };
+}
+
 export function registerOidcRoutes(app: Hono<AppEnv>, deps: Deps): void {
+  app.get('/.well-known/oauth-authorization-server', async (c) =>
+    c.json(await serverMetadata(c), 200, PUBLIC_JSON),
+  );
+
   app.get('/.well-known/openid-configuration', async (c) => {
-    // The OAuth metadata is the library's (RFC 8414); OpenID Connect Discovery adds to it.
-    const oauthMeta = await authorizationServer(c.env)
-      .fetch(
-        new Request(`${c.env.ISSUER}/.well-known/oauth-authorization-server`),
-        c.env,
-        workerCtx(c),
-      )
-      .then((r) => r.json<Record<string, unknown>>());
+    // OpenID Connect Discovery adds to the OAuth metadata (RFC 8414).
+    const oauthMeta = await serverMetadata(c);
     return c.json(
       {
         ...oauthMeta,

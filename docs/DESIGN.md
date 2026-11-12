@@ -502,6 +502,50 @@ ID tokens signed with the old key expire within 10 minutes.
 
 Apps register through a client metadata document or `/admin/apps`.
 
+### 4.12 Token introspection and step-up (phase 8c)
+
+**Introspection** (RFC 7662, `POST /oauth/introspect`) is for a resource server that can't use a
+Service Binding: a 2earl service outside Cloudflare, or a partner. The gateway keeps the binding.
+
+**Credentials.**
+- The owner creates them in `/admin/apps → Resource servers`: a name, and the one resource
+  (from `allResources`) the server may check tokens for.
+- The secret is 256 random bits, shown once. Only its SHA-256 is stored (`resource_servers`).
+- Revoking deletes the row.
+
+**Request.**
+- HTTP Basic (`client_secret_basic`), form parameter `token`.
+- Limited per address like the token endpoint.
+
+**Answer** (`Cache-Control: no-store`):
+- An access token for the server's own resource:
+
+  | Field | Value |
+  |---|---|
+  | `active` | `true` |
+  | `token_type` | `Bearer` |
+  | `scope`, `client_id`, `aud`, `iss`, `exp` | From the grant and token |
+  | `sub` | The internal account ID, as the gateway gets it |
+  | `auth_time`, `acr`, `amr` | When and how the person signed in (RFC 9470, RFC 8176) |
+
+- Everything else is `{"active": false}`: a token for another resource, a refresh token, a revoked
+  or unknown token. A resource server can't learn about tokens that aren't its own, not even
+  whether they exist.
+- Wrong credentials: `401` with a Basic challenge.
+
+**Step-up** (RFC 9470). Resource servers decide when a token isn't enough, and say so with:
+
+```
+WWW-Authenticate: Bearer error="insufficient_user_authentication", acr_values="…", max_age=N
+```
+
+(GATEWAY_INTEGRATION.md has the gateway's version.) login's side:
+- `acr_values=urn:2earl:aal2` and `max_age` work for every authorization request, not only
+  OpenID Connect: a sign-in older than `max_age` is redone first (§4.11).
+- Every grant records `signedInAt` and `method` beside `aal2At`. Introspection and ID tokens turn
+  them into `auth_time`, `acr` and `amr`. Grants approved before 8c fall back to the approval
+  time.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -577,6 +621,8 @@ passkey_challenges id_hash PK (HMAC of __Host-passkey_tx), challenge, user_id NU
                  only), expires_at                                   (§4.10; ≤ 5 minutes)
 oidc_subjects    sub PK (random), user_id FK, sector, created_at, UNIQUE(user_id, sector)
                                                                      (§4.11; with the account)
+resource_servers id PK ('rs_…'), name, resource, secret_hash (SHA-256), created_at,
+                 last_used_at                                        (§4.12; no personal data)
 login_tx         id_hash PK, state, nonce, pkce_verifier, return_to, created_at, expires_at,
                  purpose ('sign_in'|'delete_account'), user_id NULL (deletion only)
 mfa_factors      id PK, user_id FK, kind ('webauthn'|'totp'), label, created_at, last_used_at,
@@ -795,7 +841,7 @@ Resolved:
 | 7 | **Open sign-up** (§4.9): email codes, sign-in methods, welcome page, security notices by email, sign-up switch |
 | 8a | **Passkey sign-in and signed-in devices** (§4.10) |
 | 8b | **OpenID Connect provider** (§4.11) |
-| 8c | **Introspection and step-up** (§13) |
+| 8c | **Introspection and step-up** (§4.12) |
 | 8d | **Device authorization grant** and the **2earl CLI** (`2earl/cli`) (§13) |
 | 8e | **More social sign-in**: Microsoft, GitHub, Apple (§13) |
 | 9a | **Organizations and roles** (§13) |
@@ -809,7 +855,7 @@ login is the identity service and authorization server for 2earl. Every protocol
 permanent attack surface on the one service that guards every account, and one person runs it. A
 standard is added when something uses it, not to tick a list.
 
-**In place** (phases 4–8b):
+**In place** (phases 4–8c):
 
 | Standard | What it does here |
 |---|---|
@@ -828,14 +874,14 @@ standard is added when something uses it, not to tick a list.
 | OpenID Connect Core 1.0 and Discovery 1.0, as a provider | "Sign in with 2earl" (§4.11): ES256 ID tokens, `nonce`, `auth_time`, `acr`/`amr`, `at_hash`, `/userinfo`, `prompt` and `max_age` |
 | OIDC Core §8.1 pairwise subjects | Each site gets its own random ID for a person |
 | OIDC RP-Initiated Logout 1.0 | An app can ask to end the 2earl session too; the person confirms |
+| RFC 7662 Token introspection | Resource servers without a Service Binding check tokens with their own credentials, only for their own resource (§4.12) |
+| RFC 9470 Step-up authentication challenge | `acr_values` and `max_age` for every request; tokens record `auth_time`, `acr`, `amr` (§4.12) |
 
 **Next** (the owner decided on 2026-11-12 to plan all of these; the order puts each one after
 what it depends on):
 
 | Phase | Standard | Why | Depends on |
 |---|---|---|---|
-| 8c | **RFC 7662 Token introspection** | Resource servers outside Cloudflare can check tokens; the gateway keeps its Service Binding | — |
-| 8c | **RFC 9470 Step-up authentication challenge** | A resource server can ask for a fresher or stronger sign-in in the standard way | — |
 | 8d | **RFC 8628 Device authorization grant** | Sign in on a terminal by opening a short code on another device | — |
 | 8d | **2earl CLI** (`2earl/cli`, public repo) | `2earl login` with the device grant; then Prompt share from the terminal through the gateway | Device grant |
 | 8e | **Microsoft, GitHub, Apple sign-in** | More ways in for people without Google | The owner registers an app with each provider (client ID and secret); each one is a sign-in method like Google, never joined by address (B3) |

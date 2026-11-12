@@ -36,16 +36,21 @@ export interface GrantProps {
    * null. Apps that need a recent second factor (`acr_values=urn:2earl:aal2`) check it.
    */
   aal2At: number | null;
+  /**
+   * When the person signed in to the session that approved this grant, and how (RFC 9470 and
+   * OIDC `auth_time`/`amr`). Grants from before phase 8c don't have them.
+   */
+  signedInAt?: number;
+  method?: 'google' | 'email' | 'passkey' | null;
   /** OpenID Connect grants only (DESIGN §4.11). */
   oidc?: {
     /** The pairwise subject this app knows the user by (`oidc_subjects`). */
     sub: string;
     /** The app's `nonce`, returned once, in the ID token of the code exchange. */
     nonce: string | null;
-    /** When the user signed in to the session that approved (OIDC `auth_time`). */
-    signedInAt: number;
-    /** How that session signed in: becomes `amr`. */
-    method: 'google' | 'email' | 'passkey' | null;
+    /** Phase 8b grants carried these here; newer grants have them at the top level. */
+    signedInAt?: number;
+    method?: 'google' | 'email' | 'passkey' | null;
   };
 }
 

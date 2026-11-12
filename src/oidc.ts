@@ -107,14 +107,32 @@ export async function pairwiseSubject(
 
 // ---- Claims -------------------------------------------------------------------------------------
 
+/** When and how the grant's session signed in, wherever the grant recorded it. */
+export function signInOf(props: GrantProps): {
+  signedInAt: number;
+  method: 'google' | 'email' | 'passkey' | null;
+} {
+  return {
+    signedInAt: props.signedInAt ?? props.oidc?.signedInAt ?? props.authTime,
+    method: props.method ?? props.oidc?.method ?? null,
+  };
+}
+
+/** `acr`: whether a second factor or passkey was verified when the grant was approved. */
+export function acrFor(props: GrantProps): string {
+  return props.aal2At !== null ? ACR_AAL2 : ACR_AAL1;
+}
+
 /** RFC 8176 authentication method references for how the session signed in. */
-export function amrFor(oidc: NonNullable<GrantProps['oidc']>, aal2: boolean): string[] {
+export function amrFor(props: GrantProps): string[] {
+  const { method } = signInOf(props);
+  const aal2 = props.aal2At !== null;
   const base =
-    oidc.method === 'google'
+    method === 'google'
       ? ['fed']
-      : oidc.method === 'email'
+      : method === 'email'
         ? ['otp']
-        : oidc.method === 'passkey'
+        : method === 'passkey'
           ? ['pop', 'user']
           : [];
   return aal2 && !base.includes('mfa') ? [...base, 'mfa'] : base;
@@ -178,13 +196,12 @@ export async function issueIdToken(
   if (!oidc) return null;
   const claims = await userClaims(db, params.props.uid, params.scope);
   if (!claims) return null;
-  const aal2 = params.props.aal2At !== null;
   const key = await signingKey(env);
   const body: Record<string, unknown> = {
     ...claims,
-    auth_time: oidc.signedInAt,
-    acr: aal2 ? ACR_AAL2 : ACR_AAL1,
-    amr: amrFor(oidc, aal2),
+    auth_time: signInOf(params.props).signedInAt,
+    acr: acrFor(params.props),
+    amr: amrFor(params.props),
     at_hash: await atHash(params.accessToken),
     azp: params.clientId,
   };

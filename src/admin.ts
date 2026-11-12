@@ -22,6 +22,8 @@ import {
   type AppEnv,
 } from './http';
 import { deliverDeletionNotices, pendingNotices } from './deletion-notices';
+import { createResourceServer, deleteResourceServer, listResourceServers } from './introspection';
+import { allResources, serviceForResource } from './services';
 import { isStepUpFresh } from './mfa';
 import { setSignupMode, signupMode } from './settings';
 import { authorizationServer } from './oauth';
@@ -49,6 +51,7 @@ const NOTICES: Record<string, string> = {
   trusted: 'App marked as verified.',
   untrusted: 'Verification removed.',
   unregistered: 'App deleted and its access revoked.',
+  rs_deleted: 'Resource server credentials revoked.',
   signup_open: 'Sign-up is open. Anyone can create an account.',
   signup_invite: 'Sign-up is closed. New accounts need an invitation.',
 };
@@ -346,7 +349,10 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
 
   // ---- Apps ---------------------------------------------------------------------------------
 
-  async function appsHtml(c: AppContext, extra: { notice?: string; error?: string }) {
+  async function appsHtml(
+    c: AppContext,
+    extra: { notice?: string; error?: string; created?: { id: string; secret: string } },
+  ) {
     const { results } = await c.env.DB.prepare(
       'SELECT client_id, note, created_at FROM trusted_clients ORDER BY created_at',
     ).all<{ client_id: string; note: string | null; created_at: number }>();
@@ -370,6 +376,11 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
       cursor = pageOfClients.cursor;
     } while (cursor && registered.length < 500);
     return adminAppsPage({
+      resourceServers: await listResourceServers(c.env.DB),
+      resources: allResources(c.env).map((resource) => {
+        const service = serviceForResource(c.env, resource);
+        return { resource, label: `${service?.name ?? 'Unknown'} (${resource})` };
+      }),
       trusted: results.map((r) => ({
         clientId: r.client_id,
         note: r.note,
@@ -461,6 +472,25 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
           .run();
         await record(c, session, 'admin.client_deleted', { client: clientId });
         return c.redirect('/admin/apps?done=unregistered', 303);
+      }
+      case 'rs_create': {
+        const name = field('name').slice(0, 100);
+        const resource = field('resource');
+        if (!name) return fail('Enter a name for the resource server.');
+        if (!allResources(c.env).includes(resource)) return fail('Choose a resource.');
+        const created = await createResourceServer(c.env.DB, now, name, resource);
+        await record(c, session, 'admin.resource_server_created', {
+          resource_server: created.id,
+          resource,
+        });
+        return c.html(await appsHtml(c, { created }));
+      }
+      case 'rs_delete': {
+        const id = field('id');
+        if (await deleteResourceServer(c.env.DB, id)) {
+          await record(c, session, 'admin.resource_server_deleted', { resource_server: id });
+        }
+        return c.redirect('/admin/apps?done=rs_deleted', 303);
       }
       default:
         return fail('Unknown action.');
