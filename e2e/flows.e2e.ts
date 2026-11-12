@@ -236,6 +236,20 @@ test('the owner’s whole journey', async ({ page }) => {
     expect(tokens.access_token).toBeTruthy();
   });
 
+  await test.step('creates an organization and invites someone to it', async () => {
+    await page.goto('/account');
+    await page.getByRole('link', { name: 'Create an organization' }).click();
+    await page.getByLabel('Name').fill('E2E Team');
+    await page.getByRole('button', { name: 'Create organization' }).click();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('E2E Team');
+    await expect(page.getByText('Organization created.')).toBeVisible();
+    await page.getByLabel('Email address').fill('teammate@example.com');
+    await page.getByLabel('Role').selectOption('admin');
+    await page.getByRole('button', { name: 'Send invitation' }).click();
+    await expect(page.getByText('Invitation sent.')).toBeVisible();
+    await expect(page.getByText('teammate@example.com')).toBeVisible();
+  });
+
   await test.step('downloads a copy of the account data', async () => {
     await page.goto('/account');
     const download = page.waitForEvent('download');
@@ -270,6 +284,9 @@ test('the owner’s whole journey', async ({ page }) => {
   await test.step('deletes the account after confirming with Google', async () => {
     await page.goto('/account');
     await page.getByRole('link', { name: 'Delete account' }).click();
+    await expect(
+      page.getByText('The organization “E2E Team”, which has no other members'),
+    ).toBeVisible();
     await page.getByLabel(/can’t be restored/).check();
     await page.getByRole('button', { name: 'Confirm with Google' }).click();
     await expect(page).toHaveURL('/account/deleted');

@@ -1,5 +1,5 @@
 /** Local pages a sign-in may return to. Anything else falls back to the default. */
-const ALLOWED_PREFIXES = ['/account', '/authorize', '/admin'];
+const ALLOWED_PREFIXES = ['/account', '/authorize', '/admin', '/orgs', '/invite'];
 const DEFAULT_RETURN_TO = '/account';
 
 /**

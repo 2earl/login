@@ -15,7 +15,7 @@ import { IDENTITY } from './services';
 
 export const ID_TOKEN_TTL_SECONDS = 10 * 60;
 export const ACR_AAL1 = 'urn:2earl:aal1';
-export const OIDC_SCOPES = ['openid', 'profile', 'email'] as const;
+export const OIDC_SCOPES = ['openid', 'profile', 'email', 'organizations'] as const;
 
 interface SigningKey {
   kid: string;
@@ -143,6 +143,8 @@ export interface UserClaims {
   email?: string;
   email_verified?: boolean;
   updated_at?: number;
+  /** `organizations` scope (DESIGN §4.14): the active organizations, and the role in each. */
+  orgs?: { id: string; name: string; role: string }[];
 }
 
 /** What `profile` and `email` release about the account, now. */
@@ -167,6 +169,18 @@ export async function userClaims(
     // Every address on an account was verified: by Google, or by a code sent to it.
     claims.email = user.primary_email;
     claims.email_verified = true;
+  }
+  if (scope.includes('organizations')) {
+    // Read now, not when the app was allowed: a removed member's next token says so.
+    const { results } = await db
+      .prepare(
+        `SELECT o.id, o.name, m.role FROM org_members m
+         JOIN organizations o ON o.id = m.org_id AND o.status = 'active'
+         WHERE m.user_id = ? ORDER BY o.id`,
+      )
+      .bind(userId)
+      .all<{ id: string; name: string; role: string }>();
+    claims.orgs = results;
   }
   return claims;
 }

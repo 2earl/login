@@ -24,6 +24,11 @@ export interface Service {
    */
   deletionBinding: string;
   /**
+   * Whether the service keeps data for organizations (DESIGN §4.14). If so, deleting an
+   * organization reaches its `AccountEvents.deleteOrganization(orgId)` too, like account deletion.
+   */
+  organizationEvents?: boolean;
+  /**
    * Narrower addresses of the same service, each its own resource with a subset of its scopes.
    * The MCP gateway serves every 2earl service at `/mcp` and each one alone at `/<service>`
    * (2earl/mcp docs/DESIGN.md §3): a token for one address is useless at another.
@@ -82,6 +87,7 @@ export const IDENTITY: Service = {
     openid: 'Sign you in with your 2earl account, with an ID only this app gets',
     profile: 'See your name',
     email: 'See your email address',
+    organizations: 'See which organizations you belong to, and your role in each',
   },
   deletionBinding: '',
 };

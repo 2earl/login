@@ -1,4 +1,5 @@
 import type { OAuthHelpers } from '@cloudflare/workers-oauth-provider';
+import { ownershipPlan, ownershipStatements, type OwnershipPlan } from './orgs';
 import { SERVICES } from './services';
 
 /**
@@ -35,6 +36,7 @@ export async function revokeAllGrants(oauth: OAuthHelpers, userId: string): Prom
  * Deletes the account (DESIGN §6.3): grants first, so no app keeps access if a later step fails;
  * then, in one D1 transaction, the account rows and the invitation, with the user's audit events
  * re-keyed to a random correlation ID, and a deletion notice for every service; then a second sweep for any grant created in between.
+ * Returns what happened to the account's organizations, so new owners can be told.
  */
 export async function deleteAccount(
   db: D1Database,
@@ -42,11 +44,22 @@ export async function deleteAccount(
   userId: string,
   now: number,
   ipPrefix: string | null,
-): Promise<void> {
+): Promise<OwnershipPlan> {
   const revoked = await revokeAllGrants(oauth, userId);
   const correlationId = `deleted:${crypto.randomUUID()}`;
+  // Organizations it alone owns pass to the next person in line, or go with it (DESIGN §4.14).
+  const plan = await ownershipPlan(db, userId);
 
   await db.batch([
+    ...ownershipStatements(db, now, plan),
+    ...plan.passed.map((p) =>
+      db
+        .prepare(
+          `INSERT INTO audit_events (id, at, event, actor_user_id, client_id, ip_prefix, detail)
+           VALUES (?, ?, 'org.ownership_passed', ?, NULL, NULL, ?)`,
+        )
+        .bind(crypto.randomUUID(), now, p.to, JSON.stringify({ org: p.orgId })),
+    ),
     db
       .prepare('UPDATE audit_events SET actor_user_id = ? WHERE actor_user_id = ?')
       .bind(correlationId, userId),
@@ -92,6 +105,7 @@ export async function deleteAccount(
   ]);
 
   await revokeAllGrants(oauth, userId);
+  return plan;
 }
 
 /** What the account holds, as a JSON document the user downloads (DATA_PROTECTION §6). */
@@ -102,57 +116,68 @@ export async function exportAccount(
   currentSessionHash: string,
   now: number,
 ): Promise<Record<string, unknown>> {
-  const [user, identities, sessions, invitation, events, factors, codes, subjects] = await db.batch<
-    Record<string, unknown>
-  >([
-    db
-      .prepare(
-        'SELECT id, status, display_name, primary_email, created_at, updated_at FROM users WHERE id = ?',
-      )
-      .bind(userId),
-    db
-      .prepare(
-        `SELECT provider, subject, email, email_verified, created_at, last_login_at
+  const [user, identities, sessions, invitation, events, factors, codes, subjects, orgs, sent] =
+    await db.batch<Record<string, unknown>>([
+      db
+        .prepare(
+          'SELECT id, status, display_name, primary_email, created_at, updated_at FROM users WHERE id = ?',
+        )
+        .bind(userId),
+      db
+        .prepare(
+          `SELECT provider, subject, email, email_verified, created_at, last_login_at
          FROM identities WHERE user_id = ? ORDER BY created_at`,
-      )
-      .bind(userId),
-    db
-      .prepare(
-        `SELECT id_hash, aal, created_at, last_seen_at, expires_at, ip_prefix, user_agent_hash,
+        )
+        .bind(userId),
+      db
+        .prepare(
+          `SELECT id_hash, aal, created_at, last_seen_at, expires_at, ip_prefix, user_agent_hash,
                 device, method
          FROM sessions WHERE user_id = ? ORDER BY created_at`,
-      )
-      .bind(userId),
-    db
-      .prepare(
-        `SELECT a.added_by, a.created_at FROM allowlist a
+        )
+        .bind(userId),
+      db
+        .prepare(
+          `SELECT a.added_by, a.created_at FROM allowlist a
          JOIN identities i ON i.provider = 'google' AND a.kind = 'google_sub' AND a.value = i.subject
          WHERE i.user_id = ?`,
-      )
-      .bind(userId),
-    db
-      .prepare(
-        `SELECT at, event, client_id, ip_prefix, detail FROM audit_events
+        )
+        .bind(userId),
+      db
+        .prepare(
+          `SELECT at, event, client_id, ip_prefix, detail FROM audit_events
          WHERE actor_user_id = ? ORDER BY at`,
-      )
-      .bind(userId),
-    db
-      .prepare(
-        `SELECT kind, label, created_at, last_used_at FROM mfa_factors
+        )
+        .bind(userId),
+      db
+        .prepare(
+          `SELECT kind, label, created_at, last_used_at FROM mfa_factors
          WHERE user_id = ? ORDER BY created_at`,
-      )
-      .bind(userId),
-    db
-      .prepare(
-        'SELECT COUNT(*) AS unused FROM recovery_codes WHERE user_id = ? AND used_at IS NULL',
-      )
-      .bind(userId),
-    db
-      .prepare(
-        'SELECT sector, sub, created_at FROM oidc_subjects WHERE user_id = ? ORDER BY created_at',
-      )
-      .bind(userId),
-  ]);
+        )
+        .bind(userId),
+      db
+        .prepare(
+          'SELECT COUNT(*) AS unused FROM recovery_codes WHERE user_id = ? AND used_at IS NULL',
+        )
+        .bind(userId),
+      db
+        .prepare(
+          'SELECT sector, sub, created_at FROM oidc_subjects WHERE user_id = ? ORDER BY created_at',
+        )
+        .bind(userId),
+      db
+        .prepare(
+          `SELECT o.id, o.name, o.status, m.role, m.joined_at FROM org_members m
+         JOIN organizations o ON o.id = m.org_id WHERE m.user_id = ? ORDER BY m.joined_at`,
+        )
+        .bind(userId),
+      db
+        .prepare(
+          `SELECT i.org_id, i.email, i.role, i.created_at, i.expires_at FROM org_invitations i
+         WHERE i.invited_by = ? ORDER BY i.created_at`,
+        )
+        .bind(userId),
+    ]);
 
   const account = user?.results[0];
   const apps = [];
@@ -198,6 +223,21 @@ export async function exportAccount(
       site: row.sector,
       id: row.sub,
       since: iso(row.created_at as number),
+    })),
+    // Organizations (DESIGN §4.14): where you're a member, and invitations you sent that are open.
+    organizations: (orgs?.results ?? []).map((row) => ({
+      id: row.id,
+      name: row.name,
+      status: row.status,
+      role: row.role,
+      joinedAt: iso(row.joined_at as number),
+    })),
+    invitationsSent: (sent?.results ?? []).map((row) => ({
+      organization: row.org_id,
+      email: row.email,
+      role: row.role,
+      sentAt: iso(row.created_at as number),
+      expiresAt: iso(row.expires_at as number),
     })),
     signInMethods: (identities?.results ?? []).map((row) => ({
       provider: row.provider,
