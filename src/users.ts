@@ -1,4 +1,5 @@
 import type { GoogleIdentity } from './google';
+import type { FederatedIdentity, FederatedProvider } from './providers';
 
 /**
  * While the service is locked (DESIGN D9) only allowlisted accounts may sign in. An entry may
@@ -105,7 +106,7 @@ export async function isUserActive(db: D1Database, userId: string): Promise<bool
 
 // ---- Sign-in methods (DESIGN §4.9) ------------------------------------------------------------
 
-export type Provider = 'google' | 'email';
+export type Provider = 'google' | 'email' | 'microsoft' | 'github' | 'apple';
 
 export interface Identity {
   id: string;
@@ -270,6 +271,96 @@ export async function removeIdentity(
       .bind(fallback, now, userId, target.email ?? ''),
   ]);
   return target.provider;
+}
+
+// ---- Microsoft, GitHub, Apple (DESIGN §4.14) -----------------------------------------------------
+
+/** The account this provider's account signs in to, if any. */
+export async function userForProvider(
+  db: D1Database,
+  provider: FederatedProvider,
+  subject: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare('SELECT user_id FROM identities WHERE provider = ? AND subject = ?')
+    .bind(provider, subject)
+    .first<{ user_id: string }>();
+  return row?.user_id ?? null;
+}
+
+/**
+ * Finds the account for this provider's account, or creates one. Lookup is by (provider,
+ * subject) only, as for Google: an account with the same address is never reused.
+ */
+export async function upsertFederatedUser(
+  db: D1Database,
+  now: number,
+  identity: FederatedIdentity,
+): Promise<{ userId: string; created: boolean }> {
+  const existing = await userForProvider(db, identity.provider, identity.subject);
+  if (existing) {
+    await db.batch([
+      db
+        .prepare(
+          `UPDATE identities SET email = ?, email_verified = 1, last_login_at = ?
+           WHERE provider = ? AND subject = ?`,
+        )
+        .bind(identity.email, now, identity.provider, identity.subject),
+      db
+        .prepare(
+          'UPDATE users SET display_name = COALESCE(display_name, ?), updated_at = ? WHERE id = ?',
+        )
+        .bind(identity.name, now, existing),
+    ]);
+    return { userId: existing, created: false };
+  }
+  const userId = crypto.randomUUID();
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO users (id, status, display_name, primary_email, created_at, updated_at)
+         VALUES (?, 'active', ?, ?, ?, ?)`,
+      )
+      .bind(userId, identity.name, identity.email, now, now),
+    db
+      .prepare(
+        `INSERT INTO identities (id, user_id, provider, subject, email, email_verified, created_at, last_login_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        userId,
+        identity.provider,
+        identity.subject,
+        identity.email,
+        now,
+        now,
+      ),
+  ]);
+  return { userId, created: true };
+}
+
+export async function addFederatedIdentity(
+  db: D1Database,
+  now: number,
+  userId: string,
+  identity: FederatedIdentity,
+) {
+  await db
+    .prepare(
+      `INSERT INTO identities (id, user_id, provider, subject, email, email_verified, created_at, last_login_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      userId,
+      identity.provider,
+      identity.subject,
+      identity.email,
+      now,
+      now,
+    )
+    .run();
 }
 
 export async function setDisplayName(db: D1Database, now: number, userId: string, name: string) {

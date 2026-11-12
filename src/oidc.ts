@@ -1,4 +1,5 @@
 import { SignJWT, base64url, calculateJwkThumbprint, importJWK, jwtVerify, type JWK } from 'jose';
+import type { SignInMethod } from './sessions';
 import type { GrantProps } from './oauth';
 import { ACR_AAL2 } from './oauth';
 import { IDENTITY } from './services';
@@ -110,7 +111,7 @@ export async function pairwiseSubject(
 /** When and how the grant's session signed in, wherever the grant recorded it. */
 export function signInOf(props: GrantProps): {
   signedInAt: number;
-  method: 'google' | 'email' | 'passkey' | null;
+  method: SignInMethod | null;
 } {
   return {
     signedInAt: props.signedInAt ?? props.oidc?.signedInAt ?? props.authTime,
@@ -128,13 +129,13 @@ export function amrFor(props: GrantProps): string[] {
   const { method } = signInOf(props);
   const aal2 = props.aal2At !== null;
   const base =
-    method === 'google'
-      ? ['fed']
-      : method === 'email'
-        ? ['otp']
-        : method === 'passkey'
-          ? ['pop', 'user']
-          : [];
+    method === 'email'
+      ? ['otp']
+      : method === 'passkey'
+        ? ['pop', 'user']
+        : method === null
+          ? []
+          : ['fed']; // Google, Microsoft, GitHub, Apple: federated sign-in (RFC 8176)
   return aal2 && !base.includes('mfa') ? [...base, 'mfa'] : base;
 }
 

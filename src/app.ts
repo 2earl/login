@@ -20,6 +20,13 @@ import { ACR_AAL2, authorizationServer, type GrantProps } from './oauth';
 import { pairwiseSubject, sectorFor } from './oidc';
 import { registerOidcRoutes, withIdToken } from './oidc-routes';
 import { registerIntrospection } from './introspection';
+import { registerFederationRoutes, startProviderTrip } from './federation-routes';
+import {
+  enabledProviders,
+  isFederatedProvider,
+  providerEnabled,
+  type FederatedProvider,
+} from './providers';
 import { DEVICE_GRANT, deviceTokenResponse, registerDeviceRoutes } from './device';
 import { ALL_SCOPES, scopeLabel, scopesFor, serviceForResource, type Service } from './services';
 import {
@@ -33,6 +40,7 @@ import {
   signInPage,
   type ConnectedApp,
   type Message,
+  methodHasAccount,
 } from './pages';
 import {
   LOGIN_TX_COOKIE,
@@ -70,6 +78,9 @@ import {
 export interface Deps {
   fetch: typeof fetch;
   googleJwks: JWTVerifyGetKey;
+  /** Microsoft and Apple ID-token keys (DESIGN §4.14). */
+  microsoftJwks: JWTVerifyGetKey;
+  appleJwks: JWTVerifyGetKey;
   /** Current time in Unix seconds. */
   now: () => number;
 }
@@ -83,6 +94,9 @@ function gateAllows(gate: Exclude<MfaGate, null>, path: string): boolean {
     '/userinfo',
     '/login',
     '/callback/google',
+    '/callback/microsoft',
+    '/callback/github',
+    '/callback/apple',
     '/healthz',
     '/account/deleted',
   ];
@@ -262,7 +276,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.get('/', async (c) =>
     c.get('session')
       ? c.redirect('/account', 303)
-      : mfaHtml(signInPage({ mode: await signupMode(c.env) })),
+      : mfaHtml(signInPage({ mode: await signupMode(c.env), providers: enabledProviders(c.env) })),
   );
 
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
@@ -274,16 +288,29 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     const session = c.get('session');
     const reauth = c.req.query('reauth') === '1';
     if (session && !reauth) return c.redirect(safeReturnTo(returnTo), 303);
-    let methods: { google: boolean; email: string | null; passkey: boolean } | null = null;
+    let methods: {
+      google: boolean;
+      email: string | null;
+      passkey: boolean;
+      providers: FederatedProvider[];
+    } | null = null;
     if (session && reauth) {
       const identities = await listIdentities(c.env, session.user.id);
       methods = {
         google: identities.some((i) => i.provider === 'google'),
         email: identities.find((i) => i.provider === 'email')?.email ?? null,
         passkey: (await listPasskeys(c.env.DB, session.user.id)).length > 0,
+        providers: enabledProviders(c.env).filter((p) => identities.some((i) => i.provider === p)),
       };
     }
-    return mfaHtml(signInPage({ returnTo, mode: await signupMode(c.env), reauth: methods }));
+    return mfaHtml(
+      signInPage({
+        returnTo,
+        mode: await signupMode(c.env),
+        reauth: methods,
+        providers: enabledProviders(c.env),
+      }),
+    );
   });
 
   app.get('/login/google', async (c) => {
@@ -405,7 +432,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       const clash = owner
         ? null
         : await accountWithEmail(c.env.DB, identity.email, session.user.id);
-      if (clash?.provider === 'email') {
+      if (clash && clash.provider !== 'google') {
         return c.html(messagePage(MESSAGES.emailTaken, 'Nothing changed'), 409);
       }
       if (!owner) {
@@ -427,13 +454,14 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     // signs in with an email code stays that account's (no joining by address, THREAT_MODEL B3).
     const known = await userForGoogle(c.env.DB, identity.subject);
     if (!known) {
+      // Another provider's account with this address stays that account's (B3).
       const clash = await accountWithEmail(c.env.DB, identity.email);
-      if (clash?.provider === 'email') {
+      if (clash && clash.provider !== 'google') {
         await audit(c.env.DB, now, 'login.denied', {
           ipPrefix: ip,
-          detail: { reason: 'email_has_account' },
+          detail: { reason: `${clash.provider}_has_account` },
         });
-        return c.html(messagePage(MESSAGES.emailHasAccount), 409);
+        return c.html(messagePage(methodHasAccount(clash.provider)), 409);
       }
     }
     if ((await signupMode(c.env)) === 'invite') {
@@ -476,6 +504,9 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     const notices: Record<string, string> = {
       disconnected: 'App disconnected.',
       google: 'You can now sign in with Google too.',
+      microsoft: 'You can now sign in with Microsoft too.',
+      github: 'You can now sign in with GitHub too.',
+      apple: 'You can now sign in with Apple too.',
       email: 'You can now sign in with a code sent to that address too.',
       removed: 'Sign-in method removed.',
       name: 'Name saved.',
@@ -495,6 +526,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         factors: await listFactors(c.env.DB, session.user.id),
         isOwner: await isOwnerUser(c.env, session.user.id),
         methods: await listIdentities(c.env, session.user.id),
+        providers: enabledProviders(c.env),
         ...(notice ? { notice } : {}),
       }),
     );
@@ -565,6 +597,9 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         confirmWith: {
           google: identities.some((i) => i.provider === 'google'),
           email: identities.find((i) => i.provider === 'email')?.email ?? null,
+          providers: enabledProviders(c.env).filter((p) =>
+            identities.some((i) => i.provider === p),
+          ),
         },
       }),
     );
@@ -588,6 +623,24 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     const identities = await listIdentities(c.env, session.user.id);
     const emailMethod = identities.find((i) => i.provider === 'email')?.email ?? null;
     const hasGoogle = identities.some((i) => i.provider === 'google');
+    // Confirm with Microsoft, GitHub or Apple, when that's how the account signs in (§4.14).
+    const chosen = form.get('method');
+    if (
+      isFederatedProvider(chosen) &&
+      providerEnabled(c.env, chosen) &&
+      identities.some((i) => i.provider === chosen)
+    ) {
+      await audit(c.env.DB, now, 'account.deletion_started', {
+        actorUserId: session.user.id,
+        ipPrefix: clientIp(c),
+      });
+      return startProviderTrip(c, now, chosen, {
+        purpose: 'delete_account',
+        returnTo: null,
+        userId: session.user.id,
+        loginHint: session.user.primaryEmail,
+      });
+    }
     // With a code to the account's own address, when that's how it signs in (DESIGN §4.9).
     if (emailMethod && (form.get('method') === 'email' || !hasGoogle)) {
       await audit(c.env.DB, now, 'account.deletion_started', {
@@ -629,6 +682,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   );
 
   registerEmailRoutes(app, deps);
+  registerFederationRoutes(app, deps);
   registerMethodRoutes(app, deps);
   registerMfaRoutes(app, deps);
   registerPasskeyRoutes(app, deps);

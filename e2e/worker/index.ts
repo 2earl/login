@@ -64,6 +64,9 @@ export default {
     app ??= createApp({
       fetch: fakeGoogle(env),
       googleJwks: jwks,
+      // Microsoft, GitHub and Apple are off in the journey (no client IDs set).
+      microsoftJwks: jwks,
+      appleJwks: jwks,
       now: () => Math.floor(Date.now() / 1000),
     });
     return app.fetch(request, env, ctx);

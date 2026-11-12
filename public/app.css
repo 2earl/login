@@ -1146,3 +1146,9 @@ code {
 .secret-once code {
   word-break: break-all;
 }
+
+/* ---- Sign in with Microsoft, GitHub, Apple (DESIGN §4.14): the same shape as Google's ---- */
+
+.gsi + .gsi {
+  margin-top: 0.625rem;
+}

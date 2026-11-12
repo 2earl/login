@@ -1,6 +1,7 @@
 import type { AuditEvent } from './audit';
 import type { PendingNotices } from './deletion-notices';
 import type { ResourceServer } from './introspection';
+import { providerName } from './providers';
 import { escapeHtml, formatDate, page } from './pages';
 
 /** Server-rendered pages for /admin (DESIGN §4.6). Owner-only; every value is escaped. */
@@ -83,7 +84,7 @@ function userRow(user: AdminUser): string {
     user.name ? escapeHtml(user.name) : null,
     `Joined ${formatDate(user.createdAt)}`,
     user.methods.length
-      ? `signs in with ${user.methods.map((m) => (m === 'google' ? 'Google' : 'email code')).join(' and ')}`
+      ? `signs in with ${user.methods.map((m) => providerName(m)).join(' and ')}`
       : null,
     user.lastSignInAt ? `last sign-in ${dateTime(user.lastSignInAt)} UTC` : 'never signed in',
     user.factors > 0 ? `second factor: ${String(user.factors)}` : 'no second factor',

@@ -27,7 +27,7 @@ export interface Session {
   user: SessionUser;
 }
 
-export type SignInMethod = 'google' | 'email' | 'passkey';
+export type SignInMethod = 'google' | 'email' | 'passkey' | 'microsoft' | 'github' | 'apple';
 
 export interface SessionMeta {
   ipPrefix: string | null;

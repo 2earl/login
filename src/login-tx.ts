@@ -7,7 +7,10 @@ export const LOGIN_TX_TTL_SECONDS = 600;
  * Why the trip to Google was started. `delete_account` is the re-authentication before an
  * account is deleted (DESIGN §6.3); it never creates a session.
  */
-export type LoginPurpose = 'sign_in' | 'delete_account' | 'link_google';
+export type LoginPurpose = 'sign_in' | 'delete_account' | 'link_google' | 'link';
+
+/** Where the trip goes (DESIGN §4.14). */
+export type LoginProvider = 'google' | 'microsoft' | 'github' | 'apple';
 
 export interface NewLoginTx {
   /** Value for the __Host-login_tx cookie. Only its HMAC is stored. */
@@ -24,6 +27,7 @@ export interface LoginTx {
   purpose: LoginPurpose;
   /** For `delete_account`: the account the user asked to delete. */
   userId: string | null;
+  provider: LoginProvider;
 }
 
 export async function createLoginTx(
@@ -31,7 +35,7 @@ export async function createLoginTx(
   pepper: string,
   now: number,
   returnTo: string | null,
-  options: { purpose?: LoginPurpose; userId?: string } = {},
+  options: { purpose?: LoginPurpose; userId?: string; provider?: LoginProvider } = {},
 ): Promise<NewLoginTx> {
   const tx: NewLoginTx = {
     cookieValue: randomToken(32),
@@ -47,8 +51,9 @@ export async function createLoginTx(
     db
       .prepare(
         `INSERT INTO login_tx
-           (id_hash, state, nonce, pkce_verifier, return_to, purpose, user_id, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id_hash, state, nonce, pkce_verifier, return_to, purpose, user_id, created_at, expires_at,
+            provider)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         idHash,
@@ -60,6 +65,7 @@ export async function createLoginTx(
         options.userId ?? null,
         now,
         now + LOGIN_TX_TTL_SECONDS,
+        options.provider ?? 'google',
       ),
   ]);
   return tx;
@@ -82,7 +88,7 @@ export async function consumeLoginTx(
   const row = await db
     .prepare(
       `DELETE FROM login_tx WHERE id_hash = ?
-       RETURNING state, nonce, pkce_verifier, return_to, purpose, user_id, expires_at`,
+       RETURNING state, nonce, pkce_verifier, return_to, purpose, user_id, expires_at, provider`,
     )
     .bind(idHash)
     .first<{
@@ -93,6 +99,7 @@ export async function consumeLoginTx(
       purpose: LoginPurpose;
       user_id: string | null;
       expires_at: number;
+      provider: LoginProvider;
     }>();
 
   if (!row) return null;
@@ -104,5 +111,6 @@ export async function consumeLoginTx(
     returnTo: row.return_to,
     purpose: row.purpose,
     userId: row.user_id,
+    provider: row.provider,
   };
 }

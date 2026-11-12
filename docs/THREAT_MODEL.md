@@ -184,6 +184,19 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | Code collected twice | Atomic delete-and-return; a second poll gets `invalid_grant` (tested) |
 | Tokens minted outside the library's checks | login never mints tokens: approval goes through `/authorize` (second factor, step-up, consent) and tokens come from the library's own code exchange |
 
+### B1/B3 — Microsoft, GitHub and Apple sign-in (DESIGN §4.14, phase 8e)
+
+| Threat | Mitigation |
+|---|---|
+| Account takeover through an unverified address ("nOAuth": a work tenant sets any `email`) | Only verified addresses: Microsoft personal accounts, or work accounts with `xms_edov`; GitHub's primary verified address; Apple's `email_verified` (tested). And addresses never join accounts anyway (B3) |
+| Token from another Microsoft tenant passed off as this one | `iss` must equal `https://login.microsoftonline.com/{tid}/v2.0` for the token's own `tid`; signature, `aud`, expiry and `nonce` checked (tested) |
+| Login CSRF / code injection | Single-use transaction bound to the browser by `__Host-login_tx`, `state`, PKCE (Microsoft, GitHub), `nonce` (Microsoft, Apple); the transaction names its provider, so a code can't finish another provider's trip (tested) |
+| Apple's cross-site form post bypasses the browser binding | The post is parked under a random single-use ticket for 5 minutes; the binding is checked on the same-site GET that follows; a ticket without the cookie signs nobody in (tested) |
+| Second account with someone's address through a new provider | Refused when another account has the verified address, for every provider and for email codes (tested) |
+| A provider account already linked elsewhere is added to this account | Refused (`methodTaken`, tested); adding needs a recent proof (`changeCheck`) |
+| Leaked provider client secret | Secrets live only in GitHub's `production` environment and Worker secrets; Apple's client secret is a 5-minute JWT; rotation steps in docs/PROVIDERS.md |
+| Provider tokens leak from our database | None are stored; GitHub's token is used for two reads and dropped |
+
 ### B5 — Gateway integration
 
 | Threat | Mitigation |

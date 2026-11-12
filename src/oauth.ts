@@ -4,6 +4,7 @@ import {
   OAuthError,
 } from '@cloudflare/workers-oauth-provider';
 import { audit } from './audit';
+import type { SignInMethod } from './sessions';
 import { ALL_SCOPES, IDENTITY, allResources, scopeLabel } from './services';
 import { isUserActive } from './users';
 
@@ -41,7 +42,7 @@ export interface GrantProps {
    * OIDC `auth_time`/`amr`). Grants from before phase 8c don't have them.
    */
   signedInAt?: number;
-  method?: 'google' | 'email' | 'passkey' | null;
+  method?: SignInMethod | null;
   /** OpenID Connect grants only (DESIGN §4.11). */
   oidc?: {
     /** The pairwise subject this app knows the user by (`oidc_subjects`). */
@@ -50,7 +51,7 @@ export interface GrantProps {
     nonce: string | null;
     /** Phase 8b grants carried these here; newer grants have them at the top level. */
     signedInAt?: number;
-    method?: 'google' | 'email' | 'passkey' | null;
+    method?: SignInMethod | null;
   };
 }
 

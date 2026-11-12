@@ -42,6 +42,15 @@
     // The next ID-token signing key's public JWK, published in /.well-known/jwks.json ahead of a
     // rotation so relying parties already have it (DESIGN §4.11). Empty: no rotation pending.
     "OIDC_NEXT_PUBLIC_KEY": "",
+    // Sign in with Microsoft, GitHub, Apple (DESIGN §4.14, docs/PROVIDERS.md). A provider is on
+    // only when its client ID here and its secret (MICROSOFT_CLIENT_SECRET, GITHUB_CLIENT_SECRET,
+    // APPLE_PRIVATE_KEY, uploaded by deploy.yml when set) are both present. Empty: off.
+    "MICROSOFT_CLIENT_ID": "",
+    "GITHUB_CLIENT_ID": "",
+    // Apple: the Services ID, the team ID and the ID of the Sign in with Apple key.
+    "APPLE_CLIENT_ID": "",
+    "APPLE_TEAM_ID": "",
+    "APPLE_KEY_ID": "",
   },
 
   // Set by the deploy workflow from the GitHub `production` environment. Deploys fail if any

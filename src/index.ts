@@ -7,10 +7,13 @@ import { deliverDeletionNotices } from './deletion-notices';
 import { serviceForResource } from './services';
 
 export { PromptshareDirectory } from './directory';
+import { APPLE_JWKS_URL, MICROSOFT_JWKS_URL } from './providers';
 
 const app = createApp({
   fetch: (input, init) => fetch(input, init),
   googleJwks: createRemoteJWKSet(new URL(GOOGLE_JWKS_URL)),
+  microsoftJwks: createRemoteJWKSet(new URL(MICROSOFT_JWKS_URL)),
+  appleJwks: createRemoteJWKSet(new URL(APPLE_JWKS_URL)),
   now: () => Math.floor(Date.now() / 1000),
 });
 
@@ -70,6 +73,7 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
         this.env.DB.prepare('DELETE FROM login_tx WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM passkey_challenges WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM device_codes WHERE expires_at <= ?').bind(now),
+        this.env.DB.prepare('DELETE FROM callback_tickets WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM audit_events WHERE at < ?').bind(
           now - AUDIT_RETENTION_SECONDS,
         ),

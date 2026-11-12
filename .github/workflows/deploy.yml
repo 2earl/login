@@ -69,6 +69,29 @@ jobs:
           OWNER_GOOGLE_SUB: ${{ secrets.OWNER_GOOGLE_SUB }}
           OIDC_SIGNING_KEY: ${{ secrets.OIDC_SIGNING_KEY }}
 
+      # Microsoft, GitHub and Apple sign-in (DESIGN §4.14, docs/PROVIDERS.md): their secrets are
+      # optional, so they aren't in the required list above. Each is uploaded only when its GitHub
+      # secret is set (GitHub reserves the GITHUB_ prefix, hence GH_OAUTH_CLIENT_SECRET). A
+      # provider stays off until both its client ID (wrangler.jsonc) and its secret exist.
+      - name: Upload optional sign-in provider secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+          GITHUB_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
+          APPLE_PRIVATE_KEY: ${{ secrets.APPLE_PRIVATE_KEY }}
+        run: |
+          node -e '
+            const names = ["MICROSOFT_CLIENT_SECRET", "GITHUB_CLIENT_SECRET", "APPLE_PRIVATE_KEY"];
+            const set = Object.fromEntries(names.filter((n) => process.env[n]).map((n) => [n, process.env[n]]));
+            require("node:fs").writeFileSync("optional-secrets.json", JSON.stringify(set), { mode: 0o600 });
+            console.log("Optional secrets to upload:", Object.keys(set).join(", ") || "none");
+          '
+          if [ "$(cat optional-secrets.json)" != "{}" ]; then
+            pnpm exec wrangler secret bulk optional-secrets.json
+          fi
+          rm -f optional-secrets.json
+
       - name: Smoke test
         run: |
           for i in 1 2 3 4 5 6; do

@@ -36,8 +36,9 @@ resource "cloudflare_ruleset" "rate_limit" {
       description = "login: coarse per-IP limit on the browser sign-in endpoints"
       # Not /oauth/token: AI assistants' servers share a few addresses for all their users, so a
       # per-address edge limit would lock them out together. Its limit is in the Worker.
-      # The email, passkey and device paths (DESIGN §4.9, §4.10, §4.13) are here too; how many codes go out is limited in the Worker.
-      expression  = "(http.request.uri.path in {\"/authorize\" \"/callback/google\" \"/login\" \"/login/google\" \"/login/email\" \"/login/email/code\" \"/login/email/link\" \"/login/email/resend\" \"/login/passkey\" \"/login/passkey/options\" \"/device\" \"/oauth/device_authorization\"})"
+      # The email, passkey, device and Microsoft/GitHub/Apple paths (DESIGN §4.9, §4.10, §4.13, §4.14)
+      # are here too; how many codes go out is limited in the Worker.
+      expression  = "(http.request.uri.path in {\"/authorize\" \"/callback/google\" \"/login\" \"/login/google\" \"/login/email\" \"/login/email/code\" \"/login/email/link\" \"/login/email/resend\" \"/login/passkey\" \"/login/passkey/options\" \"/device\" \"/oauth/device_authorization\" \"/login/microsoft\" \"/login/github\" \"/login/apple\" \"/callback/microsoft\" \"/callback/github\" \"/callback/apple\"})"
       action      = "block"
       enabled     = true
       ratelimit = {

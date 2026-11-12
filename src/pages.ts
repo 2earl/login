@@ -6,6 +6,7 @@
 
 import { ASSET_URLS } from './assets.generated';
 import type { SignupMode } from './settings';
+import { PROVIDER_NAMES, providerName, type FederatedProvider } from './providers';
 import type { DeviceSession } from './sessions';
 import type { Identity } from './users';
 
@@ -98,14 +99,22 @@ export function signInPage(
   params: {
     returnTo?: string | null;
     mode?: SignupMode;
-    reauth?: { google: boolean; email: string | null; passkey?: boolean } | null;
+    reauth?: {
+      google: boolean;
+      email: string | null;
+      passkey?: boolean;
+      providers?: FederatedProvider[];
+    } | null;
     error?: string;
     email?: string;
+    /** Microsoft, GitHub, Apple: the ones switched on (DESIGN §4.14). */
+    providers?: FederatedProvider[];
   } = {},
 ): string {
   const returnTo = params.returnTo ?? null;
   const reauth = params.reauth ?? null;
   const google = !reauth || reauth.google;
+  const providers = params.reauth ? (params.reauth.providers ?? []) : (params.providers ?? []);
   const fixedEmail = reauth?.email ?? null;
   const showEmail = !reauth || fixedEmail !== null;
   const emailForm = showEmail
@@ -120,12 +129,19 @@ export function signInPage(
           (params.error
             ? `<p class="field-error" id="email-error">${escapeHtml(params.error)}</p>`
             : '')) +
-      `<button class="button ${google ? 'secondary' : 'primary'} wide" type="submit">${fixedEmail ? 'Send me a code' : 'Continue with email'}</button>` +
+      `<button class="button ${google || providers.length > 0 ? 'secondary' : 'primary'} wide" type="submit">${fixedEmail ? 'Send me a code' : 'Continue with email'}</button>` +
       '</form>'
     : '';
-  const googleButton = google
-    ? `<a class="gsi" href="${escapeHtml(withReturn('/login/google', returnTo, reauth ? 'reauth=1' : ''))}">${GOOGLE_G}<span>Continue with Google</span></a>`
-    : '';
+  const googleButton =
+    (google
+      ? `<a class="gsi" href="${escapeHtml(withReturn('/login/google', returnTo, reauth ? 'reauth=1' : ''))}">${GOOGLE_G}<span>Continue with Google</span></a>`
+      : '') +
+    providers
+      .map(
+        (p) =>
+          `<a class="gsi provider-button" href="${escapeHtml(withReturn(`/login/${p}`, returnTo, reauth ? 'reauth=1' : ''))}">Continue with ${PROVIDER_NAMES[p]}</a>`,
+      )
+      .join('');
   // A passkey signs in with one step (DESIGN §4.10). Without JavaScript the button stays hidden.
   const passkey = !reauth || reauth.passkey === true;
   const passkeyButton = passkey
@@ -281,7 +297,7 @@ function methodsList(methods: Identity[]): string {
       .map(
         (m) =>
           '<li>' +
-          `<span class="method-name">${m.provider === 'google' ? 'Google' : 'Email code'}</span>` +
+          `<span class="method-name">${m.provider === 'email' ? 'Email code' : PROVIDER_NAMES[m.provider]}</span>` +
           `<span class="method-what">${escapeHtml(m.email ?? '')}</span>` +
           (removable && !m.isOwner
             ? '<form method="post" action="/account/methods/remove">' +
@@ -354,6 +370,8 @@ export function accountPage(params: {
   /** The owner sees a link to /admin. */
   isOwner?: boolean;
   methods?: Identity[];
+  /** Microsoft, GitHub, Apple: the ones switched on, for "Add …" buttons. */
+  providers?: FederatedProvider[];
 }): string {
   const heading = params.name ?? 'Your account';
   const methods = params.methods ?? [];
@@ -389,6 +407,13 @@ export function accountPage(params: {
       (hasGoogle
         ? ''
         : '<form method="post" action="/account/methods/google"><button class="button secondary" type="submit">Add Google</button></form>') +
+      (params.providers ?? [])
+        .filter((p) => !methods.some((m) => m.provider === p))
+        .map(
+          (p) =>
+            `<form method="post" action="/account/methods/${p}"><button class="button secondary" type="submit">Add ${PROVIDER_NAMES[p]}</button></form>`,
+        )
+        .join('') +
       '<a class="button secondary" href="/account/methods/email">Add an email address</a>' +
       '</div>' +
       '</section>' +
@@ -425,6 +450,9 @@ const METHOD_LABEL: Record<string, string> = {
   google: 'Google',
   email: 'an email code',
   passkey: 'a passkey',
+  microsoft: 'Microsoft',
+  github: 'GitHub',
+  apple: 'Apple',
 };
 
 /** "5 minutes ago", "3 days ago": for when a device was last used. */
@@ -621,9 +649,15 @@ export function deleteAccountPage(params: {
   appCount: number;
   invited: boolean;
   /** How the user can confirm: the account's methods. Defaults to Google. */
-  confirmWith?: { google: boolean; email: string | null };
+  confirmWith?: { google: boolean; email: string | null; providers?: FederatedProvider[] };
 }): string {
   const confirmWith = params.confirmWith ?? { google: true, email: null };
+  const providers = confirmWith.providers ?? [];
+  const firstWay = confirmWith.google
+    ? 'with Google'
+    : providers[0]
+      ? `with ${PROVIDER_NAMES[providers[0]]}`
+      : 'with a code we email you';
   const apps =
     params.appCount === 0
       ? 'Connected apps: none right now'
@@ -631,7 +665,7 @@ export function deleteAccountPage(params: {
   return page(
     'Delete your account',
     '<h1>Delete your 2earl account</h1>' +
-      `<p class="lede">Your account is deleted as soon as you confirm ${confirmWith.google ? 'with Google' : 'with a code we email you'}. It can’t be restored.</p>` +
+      `<p class="lede">Your account is deleted as soon as you confirm ${firstWay}. It can’t be restored.</p>` +
       '<div class="ledger">' +
       '<section aria-labelledby="deleted-heading">' +
       '<h2 id="deleted-heading">Deleted now</h2>' +
@@ -660,8 +694,14 @@ export function deleteAccountPage(params: {
       (confirmWith.google
         ? '<button class="button danger" type="submit" name="method" value="google">Confirm with Google</button>'
         : '') +
+      providers
+        .map(
+          (p, index) =>
+            `<button class="button ${confirmWith.google || index > 0 ? 'secondary' : 'danger'}" type="submit" name="method" value="${p}">Confirm with ${PROVIDER_NAMES[p]}</button>`,
+        )
+        .join('') +
       (confirmWith.email
-        ? `<button class="button ${confirmWith.google ? 'secondary' : 'danger'}" type="submit" name="method" value="email">Confirm with an email code</button>`
+        ? `<button class="button ${confirmWith.google || providers.length > 0 ? 'secondary' : 'danger'}" type="submit" name="method" value="email">Confirm with an email code</button>`
         : '') +
       '<a class="button secondary" href="/account">Keep account</a>' +
       '</div>' +
@@ -885,6 +925,30 @@ export interface Message {
   action?: { href: string; label: string };
 }
 
+/**
+ * A new account was refused because another account already signs in with this address (no
+ * joining by address, THREAT_MODEL B3): send the person to that account's method.
+ */
+export function methodHasAccount(provider: string): Message {
+  if (provider === 'email') return MESSAGES.emailHasAccount;
+  if (provider === 'google') return MESSAGES.googleHasAccount;
+  const name = providerName(provider);
+  return {
+    title: 'This address already has an account',
+    body: `An account that signs in with ${name} uses this address. Continue with ${name}, then add other ways to sign in on your account page.`,
+    action: { href: `/login/${provider}`, label: `Continue with ${name}` },
+  };
+}
+
+/** Adding a provider's account that already signs in to another 2earl account. */
+export function methodTaken(name: string): Message {
+  return {
+    title: `That ${name} account belongs to another 2earl account`,
+    body: `A ${name} account can sign in to one 2earl account only. Nothing was changed.`,
+    action: { href: '/account', label: 'Back to your account' },
+  };
+}
+
 export function messagePage(message: Message, status = 'Sign-in stopped'): string {
   return page(
     message.title,
@@ -898,6 +962,11 @@ export function messagePage(message: Message, status = 'Sign-in stopped'): strin
 }
 
 export const MESSAGES = {
+  providerEmailNotVerified: {
+    title: 'That account has no verified email address',
+    body: 'We need a verified address to keep your account safe. For a Microsoft work or school account, your organization has to verify its domain; for GitHub, verify your primary address there. Or sign in another way.',
+    action: { href: '/login', label: 'Sign in another way' },
+  },
   accountSuspended: {
     title: 'This account can’t sign in',
     body: 'This account is suspended. If you think that’s a mistake, write to us through the contact form on 2earl.com.',

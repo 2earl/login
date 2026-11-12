@@ -596,6 +596,54 @@ stored) and `SESSION_PEPPER` (not in D1).
 - The zone rate limit covers `/device` and `/oauth/device_authorization`.
 - Expired requests are deleted daily.
 
+### 4.14 Sign in with Microsoft, GitHub and Apple (phase 8e)
+
+Three more ways in, beside Google and email codes. Each is a sign-in method exactly like Google:
+- keyed on the provider's stable account ID (`identities(provider, subject)`);
+- never joined to another account by email address (THREAT_MODEL B3);
+- can be added to or removed from an account under "How you sign in", and can confirm an
+  account deletion.
+
+**Off until configured.** A provider appears only when its client ID (`wrangler.jsonc` vars)
+and its secret (optional Worker secrets, uploaded by `deploy.yml` when set) both exist.
+`docs/PROVIDERS.md` has the owner's setup steps.
+
+| | Microsoft | GitHub | Apple |
+|---|---|---|---|
+| Protocol | OpenID Connect, `common` endpoint (personal + work/school) | OAuth 2.0 + REST API | OpenID Connect, `response_mode=form_post` |
+| Binding | state + PKCE S256 + nonce | state + PKCE S256 | state + nonce |
+| Client auth | client secret | client secret | ES256 JWT signed with the team key (5 minutes) |
+| Subject | `sub` | numeric user ID | `sub` |
+| Email accepted | personal accounts; work/school only with `xms_edov` (domain verified) | primary address marked verified | `email_verified` (may be a private relay address) |
+| Name | `name` | `name`, else login | sent once, on the first sign-in, in the form's `user` field |
+
+**Shared rules**, as for Google (§4.2):
+- The transaction is single-use and bound to the browser by `__Host-login_tx`. It records which
+  provider it went to (`login_tx.provider`), so a code from one provider can't finish a trip to
+  another.
+- A new account is refused when another account already has the verified address, and the
+  page names that account's method (`methodHasAccount`). The same rule now applies to Google and
+  email-code sign-ups, for all providers.
+- Invite-only sign-up accepts an email invitation that matches the provider's verified address.
+- Suspended accounts are refused.
+- The session records the provider as its sign-in method. `amr` for them is `fed`.
+
+**Microsoft issuer.** The `common` endpoint signs tokens with a per-tenant issuer.
+login accepts a token only when `iss` is exactly
+`https://login.microsoftonline.com/{tid}/v2.0` for the token's own `tid`.
+
+**Apple's form post.** Apple answers with a cross-site POST, which carries no `SameSite=Lax`
+cookie, so the browser binding can't be checked there:
+1. `POST /callback/apple` stores the answer (state, code, error, the name) under a random ticket
+   for 5 minutes (`callback_tickets`, HMAC of the ticket).
+2. It redirects to `GET /callback/apple?ticket=…`. That top-level GET carries the
+   `__Host-login_tx` cookie, and the transaction is checked there as usual.
+
+A ticket without the cookie signs nobody in, and a ticket works once.
+
+**Data minimisation.** GitHub's access token is used for `/user` and `/user/emails`, then
+dropped. No provider's tokens are stored.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -673,6 +721,8 @@ oidc_subjects    sub PK (random), user_id FK, sector, created_at, UNIQUE(user_id
                                                                      (§4.11; with the account)
 resource_servers id PK ('rs_…'), name, resource, secret_hash (SHA-256), created_at,
                  last_used_at                                        (§4.12; no personal data)
+callback_tickets id_hash PK (HMAC of ticket), provider ('apple'), state, code, error, name,
+                 expires_at                                          (§4.14; ≤ 5 minutes)
 device_codes     id_hash PK (HMAC of device_code), user_code UNIQUE, state UNIQUE, client_id,
                  scope, resource NULL, status, code NULL, interval, last_polled_at,
                  created_at, expires_at                              (§4.13; ≤ 10 minutes)
@@ -896,7 +946,7 @@ Resolved:
 | 8b | **OpenID Connect provider** (§4.11) |
 | 8c | **Introspection and step-up** (§4.12) |
 | 8d | **Device authorization grant** (§4.13) and the **2earl CLI** (`2earl/cli`) |
-| 8e | **More social sign-in**: Microsoft, GitHub, Apple (§13) |
+| 8e | **More social sign-in**: Microsoft, GitHub, Apple (§4.14) |
 | 9a | **Organizations and roles** (§13) |
 | 9b | **SCIM 2.0** provisioning into organizations (§13) |
 | 9c | **SAML 2.0**: organizations sign in through their own identity provider (§13) |
@@ -908,7 +958,7 @@ login is the identity service and authorization server for 2earl. Every protocol
 permanent attack surface on the one service that guards every account, and one person runs it. A
 standard is added when something uses it, not to tick a list.
 
-**In place** (phases 4–8d):
+**In place** (phases 4–8e):
 
 | Standard | What it does here |
 |---|---|
@@ -930,6 +980,7 @@ standard is added when something uses it, not to tick a list.
 | RFC 7662 Token introspection | Resource servers without a Service Binding check tokens with their own credentials, only for their own resource (§4.12) |
 | RFC 9470 Step-up authentication challenge | `acr_values` and `max_age` for every request; tokens record `auth_time`, `acr`, `amr` (§4.12) |
 | RFC 8628 Device authorization grant | Sign in on a device without a browser by approving a short code elsewhere (§4.13) |
+| OpenID Connect / OAuth 2.0 as a client of Microsoft, GitHub and Apple | More ways in, each off until configured (§4.14) |
 
 **Next** (the owner decided on 2026-11-12 to plan all of these; the order puts each one after
 what it depends on):
@@ -937,7 +988,6 @@ what it depends on):
 | Phase | Standard | Why | Depends on |
 |---|---|---|---|
 | 8d | **2earl CLI** (`2earl/cli`, public repo) | `2earl login` with the device grant; then Prompt share from the terminal through the gateway | Device grant (done) |
-| 8e | **Microsoft, GitHub, Apple sign-in** | More ways in for people without Google | The owner registers an app with each provider (client ID and secret); each one is a sign-in method like Google, never joined by address (B3) |
 | 9a | **Organizations and roles** | A team owns resources together; members have roles (owner, admin, member) that services can read from the token | A product that teams use |
 | 9b | **SCIM 2.0** (RFC 7643, 7644) | An organization's own directory adds and removes its members | Organizations |
 | 9c | **SAML 2.0** | An organization's members sign in through the organization's own identity provider (login is the SAML service provider; their IdP proves who they are) | Organizations; an XML signature library reviewed for signature-wrapping attacks |

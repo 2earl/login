@@ -56,7 +56,13 @@ export class FakeGoogle {
 }
 
 export function makeApp(google: FakeGoogle, now: () => number = () => NOW) {
-  return createApp({ fetch: google.fetch, googleJwks: testJwks, now });
+  return createApp({
+    fetch: google.fetch,
+    googleJwks: testJwks,
+    microsoftJwks: testJwks,
+    appleJwks: testJwks,
+    now,
+  });
 }
 
 type App = ReturnType<typeof makeApp>;

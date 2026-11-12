@@ -34,6 +34,7 @@ import {
   signInPage,
   welcomePage,
   type Message,
+  methodHasAccount,
 } from './pages';
 import { safeReturnTo } from './return-to';
 import { signupMode } from './settings';
@@ -228,14 +229,15 @@ export function registerEmailRoutes(app: Hono<AppEnv>, deps: Deps): void {
     let userId = await userForEmail(c.env.DB, row.email);
     let created = false;
     if (!userId) {
-      // No joining by address (THREAT_MODEL B3): an address a Google account already uses
-      // stays that account's.
-      if (await accountWithEmail(c.env.DB, row.email)) {
+      // No joining by address (THREAT_MODEL B3): an address another account already signs in
+      // with (Google, Microsoft, GitHub, Apple) stays that account's.
+      const clash = await accountWithEmail(c.env.DB, row.email);
+      if (clash) {
         await audit(c.env.DB, now, 'login.denied', {
           ipPrefix: ip,
-          detail: { reason: 'google_has_account' },
+          detail: { reason: `${clash.provider}_has_account` },
         });
-        return c.html(messagePage(MESSAGES.googleHasAccount), 409);
+        return c.html(messagePage(methodHasAccount(clash.provider)), 409);
       }
       if ((await signupMode(c.env)) === 'invite' && !(await emailInvited(c.env.DB, row.email))) {
         await audit(c.env.DB, now, 'login.denied', {
