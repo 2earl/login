@@ -34,7 +34,8 @@ with German law on telemedia: TDDDG for cookies, DDG for the imprint **[verify]*
 | Email address of an email sign-in method | D1 `identities` (provider `email`), `users.primary_email` | User, verified with a code | Sign in; security notices |
 | Email codes in progress (address, HMACs of code, link and cookie, purpose, tries, IP prefix, times) | D1 `email_codes` | System | Verify the address; enforce send limits. Deleted 2 days after creation, and with the account |
 | Security notices sent by email (sign-in method or second factor changed, new recovery codes, first approval of an app, account deleted) | Cloudflare Email Service (not stored by us) | System | Tell the user about changes to their account (Art. 6(1)(b), (f)) |
-| Session records (hashed ID, timestamps, IP prefix, user-agent hash) | D1 `sessions` | Request | Keep the user signed in; detect abuse |
+| Session records (hashed ID, timestamps, IP prefix, user-agent hash, a coarse device name such as "Firefox on Windows", how the session signed in) | D1 `sessions` | Request | Keep the user signed in; detect abuse; let the user see and sign out their devices |
+| Pending passkey sign-in challenges (hashed browser cookie, random challenge, account ID only when confirming it's you) | D1 `passkey_challenges` | Request | Check a passkey sign-in; at most 5 minutes |
 | Login transaction (`state`, `nonce`, PKCE verifier) | D1 `login_tx` | Generated | Secure the sign-in, ≤ 10 min |
 | OAuth grants and tokens (hashed, encrypted props `{uid, authTime}`) | KV | Generated | Authorise apps the user approved |
 | Consent decisions | Signed cookie + grants | User | Remember approvals |
@@ -58,6 +59,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | Data | Retention |
 |---|---|
 | Login transactions | 10 minutes, then deleted |
+| Passkey sign-in challenges | 5 minutes, then deleted |
 | Email codes | Usable 10 minutes; the row is deleted 2 days after creation (send limits count it), or with the account |
 | Sessions | 12 h idle / 7 days absolute |
 | OAuth grants | 7 days idle / 90 days absolute, or until revoked |

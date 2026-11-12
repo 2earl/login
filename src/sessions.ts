@@ -25,9 +25,19 @@ export interface Session {
   user: SessionUser;
 }
 
+export type SignInMethod = 'google' | 'email' | 'passkey';
+
 export interface SessionMeta {
   ipPrefix: string | null;
   userAgentHash: string | null;
+  /** A coarse device name (src/devices.ts). */
+  device?: string | null;
+  method?: SignInMethod | null;
+  /**
+   * A passkey with user verification is phishing-resistant and two factors in one: the session
+   * starts at aal2 (DESIGN §4.10).
+   */
+  aal2?: boolean;
 }
 
 async function hashSessionId(pepper: string, cookieValue: string): Promise<string> {
@@ -45,17 +55,22 @@ export async function createSession(
   const expiresAt = now + SESSION_ABSOLUTE_SECONDS;
   await db
     .prepare(
-      `INSERT INTO sessions (id_hash, user_id, aal, created_at, last_seen_at, expires_at, ip_prefix, user_agent_hash)
-       VALUES (?, ?, 'aal1', ?, ?, ?, ?, ?)`,
+      `INSERT INTO sessions (id_hash, user_id, aal, aal2_at, created_at, last_seen_at, expires_at,
+                             ip_prefix, user_agent_hash, device, method)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       await hashSessionId(pepper, cookieValue),
       userId,
+      meta.aal2 ? 'aal2' : 'aal1',
+      meta.aal2 ? now : null,
       now,
       now,
       expiresAt,
       meta.ipPrefix,
       meta.userAgentHash,
+      meta.device ?? null,
+      meta.method ?? null,
     )
     .run();
   return { cookieValue, expiresAt };
@@ -126,4 +141,88 @@ export async function getSession(
 
 export async function deleteSession(db: D1Database, idHash: string): Promise<void> {
   await db.prepare('DELETE FROM sessions WHERE id_hash = ?').bind(idHash).run();
+}
+
+// ---- Signed-in devices (DESIGN §7) ------------------------------------------------------------
+
+export interface DeviceSession {
+  /** An identifier for this list only: not the session's key, and useless as a cookie. */
+  ref: string;
+  device: string | null;
+  method: SignInMethod | null;
+  createdAt: number;
+  lastSeenAt: number;
+  current: boolean;
+}
+
+async function sessionRef(pepper: string, idHash: string): Promise<string> {
+  return (await hmacHex(pepper, `session-ref:${idHash}`)).slice(0, 24);
+}
+
+/** The account's active sessions, most recently used first. */
+export async function listSessions(
+  db: D1Database,
+  pepper: string,
+  now: number,
+  userId: string,
+  currentIdHash: string,
+): Promise<DeviceSession[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id_hash, device, method, created_at, last_seen_at FROM sessions
+       WHERE user_id = ? AND expires_at > ? AND last_seen_at > ?
+       ORDER BY last_seen_at DESC LIMIT 50`,
+    )
+    .bind(userId, now, now - SESSION_IDLE_SECONDS)
+    .all<{
+      id_hash: string;
+      device: string | null;
+      method: SignInMethod | null;
+      created_at: number;
+      last_seen_at: number;
+    }>();
+  return Promise.all(
+    results.map(async (row) => ({
+      ref: await sessionRef(pepper, row.id_hash),
+      device: row.device,
+      method: row.method,
+      createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at,
+      current: row.id_hash === currentIdHash,
+    })),
+  );
+}
+
+/** Ends one of the account's other sessions, named by its list reference. */
+export async function endSession(
+  db: D1Database,
+  pepper: string,
+  userId: string,
+  currentIdHash: string,
+  ref: string,
+): Promise<boolean> {
+  const { results } = await db
+    .prepare('SELECT id_hash FROM sessions WHERE user_id = ? AND id_hash <> ?')
+    .bind(userId, currentIdHash)
+    .all<{ id_hash: string }>();
+  for (const row of results) {
+    if ((await sessionRef(pepper, row.id_hash)) === ref) {
+      await deleteSession(db, row.id_hash);
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Ends every session of the account except this one; returns how many ended. */
+export async function endOtherSessions(
+  db: D1Database,
+  userId: string,
+  currentIdHash: string,
+): Promise<number> {
+  const result = await db
+    .prepare('DELETE FROM sessions WHERE user_id = ? AND id_hash <> ?')
+    .bind(userId, currentIdHash)
+    .run();
+  return result.meta.changes;
 }

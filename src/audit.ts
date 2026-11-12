@@ -15,6 +15,7 @@ export type AuditEvent =
   | 'allowlist.pinned'
   | 'user.created'
   | 'logout'
+  | 'session.ended'
   | 'consent.approved'
   | 'consent.denied'
   | 'consent.reused'

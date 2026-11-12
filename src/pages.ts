@@ -6,6 +6,7 @@
 
 import { ASSET_URLS } from './assets.generated';
 import type { SignupMode } from './settings';
+import type { DeviceSession } from './sessions';
 import type { Identity } from './users';
 
 export function escapeHtml(value: string): string {
@@ -97,7 +98,7 @@ export function signInPage(
   params: {
     returnTo?: string | null;
     mode?: SignupMode;
-    reauth?: { google: boolean; email: string | null } | null;
+    reauth?: { google: boolean; email: string | null; passkey?: boolean } | null;
     error?: string;
     email?: string;
   } = {},
@@ -115,7 +116,7 @@ export function signInPage(
         ? `<input type="hidden" name="email" value="${escapeHtml(fixedEmail)}">` +
           `<p class="section-text">We’ll send a code to <strong>${escapeHtml(fixedEmail)}</strong>.</p>`
         : '<label class="field"><span>Email address</span>' +
-          `<input name="email" type="email" autocomplete="email" inputmode="email" required maxlength="254" value="${escapeHtml(params.email ?? '')}"${params.error ? ' aria-invalid="true" aria-describedby="email-error"' : ''}></label>` +
+          `<input name="email" type="email" autocomplete="email webauthn" inputmode="email" required maxlength="254" value="${escapeHtml(params.email ?? '')}"${params.error ? ' aria-invalid="true" aria-describedby="email-error"' : ''}></label>` +
           (params.error
             ? `<p class="field-error" id="email-error">${escapeHtml(params.error)}</p>`
             : '')) +
@@ -124,6 +125,12 @@ export function signInPage(
     : '';
   const googleButton = google
     ? `<a class="gsi" href="${escapeHtml(withReturn('/login/google', returnTo, reauth ? 'reauth=1' : ''))}">${GOOGLE_G}<span>Continue with Google</span></a>`
+    : '';
+  // A passkey signs in with one step (DESIGN §4.10). Without JavaScript the button stays hidden.
+  const passkey = !reauth || reauth.passkey === true;
+  const passkeyButton = passkey
+    ? `<button class="button secondary wide passkey-button" type="button" hidden data-passkey="sign-in" data-status="passkey-status" data-return-to="${escapeHtml(returnTo ?? '')}"${reauth ? ' data-reauth="1"' : ''}>Sign in with a passkey</button>` +
+      '<p class="passkey-status" id="passkey-status" role="status" aria-live="polite"></p>'
     : '';
   const invite = params.mode === 'invite';
   return page(
@@ -136,6 +143,7 @@ export function signInPage(
       googleButton +
       (googleButton && emailForm ? '<p class="or" role="separator"><span>or</span></p>' : '') +
       emailForm +
+      passkeyButton +
       (reauth
         ? ''
         : invite
@@ -146,6 +154,7 @@ export function signInPage(
         : '<p class="fine">By continuing, you agree to the ' +
           '<a href="https://2earl.com/terms">Terms of service</a> and acknowledge the ' +
           '<a href="https://2earl.com/privacy">Privacy policy</a>.</p>'),
+    { passkeyScript: passkey },
   );
 }
 
@@ -373,6 +382,9 @@ export function accountPage(params: {
       '<section class="section" aria-labelledby="methods-heading">' +
       '<h2 id="methods-heading">How you sign in</h2>' +
       methodsList(methods) +
+      (params.factors.some((f) => f.kind === 'webauthn')
+        ? '<p class="section-text">Your passkeys also sign you in on their own, in one step. <a href="/account/security">Manage passkeys</a></p>'
+        : '') +
       '<div class="data-actions">' +
       (hasGoogle
         ? ''
@@ -383,7 +395,10 @@ export function accountPage(params: {
       '<section class="section" aria-labelledby="security-heading">' +
       '<h2 id="security-heading">Security</h2>' +
       `<p class="section-text">${escapeHtml(factorSummary(params.factors))}</p>` +
+      '<div class="data-actions">' +
       '<a class="button secondary" href="/account/security">Manage second factor</a>' +
+      '<a class="button secondary" href="/account/sessions">Signed-in devices</a>' +
+      '</div>' +
       '</section>' +
       '<section class="section" aria-labelledby="details-heading">' +
       '<h2 id="details-heading">Account details</h2>' +
@@ -403,6 +418,62 @@ export function accountPage(params: {
       '<div class="actions">' +
       '<form method="post" action="/logout"><button class="button secondary" type="submit">Sign out</button></form>' +
       '</div>',
+  );
+}
+
+const METHOD_LABEL: Record<string, string> = {
+  google: 'Google',
+  email: 'an email code',
+  passkey: 'a passkey',
+};
+
+/** "5 minutes ago", "3 days ago": for when a device was last used. */
+export function ago(now: number, then: number): string {
+  const seconds = Math.max(0, now - then);
+  if (seconds < 120) return 'Active now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `Active ${String(minutes)} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Active ${String(hours)} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `Active ${String(days)} day${days === 1 ? '' : 's'} ago`;
+}
+
+/** Signed-in devices (DESIGN §7): what each is, when it was used, and a way to sign it out. */
+export function sessionsPage(params: {
+  sessions: DeviceSession[];
+  now: number;
+  notice?: string | null;
+}): string {
+  const others = params.sessions.filter((s) => !s.current);
+  const items = params.sessions
+    .map(
+      (s) =>
+        '<li class="app">' +
+        '<div class="app-main">' +
+        `<p class="app-name">${escapeHtml(s.device ?? 'Unknown device')}${s.current ? ' <span class="tag">This device</span>' : ''}</p>` +
+        `<p class="app-meta">${escapeHtml(ago(params.now, s.lastSeenAt))} · Signed in ${formatDate(s.createdAt)}${s.method ? ` with ${escapeHtml(METHOD_LABEL[s.method] ?? s.method)}` : ''}</p>` +
+        '</div>' +
+        (s.current
+          ? ''
+          : '<form method="post" action="/account/sessions/end">' +
+            `<input type="hidden" name="session" value="${escapeHtml(s.ref)}">` +
+            '<button class="button secondary" type="submit">Sign out</button></form>') +
+        '</li>',
+    )
+    .join('');
+  return page(
+    'Signed-in devices',
+    '<p class="crumb"><a href="/account">Your account</a></p>' +
+      '<h1>Signed-in devices</h1>' +
+      '<p class="lede">Every browser where your 2earl account is signed in. If you don’t recognise one, sign it out, then check how you sign in and add a second factor.</p>' +
+      (params.notice ? `<p class="notice" role="status">${escapeHtml(params.notice)}</p>` : '') +
+      `<ul class="apps">${items}</ul>` +
+      (others.length > 0
+        ? '<form method="post" action="/account/sessions/end-others" class="actions">' +
+          '<button class="button danger" type="submit">Sign out all other devices</button></form>'
+        : '<p class="note">This is the only device signed in.</p>') +
+      '<p class="note">Apps you connected keep their access until you disconnect them on your account page. Signing out a device doesn’t disconnect apps.</p>',
   );
 }
 
@@ -617,7 +688,7 @@ export function securityPage(params: {
       'Someone who gets into your Google account still can’t get into 2earl.</p>' +
       '<section class="section" aria-labelledby="passkeys-heading">' +
       '<h2 id="passkeys-heading">Passkeys <span class="tag">Recommended</span></h2>' +
-      '<p class="section-text">Your fingerprint, face, screen lock or a security key. Passkeys only work on login.2earl.com, so they can’t be phished.</p>' +
+      '<p class="section-text">Your fingerprint, face, screen lock or a security key. Passkeys only work on login.2earl.com, so they can’t be phished. A passkey also signs you in on its own, in one step.</p>' +
       passkeyList +
       '<div class="add-passkey">' +
       '<label class="field"><span>Name (optional)</span>' +
@@ -761,6 +832,11 @@ export function messagePage(message: Message, status = 'Sign-in stopped'): strin
 }
 
 export const MESSAGES = {
+  accountSuspended: {
+    title: 'This account can’t sign in',
+    body: 'This account is suspended. If you think that’s a mistake, write to us through the contact form on 2earl.com.',
+    action: { href: 'https://2earl.com', label: 'Go to 2earl.com' },
+  },
   tooManyAttempts: {
     title: 'Too many sign-in attempts',
     body: 'Sign-in is paused for this network for a minute. Wait, then try again.',

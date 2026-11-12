@@ -382,6 +382,47 @@ deletion (to the address it had). Nothing marketing; nothing else.
 `admin.signup_changed`. Without a saved setting, `LOGIN_LOCKED` decides (`"false"` = open, the
 default from this phase). Closing sign-up stops new accounts only; existing ones keep working.
 
+### 4.10 Sign in with a passkey, and signed-in devices (phase 8a)
+
+**Passkey sign-in.** A passkey added under Security is also a way to sign in on its own:
+
+1. The sign-in page asks `/login/passkey/options` for a challenge.
+   - `userVerification: required`.
+   - No `allowCredentials`, so the browser offers the passkeys it has for `login.2earl.com`.
+   - The challenge is kept 5 minutes, keyed by the HMAC of the `__Host-passkey_tx` cookie, which
+     binds it to this browser.
+2. The person picks one of two ways:
+   - **Autofill:** the email field has `autocomplete="email webauthn"`, so the browser lists
+     passkeys among its suggestions (WebAuthn conditional mediation).
+   - **Button:** "Sign in with a passkey".
+3. `/login/passkey` checks the assertion against the stored public key:
+   - origin and RP ID must match;
+   - user verification is required;
+   - the signature counter is checked;
+   - the challenge is used once.
+
+   The account is the one that owns the credential. A credential no account has is refused, with a
+   pointer to sign in another way and add it.
+4. The session starts at **`aal2`**. A passkey with user verification is phishing-resistant and
+   two factors in one gesture (possession, plus biometric or PIN), so no second step follows.
+   `method = 'passkey'`.
+5. **Confirming it's you** (`/login?reauth=1`) offers the passkey too. The challenge then names the
+   signed-in account (`user_id`), and only that account's passkeys are accepted.
+
+There is no new credential type. A passkey is still one `mfa_factors` row, used both for the
+second step (§4.7) and for signing in. Passkeys created before this phase used
+`residentKey: preferred`; the ones the authenticator stored as discoverable work for sign-in, the
+others stay second-factor-only, which the browser handles by not offering them.
+
+**Signed-in devices** (`/account/sessions`):
+- Every active session of the account, with:
+  - a coarse device name (`src/devices.ts`, e.g. "Safari on iPhone", never the user agent);
+  - when it was last active and when and how it signed in.
+- Signing out works on one device or on all others; this browser stays signed in. Both actions
+  are audited (`session.ended`).
+- Sessions are named in the form by an HMAC reference, never by their key.
+- Signing a device out doesn't disconnect apps: grants are separate (§4.3), and the page says so.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -451,7 +492,10 @@ identities       id PK, user_id FK, provider ('google'|'email'), subject (Google
                  UNIQUE(provider, subject)
 sessions         id_hash PK (HMAC-SHA-256 of cookie value, SESSION_PEPPER), user_id FK,
                  aal ('aal1'|'aal2'), aal2_at NULL, created_at, last_seen_at, expires_at,
-                 ip_prefix, user_agent_hash
+                 ip_prefix, user_agent_hash,
+                 device NULL ("Firefox on Windows"), method NULL ('google'|'email'|'passkey')
+passkey_challenges id_hash PK (HMAC of __Host-passkey_tx), challenge, user_id NULL (reauth
+                 only), expires_at                                   (§4.10; ≤ 5 minutes)
 login_tx         id_hash PK, state, nonce, pkce_verifier, return_to, created_at, expires_at,
                  purpose ('sign_in'|'delete_account'), user_id NULL (deletion only)
 mfa_factors      id PK, user_id FK, kind ('webauthn'|'totp'), label, created_at, last_used_at,
@@ -524,7 +568,9 @@ Library maintenance (`purgeExpiredData()`) runs on a daily Cron Trigger.
   - `Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`
   - Stylesheet, font (Readex Pro, OFL, Latin subset, self-hosted) and the 2earl mark (icon) are
     Workers static assets in `public/`, referenced with content fingerprints (`?v=`), with their own headers in `public/_headers`. No third-party
-    requests, no JavaScript.
+    requests. The only JavaScript is `/passkey.js` (WebAuthn needs the browser API), served from
+    this origin and allowed only on the sign-in page and the second-factor pages (`MFA_CSP`:
+    `script-src 'self'; connect-src 'self'`).
     - Exception: the **consent page** omits `form-action`. Some browsers apply `form-action` to
       the redirect that follows a form submission, and approving consent redirects to the
       client's (arbitrary) redirect URI. That redirect target is already restricted by exact
@@ -666,6 +712,60 @@ Resolved:
 | 5 | Protocol test suite complete, audit log, purge cron, **second factor behind `MFA_REQUIRED`** (§4.7); optional OpenID conformance tests for the Google client side → **unlock** |
 | 6 | `GATEWAY_INTEGRATION.md`: handoff to the gateway session |
 | 7 | **Open sign-up** (§4.9): email codes, sign-in methods, welcome page, security notices by email, sign-up switch |
+| 8a | **Passkey sign-in and signed-in devices** (§4.10) |
+| 8b | **OpenID Connect provider** (§13) |
+| 8c | **Introspection and step-up** (§13) |
+
+## 13. Standards roadmap: what login implements, and what it deliberately doesn't
+
+login is the identity service and authorization server for 2earl. Every protocol endpoint is
+permanent attack surface on the one service that guards every account, and one person runs it. A
+standard is added when something uses it, not to tick a list.
+
+**In place** (phases 4–8a):
+
+| Standard | What it does here |
+|---|---|
+| OAuth 2.1 (draft), RFC 9700 (Security BCP) | Authorization code + PKCE (S256 only), no implicit or password grant |
+| RFC 7636 | PKCE |
+| RFC 8414 | Authorization server metadata |
+| RFC 7009 | Token revocation |
+| RFC 8707, RFC 9728 | Resource indicators: tokens bound to one audience; protected-resource metadata |
+| RFC 9207 | `iss` in the authorization response (mix-up defence) |
+| draft-ietf-oauth-client-id-metadata-document | Client registration by URL (MCP 2026-07-28) |
+| Rotating refresh tokens, 90-day grant cap | RFC 9700 §4.14 |
+| WebAuthn Level 3, passkeys | Second factor; sign-in on its own with user verification (§4.10); autofill (conditional mediation) |
+| RFC 6238 (TOTP) | Second-factor fallback |
+| NIST SP 800-63B AAL | `aal1`/`aal2` sessions; `acr_values=urn:2earl:aal2` for apps that need a recent second factor |
+| OpenID Connect (as a client of Google) | Google sign-in: PKCE, nonce, `iss`/`aud` checks |
+
+**Next:**
+
+| Phase | Standard | Why |
+|---|---|---|
+| 8b | **OpenID Connect Core 1.0** as a provider: discovery (`/.well-known/openid-configuration`), JWKS, ID tokens (ES256), `nonce`, `auth_time`, `acr`/`amr`, `/userinfo`, scopes `openid profile email` | Lets any site or app offer "Sign in with 2earl", not only 2earl services |
+| 8b | **Pairwise subject identifiers** (OIDC Core §8.1) | Each site gets its own user ID, so sites can't link one person across each other |
+| 8b | **OIDC RP-Initiated Logout 1.0** | Signing out of an app can end the 2earl session too |
+| 8c | **RFC 7662 Token introspection** | Resource servers outside Cloudflare can check tokens; the gateway keeps its Service Binding |
+| 8c | **RFC 9470 Step-up authentication challenge** | A resource server can ask for a fresher or stronger sign-in in a standard way, instead of the current 2earl-specific `acr_values` handling only |
+
+**Deliberately not implemented** (revisit when the listed condition is true):
+
+| Standard | Why not now | Revisit when |
+|---|---|---|
+| Passwords | Phishable, reused, and the biggest source of account takeover; email codes and passkeys cover everyone | Never planned |
+| SMS codes | SIM swap; NIST SP 800-63B restricts them | Never planned |
+| Implicit and password grants | Removed in OAuth 2.1 | Never |
+| RFC 9449 DPoP | Sender-constrained tokens are a strong defence, but neither the library nor Claude's connector client supports DPoP today; a half-supported DPoP is a downgrade path | A client that matters sends DPoP, and the library supports it |
+| RFC 9126 PAR, RFC 9101 JAR | Protect request integrity for high-assurance clients (banking, FAPI); the current clients are MCP assistants and 2earl's own sites | A FAPI-grade client |
+| RFC 9396 Rich Authorization Requests | Scopes per service already cover the permissions in use | A service needs per-object consent (e.g. "this one session") |
+| RFC 8628 Device authorization grant | No CLI or TV client | A 2earl CLI exists |
+| RFC 7591 Dynamic client registration | Replaced by client metadata documents, which can't be abused to fill the database | Never, unless MCP requires it again |
+| Client credentials grant | No machine-to-machine client; services talk over Service Bindings | A third-party backend needs its own access |
+| SAML 2.0, SCIM 2.0, organizations and roles | Enterprise single sign-on and provisioning; 2earl has individual accounts only | A team or organization product exists |
+| FedCM | Browser-mediated sign-in for third-party sites; only useful once 8b exists and sites embed it | After 8b, if a site asks for it |
+| Shared Signals (CAEP, RISC) | Pushes session and credential events to relying parties; there is one relying party, our own gateway, which already checks every token | Several independent relying parties |
+| Social sign-in beyond Google | Each provider is another OAuth client to secure and keep working | People ask for a specific one (Apple, Microsoft, GitHub) |
 
 ## References
 

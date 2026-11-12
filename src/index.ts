@@ -68,6 +68,7 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
       this.env.DB.batch([
         this.env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM login_tx WHERE expires_at <= ?').bind(now),
+        this.env.DB.prepare('DELETE FROM passkey_challenges WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM audit_events WHERE at < ?').bind(
           now - AUDIT_RETENTION_SECONDS,
         ),

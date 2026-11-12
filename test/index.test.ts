@@ -1,6 +1,6 @@
 import { exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { BASE_HEADERS, DEFAULT_CSP } from '../src/security-headers';
+import { BASE_HEADERS, DEFAULT_CSP, MFA_CSP } from '../src/security-headers';
 
 const ORIGIN = 'https://login.2earl.com';
 
@@ -36,7 +36,8 @@ describe('security headers', () => {
       for (const [name, value] of Object.entries(BASE_HEADERS)) {
         expect(res.headers.get(name), name).toBe(value);
       }
-      expect(res.headers.get('Content-Security-Policy')).toBe(DEFAULT_CSP);
+      // The sign-in page runs /passkey.js (sign in with a passkey); every other page runs nothing.
+      expect(res.headers.get('Content-Security-Policy')).toBe(path === '/' ? MFA_CSP : DEFAULT_CSP);
     });
   }
 

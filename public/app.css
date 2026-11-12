@@ -1114,3 +1114,18 @@ code {
 .code-form .button.wide {
   max-width: none;
 }
+
+/* ---- Sign in with a passkey (DESIGN §4.10) ------------------------------------------------ */
+
+.button.wide.passkey-button {
+  margin-top: 0.75rem;
+  max-width: none;
+}
+.passkey-status {
+  margin: 0.5rem 0 0;
+  color: var(--alert);
+  font-size: 0.9rem;
+}
+.passkey-status:empty {
+  display: none;
+}

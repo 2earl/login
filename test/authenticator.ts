@@ -148,13 +148,16 @@ export class SoftAuthenticator {
   }
 
   /** The browser's answer to navigator.credentials.get(), as JSON. */
-  async authenticate(options: { challenge: string }): Promise<Record<string, unknown>> {
+  async authenticate(
+    options: { challenge: string },
+    { userVerified = true }: { userVerified?: boolean } = {},
+  ): Promise<Record<string, unknown>> {
     this.counter += 1;
     const counter = new Uint8Array(4);
     new DataView(counter.buffer).setUint32(0, this.counter);
     const authData = concat(
       await sha256(encoder.encode(this.rpId)),
-      new Uint8Array([0x05]), // UP | UV
+      new Uint8Array([userVerified ? 0x05 : 0x01]), // UP | UV, or UP only
       counter,
     );
     const clientData = this.clientData('webauthn.get', options.challenge);
