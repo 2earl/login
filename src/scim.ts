@@ -102,7 +102,7 @@ export interface ScimUserInput {
 }
 
 /** The one active account that signs in with `email` (a verified address), or null. */
-async function accountFor(db: D1Database, email: string): Promise<string | null> {
+export async function accountFor(db: D1Database, email: string): Promise<string | null> {
   const { results } = await db
     .prepare(
       `SELECT DISTINCT u.id FROM users u

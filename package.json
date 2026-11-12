@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.4",
+    "@node-saml/node-saml": "5.2.0",
     "@simplewebauthn/server": "14.1.0",
     "hono": "4.13.17",
     "jose": "6.2.15",
@@ -39,6 +40,7 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1",
     "vitest": "5.1.0",
-    "wrangler": "4.158.0"
+    "wrangler": "4.158.0",
+    "xml-crypto": "6.4.0"
   }
 }

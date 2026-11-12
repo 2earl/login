@@ -148,6 +148,9 @@ export function signInPage(
       passkeyButton +
       (reauth
         ? ''
+        : `<p class="note"><a href="${escapeHtml(withReturn('/login/sso', returnTo))}">Sign in with your organization (SSO)</a></p>`) +
+      (reauth
+        ? ''
         : invite
           ? '<p class="note">Sign-up is by invitation for now. Use the Google account or the address you were invited with.</p>'
           : '<p class="note">New here? The same buttons create your account. With email, there’s no password: we send you a code each time.</p>') +
@@ -429,6 +432,7 @@ const METHOD_LABEL: Record<string, string> = {
   google: 'Google',
   email: 'an email code',
   passkey: 'a passkey',
+  saml: 'your organization’s sign-in (SSO)',
 };
 
 /** "5 minutes ago", "3 days ago": for when a device was last used. */
@@ -1014,5 +1018,28 @@ export function notFoundPage(): string {
     '<h1>There’s nothing at this address</h1>' +
       '<p class="lede">Check the link, or go to your account.</p>' +
       '<a class="button primary" href="/account">Go to your account</a>',
+  );
+}
+
+/** Single sign-on (DESIGN §4.17): the work address decides which organization's IdP to use. */
+export function ssoPage(params: {
+  returnTo: string | null;
+  email?: string;
+  error?: string;
+}): string {
+  return page(
+    'Single sign-on',
+    '<h1>Sign in with your organization</h1>' +
+      '<p class="lede">If your organization connected its sign-in to 2earl, enter your work address and we’ll send you there.</p>' +
+      '<form method="post" action="/login/sso" class="email-form" novalidate>' +
+      returnField(params.returnTo) +
+      '<label class="field"><span>Work email address</span>' +
+      `<input name="email" type="email" autocomplete="email" inputmode="email" required maxlength="254" value="${escapeHtml(params.email ?? '')}"${params.error ? ' aria-invalid="true" aria-describedby="sso-error"' : ''}></label>` +
+      (params.error
+        ? `<p class="field-error" id="sso-error">${escapeHtml(params.error)}</p>`
+        : '') +
+      '<button class="button primary wide" type="submit">Continue</button>' +
+      '</form>' +
+      `<p class="note"><a href="${escapeHtml(withReturn('/login', params.returnTo))}">Sign in another way</a></p>`,
   );
 }

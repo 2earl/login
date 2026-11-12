@@ -6,7 +6,7 @@
   "name": "login-e2e",
   "main": "worker/index.ts",
   "compatibility_date": "2026-11-01",
-  "compatibility_flags": ["global_fetch_strictly_public"],
+  "compatibility_flags": ["global_fetch_strictly_public", "nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
   "assets": {

@@ -11,6 +11,7 @@ import { exportAccount } from './account';
 import { exportFromServices } from './service-exports';
 import { registerOrgRoutes } from './org-routes';
 import { registerScimRoutes } from './scim-routes';
+import { registerSamlRoutes } from './saml-routes';
 import { DpopError, dpopOf, verifyDpopProof, withDpop } from './dpop';
 import { pushedRequestUrl, registerParRoute } from './par';
 import { membershipsOf, ownershipPlan } from './orgs';
@@ -104,6 +105,8 @@ function gateAllows(gate: Exclude<MfaGate, null>, path: string): boolean {
     '/account/deleted',
   ];
   if (always.includes(path) || path.startsWith('/mfa/') || path.startsWith('/login/')) return true;
+  // SAML sign-in replies (DESIGN §4.17) start a new session, like /callback/google.
+  if (path.startsWith('/saml/')) return true;
   if (path.startsWith('/oauth/') || path.startsWith('/.well-known/')) return true;
   if (gate === 'enrol') {
     // Enrolling, and the data-protection rights, stay available without a factor.
@@ -657,6 +660,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   registerAdminRoutes(app, deps);
   registerOrgRoutes(app, deps);
   registerScimRoutes(app, deps);
+  registerSamlRoutes(app, deps);
 
   // ---- OAuth authorization server (DESIGN §4.1, §4.3) ------------------------------------
 

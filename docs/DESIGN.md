@@ -790,6 +790,59 @@ display name, active, and the linked account. It is deleted when the directory d
 the organization is deleted. When the account is deleted, the link is cleared. The person's export
 lists every record linked to them (`directoryRecords`).
 
+### 4.17 Single sign-on with SAML 2.0 (phase 9c)
+
+An organization's members sign in through its own identity provider (Okta, Microsoft Entra ID,
+Google Workspace, ADFS…). login is the SAML **service provider**.
+
+**Setup** (an owner, on `/orgs/:id/directory`, after a recent proof it's them and once a domain
+is verified):
+- **Owner enters:** the IdP's entity ID, its sign-in URL (https, HTTP-Redirect binding) and its
+  signing certificate, as PEM or bare base64.
+- **login gives:** its entity ID `https://login.2earl.com/saml/<org>`, the ACS URL `…/acs`
+  (HTTP-POST), and metadata at `…/metadata`.
+- **Name ID:** the work email address.
+
+**Sign-in, started by login only.** IdP-initiated responses are refused: without login's own
+request there is nothing to check them against.
+1. The person chooses "Sign in with your organization (SSO)" on `/login` and enters their work
+   address. login finds the active organization that verified that domain (§4.16) and has single
+   sign-on on.
+2. login stores a state, keyed by an HMAC of a 256-bit RelayState, bound to the browser by
+   `__Host-saml_tx` (HMAC stored). It then redirects to the IdP with a deflated AuthnRequest.
+3. **The IdP's cross-site POST** to the ACS carries no SameSite=Lax cookie. The response is parked
+   in that state, and the browser is sent `303` to `GET …/acs?rs=<RelayState>`. That same-site
+   GET carries the cookie; only the browser that started can finish.
+4. **Checking the response.** node-saml with xml-crypto does it; login has no XML-signature code
+   of its own. It requires:
+   - a **signed assertion** (RSA-SHA256), not just a signed envelope;
+   - the configured IdP issuer;
+   - the audience equal to login's entity ID for this organization;
+   - the recipient equal to the ACS URL;
+   - `InResponseTo` naming the request of **this** sign-in. The cache is scoped to the state,
+     and every ID is used once (`consumeAsync`);
+   - assertion IDs never seen before (`rejectReplayedAssertions`);
+   - validity times within 60 seconds of clock skew, and the assertion at most 10 minutes old.
+5. **The address.** It comes from an email attribute or an email-format NameID, and must be at one
+   of the organization's verified domains. Anything else is refused.
+6. **The account.** The account that signs in with that address is signed in (`method: saml`,
+   `amr: fed`). With none, an account is created like an email sign-up: provider `email`, under
+   the sign-up switch (§4.9).
+   - **Why the address alone is enough here.** An organization that proved control of a domain
+     controls its mailboxes, so it could already sign in with an email code. SAML gives it no
+     power it didn't have; it gives its members their company's sign-in.
+   - **Second factor.** One set up on 2earl is still asked for.
+
+**Runtime.** node-saml needs the Workers `nodejs_compat` flag (`wrangler.jsonc`), for `crypto` and
+`zlib`. The bundle is about 510 KB gzipped.
+
+**Not implemented:**
+- single logout;
+- encrypted assertions (TLS already protects the POST);
+- signed AuthnRequests;
+- "require SSO" for a domain: other ways to sign in keep working, because a 2earl account is the
+  person's own.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -860,7 +913,7 @@ identities       id PK, user_id FK, provider ('google'|'email'), subject (Google
 sessions         id_hash PK (HMAC-SHA-256 of cookie value, SESSION_PEPPER), user_id FK,
                  aal ('aal1'|'aal2'), aal2_at NULL, created_at, last_seen_at, expires_at,
                  ip_prefix, user_agent_hash,
-                 device NULL ("Firefox on Windows"), method NULL ('google'|'email'|'passkey')
+                 device NULL ("Firefox on Windows"), method NULL ('google'|'email'|'passkey'|'saml')
 passkey_challenges id_hash PK (HMAC of __Host-passkey_tx), challenge, user_id NULL (reauth
                  only), expires_at                                   (§4.10; ≤ 5 minutes)
 oidc_subjects    sub PK (random), user_id FK, sector, created_at, UNIQUE(user_id, sector)
@@ -899,6 +952,11 @@ scim_tokens      id PK ('st_…'), org_id FK, token_hash UNIQUE (SHA-256), creat
 scim_users       id PK ('scu_…'), org_id FK, user_name, external_id, display_name, given_name,
                  family_name, active, user_id FK NULL (SET NULL), created_at, updated_at,
                  UNIQUE(org_id, user_name)
+org_saml         org_id PK FK, idp_entity_id, sso_url, certificate (public), enabled,
+                 created_at, updated_at                              (§4.17)
+saml_states      state_hash PK (HMAC of RelayState), org_id FK, browser_hash (HMAC of cookie),
+                 return_to, response NULL, expires_at                (≤ 10 minutes)
+saml_cache       key PK (org, sign-in, request or assertion ID), value, expires_at
 pushed_requests  id_hash PK (HMAC of the request_uri's random part), client_id, params,
                  created_at, expires_at                              (§4.15; ≤ 10 minutes)
 dpop_proofs      id_hash PK (SHA-256 of key thumbprint and jti), expires_at  (§4.15; 2 minutes)
@@ -1108,7 +1166,7 @@ Resolved:
 | 8d | **Device authorization grant** (§4.13) and the **2earl CLI** (`2earl/cli`) |
 | 9a | **Organizations and roles** (§4.14) |
 | 9b | **SCIM 2.0** provisioning into organizations, with verified domains (§4.16) |
-| 9c | **SAML 2.0**: organizations sign in through their own identity provider (§13) |
+| 9c | **SAML 2.0**: organizations sign in through their own identity provider (§4.17) |
 | 9d | **DPoP and PAR** (§4.15) |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
@@ -1117,7 +1175,7 @@ login is the identity service and authorization server for 2earl. Every protocol
 permanent attack surface on the one service that guards every account, and one person runs it. A
 standard is added when something uses it, not to tick a list.
 
-**In place** (phases 4–9b, 9d):
+**In place** (phases 4–9d):
 
 | Standard | What it does here |
 |---|---|
@@ -1141,21 +1199,15 @@ standard is added when something uses it, not to tick a list.
 | RFC 8628 Device authorization grant | Sign in on a device without a browser by approving a short code elsewhere (§4.13); the 2earl CLI (`2earl/cli`) uses it |
 | Organizations and roles | Teams of accounts with owner, admin and member roles; services read them live over a Service Binding, sites through the `organizations` scope (§4.14) |
 | SCIM 2.0 (RFC 7643, 7644) | An organization's directory adds and removes members at its verified domains; never creates accounts (§4.16) |
+| SAML 2.0 Web Browser SSO (as service provider) | An organization's members sign in through its IdP, for addresses at its verified domains; SP-initiated only; signed assertions checked by node-saml (§4.17) |
 | RFC 9449 DPoP | Refresh tokens bound to the client's key whenever it sends a proof; access tokens bound for resources that check proofs (UserInfo now; the gateway when it opts in) (§4.15) |
 | RFC 9126 PAR | The authorization request goes to login first; the browser carries only a reference (§4.15) |
 
-**Next** (the owner decided on 2026-11-12 to plan all of these; the order puts each one after
-what it depends on). Organizations (9a) and verified domains (9b) are in place, so 9c has what it
-depends on:
-
-| Phase | Standard | Why | Depends on |
-|---|---|---|---|
-| 9c | **SAML 2.0** | An organization's members sign in through the organization's own identity provider (login is the SAML service provider; their IdP proves who they are) | Organizations; an XML signature library reviewed for signature-wrapping attacks |
-
-**Advisor's note (2026-11-12).** Every row above adds permanent attack surface to the service that
-guards every account, and none of them has a user yet. The order above is chosen so each phase
-lands only when the thing it depends on exists. 9c (SAML) carries the most risk: XML signature
-handling has a long record of signature-wrapping bypasses.
+**Advisor's note (2026-11-12).** Everything the owner planned on 2026-11-12 is in place. Each of
+these adds permanent attack surface to the service that guards every account, before any of them
+has a user. SAML (§4.17) carries the most risk: XML signature handling has a long record of
+signature-wrapping bypasses. It is delegated to node-saml and xml-crypto, which need prompt
+updates (Dependabot), and it is on only for organizations that turn it on.
 
 **Deliberately not implemented** (revisit when the listed condition is true):
 
@@ -1169,6 +1221,7 @@ handling has a long record of signature-wrapping bypasses.
 | Client credentials grant | No machine-to-machine client; services talk over Service Bindings | A third-party backend needs its own access |
 | RFC 9101 JAR | Signed request objects; PAR (9d) already keeps the request off the browser | A FAPI-grade client |
 | Microsoft, GitHub, Apple and other social sign-in | The owner decided on 2026-11-12: Google, email codes and passkeys are the ways in | The owner decides otherwise |
+| SAML single logout, encrypted assertions, signed AuthnRequests, IdP-initiated sign-in, "require SSO" | TLS protects the POST; IdP-initiated responses can't be tied to a request login made; a 2earl account belongs to its person | An organization needs one of them |
 | SCIM Groups, bulk operations, roles from the directory | Members are what organizations need now; roles stay in 2earl | A directory customer needs group-based roles |
 | DPoP server nonces (RFC 9449 §8) and `dpop_jkt` | Proofs already expire in 60 seconds and work once; PKCE binds the code | A client or resource needs them |
 | FedCM | Browser-mediated sign-in for third-party sites; only useful once sites embed "Sign in with 2earl" | A site asks for it |

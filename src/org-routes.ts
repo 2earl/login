@@ -15,6 +15,7 @@ import { changeCheck } from './mfa-routes';
 import { deleteOrgPage, directoryPage, invitationPage, newOrgPage, orgPage } from './org-pages';
 import { addDomain, listDomains, normaliseDomain, removeDomain, verifyDomain } from './org-domains';
 import { createScimToken, listScimTokens, revokeScimToken } from './scim';
+import { samlConfig, signingKeyPem, ssoUrl } from './saml';
 import {
   MAX_INVITATIONS_PER_DAY,
   acceptInvitation,
@@ -464,6 +465,16 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         issuer: c.env.ISSUER,
         domains: await listDomains(c.env.DB, orgId),
         tokens: await listScimTokens(c.env.DB, orgId),
+        saml: await samlConfig(c.env.DB, orgId).then((config) =>
+          config
+            ? {
+                idpEntityId: config.idpEntityId,
+                ssoUrl: config.ssoUrl,
+                certificate: config.certificate,
+                enabled: config.enabled,
+              }
+            : null,
+        ),
         provisioned: {
           active: counts?.active ?? 0,
           waiting: counts?.waiting ?? 0,
@@ -488,6 +499,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     verified: 'Domain verified.',
     removed: 'Domain removed.',
     revoked: 'Token revoked. Your directory can no longer use it.',
+    saml: 'Single sign-on saved.',
   };
 
   app.get('/orgs/:org/directory', async (c) => {
@@ -572,6 +584,45 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     }
     await record(c, ctx.session, 'org.scim_token_created', { org: ctx.orgId, token: created.id });
     return showDirectory(c, ctx.orgId, { newToken: created.token });
+  });
+
+  app.post('/orgs/:org/saml', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    // Single sign-on decides who signs in at the organization's domains: a recent proof first.
+    const redirect = changeCheck(ctx.session, deps.now(), `/orgs/${ctx.orgId}/directory`);
+    if (redirect) return c.redirect(redirect, 303);
+    const verified = (await listDomains(c.env.DB, ctx.orgId)).some((d) => d.verifiedAt !== null);
+    if (!verified) return showDirectory(c, ctx.orgId, { error: 'Verify a domain first.' }, 409);
+    const idp = ctx.form.get('idp_entity_id');
+    const idpEntityId = typeof idp === 'string' ? idp.trim().slice(0, 500) : '';
+    const url = ssoUrl(ctx.form.get('sso_url'));
+    const certificate = signingKeyPem(ctx.form.get('certificate'));
+    if (!idpEntityId || !url || !certificate) {
+      return showDirectory(
+        c,
+        ctx.orgId,
+        {
+          error:
+            'Enter the identity provider’s entity ID, an https sign-in URL and its signing certificate.',
+        },
+        400,
+      );
+    }
+    const now = deps.now();
+    await c.env.DB.prepare(
+      `INSERT INTO org_saml (org_id, idp_entity_id, sso_url, certificate, enabled, created_at, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+       ON CONFLICT (org_id) DO UPDATE SET idp_entity_id = ?2, sso_url = ?3, certificate = ?4,
+         enabled = ?5, updated_at = ?6`,
+    )
+      .bind(ctx.orgId, idpEntityId, url, certificate, ctx.form.get('enabled') === 'on' ? 1 : 0, now)
+      .run();
+    await record(c, ctx.session, 'org.saml_saved', {
+      org: ctx.orgId,
+      enabled: ctx.form.get('enabled') === 'on',
+    });
+    return c.redirect(directory(ctx.orgId, 'saml'), 303);
   });
 
   app.post('/orgs/:org/scim-tokens/revoke', async (c) => {
