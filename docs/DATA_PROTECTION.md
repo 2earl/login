@@ -35,6 +35,7 @@ with German law on telemedia: TDDDG for cookies, DDG for the imprint **[verify]*
 | Email codes in progress (address, HMACs of code, link and cookie, purpose, tries, IP prefix, times) | D1 `email_codes` | System | Verify the address; enforce send limits. Deleted 2 days after creation, and with the account |
 | Security notices sent by email (sign-in method or second factor changed, new recovery codes, first approval of an app, account deleted) | Cloudflare Email Service (not stored by us) | System | Tell the user about changes to their account (Art. 6(1)(b), (f)) |
 | Session records (hashed ID, timestamps, IP prefix, user-agent hash, a coarse device name such as "Firefox on Windows", how the session signed in) | D1 `sessions` | Request | Keep the user signed in; detect abuse; let the user see and sign out their devices |
+| Per-site IDs for "Sign in with 2earl" (a random ID per account and site host) | D1 `oidc_subjects` | When you first sign in to a site with 2earl | Give each site its own ID for you, so sites can't link you to each other |
 | Pending passkey sign-in challenges (hashed browser cookie, random challenge, account ID only when confirming it's you) | D1 `passkey_challenges` | Request | Check a passkey sign-in; at most 5 minutes |
 | Login transaction (`state`, `nonce`, PKCE verifier) | D1 `login_tx` | Generated | Secure the sign-in, ≤ 10 min |
 | OAuth grants and tokens (hashed, encrypted props `{uid, authTime}`) | KV | Generated | Authorise apps the user approved |
@@ -78,6 +79,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | Google | Independent controller for the user's Google account | We receive identity claims when the user chooses "Sign in with Google". Google's privacy terms apply to the user's Google account |
 | GitHub, HashiCorp | Not recipients of user data | Hold code, infrastructure state and secrets only. **Terraform state must not contain user data** |
 | OAuth clients (MCP apps) | Separate controllers | Receive only what the user approves. In v1 the gateway receives the internal user ID and scopes, not email or name |
+| Sites using "Sign in with 2earl" (OpenID Connect) | Separate controllers | Receive, when the user approves: that site's own ID for the user, how and when they signed in, and the name and address only if the user left those ticked. Their own privacy terms apply to what they do with it |
 
 ## 6. Data subject rights — how the system supports them
 

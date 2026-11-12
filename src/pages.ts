@@ -477,11 +477,36 @@ export function sessionsPage(params: {
   );
 }
 
+/** RP-Initiated Logout: an app asks to sign the person out of 2earl too (DESIGN §4.11). */
+export function signOutPage(params: { appName: string | null; query: string }): string {
+  return page(
+    'Sign out',
+    '<h1>Sign out of 2earl?</h1>' +
+      `<p class="lede">${params.appName ? `${escapeHtml(params.appName)} signed you out and asks` : 'An app asks'} to sign you out of your 2earl account in this browser too.</p>` +
+      '<form method="post" action="/oidc/logout" class="consent-actions">' +
+      `<input type="hidden" name="query" value="${escapeHtml(params.query)}">` +
+      '<button class="button primary" type="submit" name="decision" value="sign_out">Sign out</button>' +
+      '<button class="button secondary" type="submit" name="decision" value="stay">Stay signed in</button>' +
+      '</form>',
+  );
+}
+
+export function signedOutPage(): string {
+  return page(
+    'Signed out',
+    '<h1>You’re signed out</h1>' +
+      '<p class="lede">Your 2earl account is signed out in this browser.</p>' +
+      '<a class="button primary" href="/">Sign in again</a>',
+  );
+}
+
 /** Everything the consent page shows comes from the library's validated description. */
 export interface ConsentView {
   handle: string;
   /** The scopes offered on this page, signed and bound to the handle (app.ts offeredScopesMac). */
   offeredMac: string;
+  /** OpenID Connect `nonce`, carried to the approval and bound to the handle (app.ts nonceMac). */
+  nonce?: { value: string; mac: string } | null;
   clientName: string;
   /** Verified domain of a CIMD client; absent for a pre-registered or self-registered client. */
   clientDomain: string | null;
@@ -512,7 +537,10 @@ export function consentPage(view: ConsentView): string {
         view.scopes
           .map(
             ({ scope, label }) =>
-              `<label class="scope"><input type="checkbox" name="scope" value="${escapeHtml(scope)}" checked>` +
+              // Signing in is what an OpenID Connect app is for: `openid` can't be unticked.
+              (scope === 'openid'
+                ? `<label class="scope"><input type="checkbox" checked disabled><input type="hidden" name="scope" value="openid">`
+                : `<label class="scope"><input type="checkbox" name="scope" value="${escapeHtml(scope)}" checked>`) +
               `<span>${escapeHtml(label)}</span></label>`,
           )
           .join('') +
@@ -538,6 +566,10 @@ export function consentPage(view: ConsentView): string {
       `<input type="hidden" name="handle" value="${escapeHtml(view.handle)}">` +
       `<input type="hidden" name="offered" value="${escapeHtml(view.scopes.map((s) => s.scope).join(' '))}">` +
       `<input type="hidden" name="offered_mac" value="${escapeHtml(view.offeredMac)}">` +
+      (view.nonce
+        ? `<input type="hidden" name="nonce" value="${escapeHtml(view.nonce.value)}">` +
+          `<input type="hidden" name="nonce_mac" value="${escapeHtml(view.nonce.mac)}">`
+        : '') +
       scopes +
       unavailable +
       '<label class="remember"><input type="checkbox" name="remember" value="on"> Don’t ask again for this app for 30 days</label>' +

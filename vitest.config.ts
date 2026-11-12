@@ -1,5 +1,6 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
 import { defineConfig } from 'vitest/config';
+import { newSigningKey } from './scripts/oidc-key.mjs';
 
 /**
  * A stand-in for a service's AccountEvents entrypoint (wrangler.jsonc "services"), so its binding
@@ -27,6 +28,8 @@ export default defineConfig(async () => {
   // Read the real migrations so tests run against exactly the schema that production gets.
   // The path is relative to the repository root, where pnpm runs vitest.
   const migrations = await readD1Migrations('./migrations');
+  // A fresh ID-token signing key for every test run (DESIGN §4.11).
+  const oidcSigningKey = await newSigningKey();
 
   return {
     plugins: [
@@ -41,6 +44,7 @@ export default defineConfig(async () => {
             CONSENT_REMEMBER_SECRET: 'test-consent-remember-secret-at-least-32-chars',
             MFA_ENCRYPTION_KEY: 'test-mfa-encryption-key',
             OWNER_GOOGLE_SUB: 'google-sub-owner',
+            OIDC_SIGNING_KEY: oidcSigningKey,
             // Tests start invite-only, as the service launched; open sign-up is tested by
             // switching it (the settings table or a per-call override).
             LOGIN_LOCKED: 'true',

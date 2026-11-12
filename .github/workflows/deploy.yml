@@ -57,6 +57,7 @@ jobs:
             CONSENT_REMEMBER_SECRET
             MFA_ENCRYPTION_KEY
             OWNER_GOOGLE_SUB
+            OIDC_SIGNING_KEY
           command: |
             d1 migrations apply DB --remote
             deploy
@@ -66,6 +67,7 @@ jobs:
           CONSENT_REMEMBER_SECRET: ${{ secrets.CONSENT_REMEMBER_SECRET }}
           MFA_ENCRYPTION_KEY: ${{ secrets.MFA_ENCRYPTION_KEY }}
           OWNER_GOOGLE_SUB: ${{ secrets.OWNER_GOOGLE_SUB }}
+          OIDC_SIGNING_KEY: ${{ secrets.OIDC_SIGNING_KEY }}
 
       - name: Smoke test
         run: |

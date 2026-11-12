@@ -145,6 +145,22 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | Stolen session stays signed in unnoticed | Signed-in devices list with coarse device names and last activity; sign out one or all others (audited); security notices for method and factor changes |
 | Signing out a device used to end someone else's session | The form names a session by an HMAC reference, matched only among the signed-in account's own sessions; same-origin check (tested) |
 
+### B1/B2 — OpenID Connect provider (DESIGN §4.11, phase 8b)
+
+| Threat | Mitigation |
+|---|---|
+| ID token forged | ES256 with a key only in the Worker secret; relying parties verify against `/.well-known/jwks.json` (tested with a standard JOSE library) |
+| Signing key leak | Rotation without downtime (announce the next key, then swap); ID tokens last 10 minutes; the key never leaves Worker secrets and the JWKS never contains `d` (tested) |
+| Replay of an ID token into another app's login | `aud`/`azp` name the client; `nonce` from the request, bound to the consent handle by HMAC so the form can't change it (tested) |
+| Sites link one person across each other | Pairwise `sub` per sector, random and stored, not derived (tested: different sites get different IDs, the same site the same one) |
+| Access token for a 2earl service read at UserInfo, or the reverse | Every token is bound to one audience (RFC 8707); UserInfo accepts only its own; `openid` can't be combined with service scopes (tested) |
+| Silent sign-in (`prompt=none`) used to probe | Answers only `login_required`/`consent_required`/`interaction_required` to the client's registered redirect URI, which the library validated first |
+| Stale sign-in used for a sensitive app | `max_age` and `prompt=login` force a fresh sign-in; `auth_time` and `acr`/`amr` tell the app how and when the person signed in |
+| Logout CSRF (a link signs people out) | `/oidc/logout` asks first; the POST is same-origin only (tested) |
+| Open redirect through logout | Only a redirect URI the app registered, for the app named by `client_id` or a valid `id_token_hint`; anything else gets the signed-out page (tested) |
+| Name or address leaked to an app that wasn't allowed them | Claims follow the granted scopes; `profile` and `email` can be unticked on the consent page; UserInfo reads the account now |
+| UserInfo abuse | Bearer only, no cookies (CORS `*` is safe); limited per address like the token endpoint |
+
 ### B5 — Gateway integration
 
 | Threat | Mitigation |

@@ -17,6 +17,8 @@ import { isStepUpFresh, listFactors, listPasskeys, mfaGate, type MfaGate } from 
 import { mfaHtml, registerMfaRoutes } from './mfa-routes';
 import { isOwnerUser, registerAdminRoutes } from './admin';
 import { ACR_AAL2, authorizationServer, type GrantProps } from './oauth';
+import { pairwiseSubject, sectorFor } from './oidc';
+import { registerOidcRoutes, withIdToken } from './oidc-routes';
 import { ALL_SCOPES, scopeLabel, scopesFor, serviceForResource, type Service } from './services';
 import {
   MESSAGES,
@@ -45,7 +47,7 @@ import {
 } from './http';
 import { safeReturnTo } from './return-to';
 import { CONSENT_CSP, applySecurityHeaders } from './security-headers';
-import { deleteSession, getSession } from './sessions';
+import { deleteSession, getSession, type Session } from './sessions';
 import { registerEmailRoutes, sendCode } from './email-routes';
 import { registerMethodRoutes } from './method-routes';
 import { registerPasskeyRoutes } from './passkey-routes';
@@ -72,7 +74,16 @@ export interface Deps {
 
 /** Paths a session may use before its second-factor gate is passed (DESIGN §4.7). */
 function gateAllows(gate: Exclude<MfaGate, null>, path: string): boolean {
-  const always = ['/mfa', '/logout', '/login', '/callback/google', '/healthz', '/account/deleted'];
+  const always = [
+    '/mfa',
+    '/logout',
+    '/oidc/logout',
+    '/userinfo',
+    '/login',
+    '/callback/google',
+    '/healthz',
+    '/account/deleted',
+  ];
   if (always.includes(path) || path.startsWith('/mfa/') || path.startsWith('/login/')) return true;
   if (path.startsWith('/oauth/') || path.startsWith('/.well-known/')) return true;
   if (gate === 'enrol') {
@@ -94,6 +105,59 @@ function gateAllows(gate: Exclude<MfaGate, null>, path: string): boolean {
  */
 function offeredScopesMac(env: Env, handle: string, offered: readonly string[]): Promise<string> {
   return hmacHex(env.SESSION_PEPPER, `consent-offered:${handle}:${offered.join(' ')}`);
+}
+
+/**
+ * OpenID Connect's own authorization errors (OIDC Core §3.1.2.6), for `prompt=none`. The
+ * library's helper knows only OAuth's codes; this adds `iss` and `state` the same way.
+ */
+function oidcErrorRedirect(
+  request: AuthRequest,
+  code: 'login_required' | 'consent_required' | 'interaction_required',
+): string {
+  const url = new URL(request.redirectUri);
+  url.searchParams.set('error', code);
+  if (request.state) url.searchParams.set('state', request.state);
+  if (request.issuer) url.searchParams.set('iss', request.issuer);
+  return url.toString();
+}
+
+/**
+ * The OpenID Connect `nonce` travels through the consent form like the offered scopes: bound to
+ * the single-use handle, so a form can't swap in another value.
+ */
+function nonceMac(env: Env, handle: string, nonce: string): Promise<string> {
+  return hmacHex(env.SESSION_PEPPER, `consent-nonce:${handle}:${nonce}`);
+}
+
+/** Grant properties: the account, when, and for OpenID Connect what the ID token needs. */
+async function grantProps(
+  c: AppContext,
+  now: number,
+  session: Session,
+  request: AuthRequest,
+  scope: readonly string[],
+  nonce: string | null,
+): Promise<GrantProps> {
+  const props: GrantProps = {
+    uid: session.user.id,
+    authTime: now,
+    aal2At: session.aal === 'aal2' ? session.aal2At : null,
+  };
+  if (scope.includes('openid')) {
+    props.oidc = {
+      sub: await pairwiseSubject(
+        c.env.DB,
+        now,
+        session.user.id,
+        sectorFor(request.clientId, request.redirectUri),
+      ),
+      nonce,
+      signedInAt: session.createdAt,
+      method: session.method,
+    };
+  }
+  return props;
 }
 
 /** How a service reads on the consent page: what it is, then the host it lives on. */
@@ -158,7 +222,11 @@ export function createApp(deps: Deps): Hono<AppEnv> {
 
   // Resolve the session once per request. OAuth protocol endpoints never use it.
   app.use('*', async (c, next) => {
-    if (c.req.path.startsWith('/oauth/') || c.req.path.startsWith('/.well-known/')) {
+    if (
+      c.req.path.startsWith('/oauth/') ||
+      c.req.path.startsWith('/.well-known/') ||
+      c.req.path === '/userinfo'
+    ) {
       c.set('session', null);
       await next();
       return;
@@ -583,9 +651,35 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         302,
       );
     }
-    if (!new URL(c.req.url).searchParams.has('resource')) {
+    const query = new URL(c.req.url).searchParams;
+    const openid = request.scope.includes('openid');
+    // An OpenID Connect sign-in may leave out `resource`: its token is for UserInfo (DESIGN
+    // §4.11). Every other request must name its resource (RFC 8707), as MCP requires.
+    if (!query.has('resource') && !openid) {
       return c.redirect(
         authorizationErrorRedirect(request, 'invalid_target', 'The resource parameter is required'),
+        302,
+      );
+    }
+    const nonce = query.get('nonce');
+    if (nonce !== null && (nonce.length === 0 || nonce.length > 255)) {
+      return c.redirect(
+        authorizationErrorRedirect(request, 'invalid_request', 'nonce must be 1 to 255 characters'),
+        302,
+      );
+    }
+    const prompt = new Set((query.get('prompt') ?? '').split(' ').filter(Boolean));
+    if (prompt.has('none') && prompt.size > 1) {
+      return c.redirect(
+        authorizationErrorRedirect(request, 'invalid_request', 'prompt=none stands alone'),
+        302,
+      );
+    }
+    const maxAgeText = query.get('max_age');
+    const maxAge = maxAgeText === null ? null : Number(maxAgeText);
+    if (maxAge !== null && (!Number.isInteger(maxAge) || maxAge < 0)) {
+      return c.redirect(
+        authorizationErrorRedirect(request, 'invalid_request', 'max_age must be a whole number'),
         302,
       );
     }
@@ -598,10 +692,49 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       );
     }
 
+    if (openid && !request.scope.every((s) => Object.hasOwn(service.scopes, s))) {
+      // An OpenID Connect request is for the account alone: never mixed with a service's scopes.
+      return c.redirect(
+        authorizationErrorRedirect(
+          request,
+          'invalid_scope',
+          'openid can’t be combined with service scopes',
+        ),
+        302,
+      );
+    }
+    if (service.id === 'login' && !openid) {
+      return c.redirect(
+        authorizationErrorRedirect(request, 'invalid_scope', 'The openid scope is required'),
+        302,
+      );
+    }
+
     const session = c.get('session');
     if (!session) {
+      if (prompt.has('none')) {
+        return c.redirect(oidcErrorRedirect(request, 'login_required'), 302);
+      }
       const url = new URL(c.req.url);
       return c.redirect(`/login?return_to=${encodeURIComponent(url.pathname + url.search)}`, 303);
+    }
+
+    // prompt=login, or a sign-in older than max_age: the person signs in again first. The
+    // request comes back without `login` in prompt, so it doesn't ask twice.
+    const now = deps.now();
+    if (prompt.has('login') || (maxAge !== null && now - session.createdAt > maxAge)) {
+      if (prompt.has('none')) {
+        return c.redirect(oidcErrorRedirect(request, 'login_required'), 302);
+      }
+      const back = new URL(c.req.url);
+      prompt.delete('login');
+      if (prompt.size > 0) back.searchParams.set('prompt', [...prompt].join(' '));
+      else back.searchParams.delete('prompt');
+      back.searchParams.delete('max_age');
+      return c.redirect(
+        `/login?reauth=1&return_to=${encodeURIComponent(back.pathname + back.search)}`,
+        303,
+      );
     }
 
     // An app can require a recent second factor, e.g. for its admin area. login asks for it
@@ -610,6 +743,9 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     const requested = new URL(c.req.url);
     const acr = (requested.searchParams.get('acr_values') ?? '').split(' ');
     if (acr.includes(ACR_AAL2) && !isStepUpFresh(session, deps.now())) {
+      if (prompt.has('none')) {
+        return c.redirect(oidcErrorRedirect(request, 'interaction_required'), 302);
+      }
       const back = encodeURIComponent(requested.pathname + requested.search);
       return c.redirect(
         session.hasFactor
@@ -620,17 +756,14 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     }
 
     const remember = { secret: c.env.CONSENT_REMEMBER_SECRET, subject: session.user.id };
-    if (await oauth.isConsentRemembered(c.req.raw, request, remember)) {
+    if (!prompt.has('consent') && (await oauth.isConsentRemembered(c.req.raw, request, remember))) {
+      const scope = scopesFor(service, request.scope);
       const { redirectTo } = await oauth.completeAuthorization({
         request,
         userId: session.user.id,
         metadata: {},
-        scope: scopesFor(service, request.scope),
-        props: {
-          uid: session.user.id,
-          authTime: deps.now(),
-          aal2At: session.aal === 'aal2' ? session.aal2At : null,
-        } satisfies GrantProps,
+        scope,
+        props: await grantProps(c, deps.now(), session, request, scope, nonce),
       });
       await audit(c.env.DB, deps.now(), 'consent.reused', {
         actorUserId: session.user.id,
@@ -638,6 +771,10 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         ipPrefix: clientIp(c),
       });
       return c.redirect(redirectTo, 302);
+    }
+
+    if (prompt.has('none')) {
+      return c.redirect(oidcErrorRedirect(request, 'consent_required'), 302);
     }
 
     let details;
@@ -655,6 +792,8 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     const html = consentPage({
       handle: consent.handle,
       offeredMac: await offeredScopesMac(c.env, consent.handle, offered),
+      nonce:
+        nonce === null ? null : { value: nonce, mac: await nonceMac(c.env, consent.handle, nonce) },
       clientName: details.clientName,
       clientDomain: details.clientDomain ?? null,
       trusted: Boolean(trusted),
@@ -702,6 +841,23 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         (s): s is string =>
           typeof s === 'string' && Object.hasOwn(ALL_SCOPES, s) && offered.includes(s),
       );
+    // Signing in is what an OpenID Connect app asked for: `openid` can't be left out, only the
+    // name and address can.
+    if (offered.includes('openid') && scope.length > 0 && !scope.includes('openid')) {
+      scope.unshift('openid');
+    }
+    const nonceField = form.get('nonce');
+    const nonceMacField = form.get('nonce_mac');
+    let nonce: string | null = null;
+    if (typeof nonceField === 'string') {
+      if (
+        typeof nonceMacField !== 'string' ||
+        !timingSafeEqual(nonceMacField, await nonceMac(c.env, handle, nonceField))
+      ) {
+        return c.html(messagePage(MESSAGES.consentExpired, 'Approval stopped'), 400);
+      }
+      nonce = nonceField;
+    }
 
     try {
       if (form.get('decision') !== 'approve' || scope.length === 0) {
@@ -738,11 +894,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         userId: session.user.id,
         metadata: {},
         scope: approvedScope,
-        props: {
-          uid: session.user.id,
-          authTime: deps.now(),
-          aal2At: session.aal === 'aal2' ? session.aal2At : null,
-        } satisfies GrantProps,
+        props: await grantProps(c, deps.now(), session, approved.request, approvedScope, nonce),
       });
       await audit(c.env.DB, deps.now(), 'consent.approved', {
         actorUserId: session.user.id,
@@ -783,9 +935,22 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         { 'Retry-After': '10' },
       );
     }
-    return authorizationServer(c.env).fetch(c.req.raw, c.env, workerCtx(c));
+    const form = await c.req.raw
+      .clone()
+      .formData()
+      .catch(() => null);
+    const grantType = form?.get('grant_type');
+    const response = await authorizationServer(c.env).fetch(c.req.raw, c.env, workerCtx(c));
+    // OpenID Connect: an ID token beside the access token when the grant includes `openid`.
+    return withIdToken(
+      c.env,
+      deps.now(),
+      typeof grantType === 'string' ? grantType : null,
+      response,
+    );
   });
   app.all('/oauth/*', (c) => authorizationServer(c.env).fetch(c.req.raw, c.env, workerCtx(c)));
+  registerOidcRoutes(app, deps);
   app.get('/.well-known/*', (c) =>
     authorizationServer(c.env).fetch(c.req.raw, c.env, workerCtx(c)),
   );
