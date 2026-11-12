@@ -4,7 +4,7 @@ import {
   OAuthError,
 } from '@cloudflare/workers-oauth-provider';
 import { audit } from './audit';
-import { ALL_SCOPES, allResources, scopeLabel } from './services';
+import { ALL_SCOPES, IDENTITY, allResources, scopeLabel } from './services';
 import { isUserActive } from './users';
 
 /**
@@ -36,6 +36,17 @@ export interface GrantProps {
    * null. Apps that need a recent second factor (`acr_values=urn:2earl:aal2`) check it.
    */
   aal2At: number | null;
+  /** OpenID Connect grants only (DESIGN §4.11). */
+  oidc?: {
+    /** The pairwise subject this app knows the user by (`oidc_subjects`). */
+    sub: string;
+    /** The app's `nonce`, returned once, in the ID token of the code exchange. */
+    nonce: string | null;
+    /** When the user signed in to the session that approved (OIDC `auth_time`). */
+    signedInAt: number;
+    /** How that session signed in: becomes `amr`. */
+    method: 'google' | 'email' | 'passkey' | null;
+  };
 }
 
 /** `acr_values` an app sends to require a recent second factor before login approves. */
@@ -60,6 +71,9 @@ export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
     server = new OAuthAuthorizationServer<Env>({
       issuer: env.ISSUER,
       resources,
+      // An OpenID Connect client that sends no `resource` gets a token for the UserInfo
+      // endpoint; every other client must name its resource (app.ts checks that).
+      defaultResource: IDENTITY.resource(env),
       scopesSupported: Object.keys(SCOPES),
       // MCP 2026-07-28 client registration. Needs the global_fetch_strictly_public flag
       // (wrangler.jsonc), which keeps metadata fetches off private and same-zone addresses.

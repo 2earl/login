@@ -4,6 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { newSigningKey } from '../scripts/oidc-key.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const config = join(here, 'wrangler.jsonc');
@@ -18,6 +19,7 @@ const secrets = {
   CONSENT_REMEMBER_SECRET: 'e2e-consent-remember-secret-at-least-32-chars',
   MFA_ENCRYPTION_KEY: 'e2e-mfa-encryption-key',
   OWNER_GOOGLE_SUB: E2E_OWNER_SUB,
+  OIDC_SIGNING_KEY: await newSigningKey(),
 };
 
 rmSync(persist, { recursive: true, force: true });

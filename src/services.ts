@@ -68,9 +68,28 @@ export const SERVICES: readonly Service[] = [
   },
 ];
 
+/**
+ * login itself, as an OpenID Connect provider (DESIGN §4.11): "Sign in with 2earl" for any site
+ * or app. Not a 2earl service: no data of its own to delete or export, so it is not in
+ * SERVICES. Its resource is the UserInfo endpoint, the one place its tokens are accepted, and it
+ * is the default audience when an OpenID Connect client sends no `resource`.
+ */
+export const IDENTITY: Service = {
+  id: 'login',
+  name: 'Your 2earl account',
+  resource: (env) => `${env.ISSUER}/userinfo`,
+  scopes: {
+    openid: 'Sign you in with your 2earl account, with an ID only this app gets',
+    profile: 'See your name',
+    email: 'See your email address',
+  },
+  deletionBinding: '',
+};
+
 /** Every scope of every service, with its consent wording. */
 export const ALL_SCOPES: Readonly<Record<string, string>> = Object.assign(
   {},
+  IDENTITY.scopes,
   ...SERVICES.map((service) => service.scopes),
 ) as Record<string, string>;
 
@@ -80,6 +99,7 @@ export const ALL_SCOPES: Readonly<Record<string, string>> = Object.assign(
  */
 export function serviceForResource(env: Env, resource: string | undefined): Service | undefined {
   if (resource === undefined) return undefined;
+  if (resource === IDENTITY.resource(env)) return IDENTITY;
   for (const service of SERVICES) {
     if (service.resource(env) === resource) return service;
     const endpoint = service.endpoints?.find((e) => e.resource(env) === resource);
@@ -100,10 +120,13 @@ export function serviceForResource(env: Env, resource: string | undefined): Serv
 
 /** Every resource tokens may be issued for: each service's, and each of its endpoints'. */
 export function allResources(env: Env): string[] {
-  return SERVICES.flatMap((s) => [
-    s.resource(env),
-    ...(s.endpoints ?? []).map((e) => e.resource(env)),
-  ]);
+  return [
+    ...SERVICES.flatMap((s) => [
+      s.resource(env),
+      ...(s.endpoints ?? []).map((e) => e.resource(env)),
+    ]),
+    IDENTITY.resource(env),
+  ];
 }
 
 export function serviceById(id: string): Service | undefined {

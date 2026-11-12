@@ -39,6 +39,9 @@
     // Second factor (DESIGN §4.7). "true" makes every user enrol before using the account.
     // Users who enrolled are challenged either way, and /admin always requires it.
     "MFA_REQUIRED": "false",
+    // The next ID-token signing key's public JWK, published in /.well-known/jwks.json ahead of a
+    // rotation so relying parties already have it (DESIGN §4.11). Empty: no rotation pending.
+    "OIDC_NEXT_PUBLIC_KEY": "",
   },
 
   // Set by the deploy workflow from the GitHub `production` environment. Deploys fail if any
@@ -52,6 +55,10 @@
       "MFA_ENCRYPTION_KEY",
       // Google account ID of the only user who may open /admin (DESIGN §4.6).
       "OWNER_GOOGLE_SUB",
+      // Private ES256 JSON Web Key that signs OpenID Connect ID tokens (DESIGN §4.11).
+      // Make one with `pnpm oidc:key`. Rotate by announcing the next key first
+      // (OIDC_NEXT_PUBLIC_KEY), then swapping.
+      "OIDC_SIGNING_KEY",
     ],
   },
 

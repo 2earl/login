@@ -19,6 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "assets:version": "node scripts/asset-versions.mjs",
+    "oidc:key": "node scripts/oidc-key.mjs",
     "test:e2e": "playwright test -c e2e/playwright.config.ts"
   },
   "dependencies": {

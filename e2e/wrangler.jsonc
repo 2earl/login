@@ -20,6 +20,7 @@
     // Prompt share's website (phase P2): the audience of its sign-in tokens.
     "PROMPTSHARE_RESOURCE": "https://promptshare.cc",
     "MFA_REQUIRED": "false",
+    "OIDC_NEXT_PUBLIC_KEY": "",
   },
   // Local simulation: wrangler dev keeps the emails instead of sending them.
   "send_email": [{ "name": "MAILER", "allowed_sender_addresses": ["noreply@2earl.com"] }],

@@ -423,6 +423,85 @@ others stay second-factor-only, which the browser handles by not offering them.
 - Sessions are named in the form by an HMAC reference, never by their key.
 - Signing a device out doesn't disconnect apps: grants are separate (§4.3), and the page says so.
 
+### 4.11 OpenID Connect provider: "Sign in with 2earl" (phase 8b)
+
+Any site or app can sign people in with their 2earl account, with the standard OpenID Connect
+authorization code flow (with PKCE). Discovery is at `/.well-known/openid-configuration`.
+
+**Request.**
+- `scope=openid`, optionally `profile` (the name) and `email` (the address, always verified).
+- `openid` can't be combined with a 2earl service's scopes. The token is for the account's
+  UserInfo endpoint (`${ISSUER}/userinfo`), which is the library's `defaultResource`, so an
+  OpenID Connect client may leave out `resource`. Every other request must still name its
+  resource (RFC 8707, MCP).
+- `nonce` (1–255 characters) is carried through the consent form, bound to the single-use consent
+  handle by an HMAC, like the offered scopes.
+- `prompt`:
+  - `none` answers `login_required`, `consent_required` or `interaction_required` instead of
+    showing a page;
+  - `login` signs the person in again first;
+  - `consent` shows the consent page even when consent is remembered.
+- `max_age`: a sign-in older than this is redone. The request then comes back without `login`
+  and `max_age`, so it doesn't ask twice.
+- `acr_values=urn:2earl:aal2` works as before (§4.7).
+
+**Consent.** `openid` is shown ticked and can't be unticked: signing in is what the app is for.
+The name and the address can be refused.
+
+**ID token** (`id_token` beside the access token, from the code exchange and from each refresh):
+- ES256, signed with the Worker secret `OIDC_SIGNING_KEY`, a private P-256 JWK made by
+  `pnpm oidc:key`.
+- `kid` is the key's RFC 7638 thumbprint.
+- Lifetime 10 minutes.
+- Claims:
+
+| Claim | Value |
+|---|---|
+| `iss`, `aud`, `azp` | The issuer; the client |
+| `sub` | **Pairwise**: a random ID per account and sector, stored in `oidc_subjects`, never derived from a secret, so no key rotation can change it |
+| `auth_time` | When the approving session signed in |
+| `acr` | `urn:2earl:aal2` if a second factor or passkey was verified, else `urn:2earl:aal1` |
+| `amr` (RFC 8176) | `fed` for Google, `otp` for an email code, `pop user` for a passkey, plus `mfa` at aal2 |
+| `at_hash` | Of the access token it came with |
+| `nonce` | Only in the ID token from the code exchange |
+| `name`, `updated_at` | With `profile` |
+| `email`, `email_verified` | With `email` |
+
+The sector is the host of the redirect URI. Apps on the person's own device (loopback redirects)
+are each their own sector, by client ID.
+
+**UserInfo** (`GET`/`POST /userinfo`):
+- Bearer token bound to the UserInfo resource, with `openid`; tokens for any other resource are
+  refused.
+- Answers `sub` and the claims of the granted scopes, read now (a changed name shows at once).
+- CORS for bearer requests, no cookies; limited like the token endpoint.
+
+**Keys** (`/.well-known/jwks.json`): the current public key, plus `OIDC_NEXT_PUBLIC_KEY` when a
+rotation is announced. To rotate:
+1. Make a new key.
+2. Publish its public half as `OIDC_NEXT_PUBLIC_KEY` (`pnpm oidc:key --public < key.json`).
+3. Wait at least a day, so relying parties' caches pick it up.
+4. Swap `OIDC_SIGNING_KEY` and clear `OIDC_NEXT_PUBLIC_KEY`.
+
+ID tokens signed with the old key expire within 10 minutes.
+
+**RP-Initiated Logout 1.0** (`/oidc/logout`):
+1. The app names itself by `client_id` or by an `id_token_hint` signed by us. Expired hints are
+   accepted, as the spec allows.
+2. The person confirms "Sign out of 2earl?". Without that step, a link on any site could sign
+   people out.
+3. The browser returns to `post_logout_redirect_uri` with `state`, but only to an address the app
+   registered as a redirect URI. login keeps no separate list of logout addresses, and
+   client metadata documents have no field for one. Any other address gets the signed-out page.
+
+**Not included:**
+- implicit and hybrid flows (`response_type` other than `code`);
+- the `claims` request parameter and request objects;
+- front- and back-channel logout;
+- dynamic registration.
+
+Apps register through a client metadata document or `/admin/apps`.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -496,6 +575,8 @@ sessions         id_hash PK (HMAC-SHA-256 of cookie value, SESSION_PEPPER), user
                  device NULL ("Firefox on Windows"), method NULL ('google'|'email'|'passkey')
 passkey_challenges id_hash PK (HMAC of __Host-passkey_tx), challenge, user_id NULL (reauth
                  only), expires_at                                   (§4.10; ≤ 5 minutes)
+oidc_subjects    sub PK (random), user_id FK, sector, created_at, UNIQUE(user_id, sector)
+                                                                     (§4.11; with the account)
 login_tx         id_hash PK, state, nonce, pkce_verifier, return_to, created_at, expires_at,
                  purpose ('sign_in'|'delete_account'), user_id NULL (deletion only)
 mfa_factors      id PK, user_id FK, kind ('webauthn'|'totp'), label, created_at, last_used_at,
@@ -713,8 +794,14 @@ Resolved:
 | 6 | `GATEWAY_INTEGRATION.md`: handoff to the gateway session |
 | 7 | **Open sign-up** (§4.9): email codes, sign-in methods, welcome page, security notices by email, sign-up switch |
 | 8a | **Passkey sign-in and signed-in devices** (§4.10) |
-| 8b | **OpenID Connect provider** (§13) |
+| 8b | **OpenID Connect provider** (§4.11) |
 | 8c | **Introspection and step-up** (§13) |
+| 8d | **Device authorization grant** and the **2earl CLI** (`2earl/cli`) (§13) |
+| 8e | **More social sign-in**: Microsoft, GitHub, Apple (§13) |
+| 9a | **Organizations and roles** (§13) |
+| 9b | **SCIM 2.0** provisioning into organizations (§13) |
+| 9c | **SAML 2.0**: organizations sign in through their own identity provider (§13) |
+| 9d | **DPoP and PAR** (§13) |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 
@@ -722,7 +809,7 @@ login is the identity service and authorization server for 2earl. Every protocol
 permanent attack surface on the one service that guards every account, and one person runs it. A
 standard is added when something uses it, not to tick a list.
 
-**In place** (phases 4–8a):
+**In place** (phases 4–8b):
 
 | Standard | What it does here |
 |---|---|
@@ -738,16 +825,30 @@ standard is added when something uses it, not to tick a list.
 | RFC 6238 (TOTP) | Second-factor fallback |
 | NIST SP 800-63B AAL | `aal1`/`aal2` sessions; `acr_values=urn:2earl:aal2` for apps that need a recent second factor |
 | OpenID Connect (as a client of Google) | Google sign-in: PKCE, nonce, `iss`/`aud` checks |
+| OpenID Connect Core 1.0 and Discovery 1.0, as a provider | "Sign in with 2earl" (§4.11): ES256 ID tokens, `nonce`, `auth_time`, `acr`/`amr`, `at_hash`, `/userinfo`, `prompt` and `max_age` |
+| OIDC Core §8.1 pairwise subjects | Each site gets its own random ID for a person |
+| OIDC RP-Initiated Logout 1.0 | An app can ask to end the 2earl session too; the person confirms |
 
-**Next:**
+**Next** (the owner decided on 2026-11-12 to plan all of these; the order puts each one after
+what it depends on):
 
-| Phase | Standard | Why |
-|---|---|---|
-| 8b | **OpenID Connect Core 1.0** as a provider: discovery (`/.well-known/openid-configuration`), JWKS, ID tokens (ES256), `nonce`, `auth_time`, `acr`/`amr`, `/userinfo`, scopes `openid profile email` | Lets any site or app offer "Sign in with 2earl", not only 2earl services |
-| 8b | **Pairwise subject identifiers** (OIDC Core §8.1) | Each site gets its own user ID, so sites can't link one person across each other |
-| 8b | **OIDC RP-Initiated Logout 1.0** | Signing out of an app can end the 2earl session too |
-| 8c | **RFC 7662 Token introspection** | Resource servers outside Cloudflare can check tokens; the gateway keeps its Service Binding |
-| 8c | **RFC 9470 Step-up authentication challenge** | A resource server can ask for a fresher or stronger sign-in in a standard way, instead of the current 2earl-specific `acr_values` handling only |
+| Phase | Standard | Why | Depends on |
+|---|---|---|---|
+| 8c | **RFC 7662 Token introspection** | Resource servers outside Cloudflare can check tokens; the gateway keeps its Service Binding | — |
+| 8c | **RFC 9470 Step-up authentication challenge** | A resource server can ask for a fresher or stronger sign-in in the standard way | — |
+| 8d | **RFC 8628 Device authorization grant** | Sign in on a terminal by opening a short code on another device | — |
+| 8d | **2earl CLI** (`2earl/cli`, public repo) | `2earl login` with the device grant; then Prompt share from the terminal through the gateway | Device grant |
+| 8e | **Microsoft, GitHub, Apple sign-in** | More ways in for people without Google | The owner registers an app with each provider (client ID and secret); each one is a sign-in method like Google, never joined by address (B3) |
+| 9a | **Organizations and roles** | A team owns resources together; members have roles (owner, admin, member) that services can read from the token | A product that teams use |
+| 9b | **SCIM 2.0** (RFC 7643, 7644) | An organization's own directory adds and removes its members | Organizations |
+| 9c | **SAML 2.0** | An organization's members sign in through the organization's own identity provider (login is the SAML service provider; their IdP proves who they are) | Organizations; an XML signature library reviewed for signature-wrapping attacks |
+| 9d | **RFC 9449 DPoP** | Tokens bound to the client's key, so a stolen token is useless elsewhere | Support in `@cloudflare/workers-oauth-provider`, or our own token-endpoint and resource-server wrapping; clients that send DPoP proofs |
+| 9d | **RFC 9126 PAR** | The authorization request goes to the server first, not through the browser | — |
+
+**Advisor's note (2026-11-12).** Every row above adds permanent attack surface to the service that
+guards every account, and none of them has a user yet. The order above is chosen so each phase
+lands only when the thing it depends on exists. 9c (SAML) carries the most risk: XML signature
+handling has a long record of signature-wrapping bypasses.
 
 **Deliberately not implemented** (revisit when the listed condition is true):
 
@@ -756,21 +857,18 @@ standard is added when something uses it, not to tick a list.
 | Passwords | Phishable, reused, and the biggest source of account takeover; email codes and passkeys cover everyone | Never planned |
 | SMS codes | SIM swap; NIST SP 800-63B restricts them | Never planned |
 | Implicit and password grants | Removed in OAuth 2.1 | Never |
-| RFC 9449 DPoP | Sender-constrained tokens are a strong defence, but neither the library nor Claude's connector client supports DPoP today; a half-supported DPoP is a downgrade path | A client that matters sends DPoP, and the library supports it |
-| RFC 9126 PAR, RFC 9101 JAR | Protect request integrity for high-assurance clients (banking, FAPI); the current clients are MCP assistants and 2earl's own sites | A FAPI-grade client |
 | RFC 9396 Rich Authorization Requests | Scopes per service already cover the permissions in use | A service needs per-object consent (e.g. "this one session") |
-| RFC 8628 Device authorization grant | No CLI or TV client | A 2earl CLI exists |
 | RFC 7591 Dynamic client registration | Replaced by client metadata documents, which can't be abused to fill the database | Never, unless MCP requires it again |
 | Client credentials grant | No machine-to-machine client; services talk over Service Bindings | A third-party backend needs its own access |
-| SAML 2.0, SCIM 2.0, organizations and roles | Enterprise single sign-on and provisioning; 2earl has individual accounts only | A team or organization product exists |
-| FedCM | Browser-mediated sign-in for third-party sites; only useful once 8b exists and sites embed it | After 8b, if a site asks for it |
+| RFC 9101 JAR | Signed request objects; PAR (9d) already keeps the request off the browser | A FAPI-grade client |
+| FedCM | Browser-mediated sign-in for third-party sites; only useful once sites embed "Sign in with 2earl" | A site asks for it |
 | Shared Signals (CAEP, RISC) | Pushes session and credential events to relying parties; there is one relying party, our own gateway, which already checks every token | Several independent relying parties |
-| Social sign-in beyond Google | Each provider is another OAuth client to secure and keep working | People ask for a specific one (Apple, Microsoft, GitHub) |
 
 ## References
 
 - MCP Authorization, revision 2026-07-28
 - OAuth 2.1 (draft-ietf-oauth-v2-1), RFC 9700 (OAuth 2.0 Security BCP)
+- OpenID Connect Core 1.0, Discovery 1.0, RP-Initiated Logout 1.0; RFC 8176 (`amr` values)
 - RFC 8414, RFC 8707, RFC 9207, RFC 9728, RFC 7009, RFC 7636, RFC 8252
 - draft-ietf-oauth-client-id-metadata-document-00
 - `@cloudflare/workers-oauth-provider` 1.2.4 documentation

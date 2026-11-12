@@ -102,7 +102,7 @@ export async function exportAccount(
   currentSessionHash: string,
   now: number,
 ): Promise<Record<string, unknown>> {
-  const [user, identities, sessions, invitation, events, factors, codes] = await db.batch<
+  const [user, identities, sessions, invitation, events, factors, codes, subjects] = await db.batch<
     Record<string, unknown>
   >([
     db
@@ -147,6 +147,11 @@ export async function exportAccount(
         'SELECT COUNT(*) AS unused FROM recovery_codes WHERE user_id = ? AND used_at IS NULL',
       )
       .bind(userId),
+    db
+      .prepare(
+        'SELECT sector, sub, created_at FROM oidc_subjects WHERE user_id = ? ORDER BY created_at',
+      )
+      .bind(userId),
   ]);
 
   const account = user?.results[0];
@@ -188,6 +193,12 @@ export async function exportAccount(
           updatedAt: iso(account.updated_at as number),
         }
       : null,
+    // OpenID Connect (DESIGN §4.11): the ID each site you signed in to knows you by.
+    siteIds: (subjects?.results ?? []).map((row) => ({
+      site: row.sector,
+      id: row.sub,
+      since: iso(row.created_at as number),
+    })),
     signInMethods: (identities?.results ?? []).map((row) => ({
       provider: row.provider,
       accountId: row.subject,
