@@ -205,6 +205,18 @@ Tokens carry no memberships.
   login's `src/services.ts` and adds `deleteOrganization(orgId)` to its `AccountEvents`. That method
   has the same rules as `deleteUser`: idempotent, and it throws until done.
 
+### 5.2 DPoP-bound tokens (phase 9d, DESIGN §4.15)
+
+Access tokens for the gateway are bearer tokens until the gateway opts in. To accept DPoP:
+1. Validate with `AUTH_SERVER.validateRequest(resource, { authorization, dpop, method, url })`:
+   pass the request's `Authorization` and `DPoP` headers, its method and its full URL. The answer
+   is `{ ok: true, token }`, with the same fields as `validateToken` plus `jkt`, or
+   `{ ok: false, error, wwwAuthenticate }`. Answer `401` with that `WWW-Authenticate` value.
+2. Publish `dpop_signing_alg_values_supported` in the gateway's protected-resource metadata.
+3. Ask for `dpop: true` on its entry in login's `src/services.ts`. From then on, clients that send
+   proofs get bound tokens for the gateway. `validateToken` refuses those, so step 1 must be live
+   first.
+
 ## 6. Infrastructure constraints
 
 - **Zone:** `2earl.com` is managed in `2earl/login` `infra/` (HCP workspace `2earl-login-prod`):

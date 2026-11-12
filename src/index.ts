@@ -5,6 +5,7 @@ import { GOOGLE_JWKS_URL } from './google';
 import { authorizationServer, type GrantProps } from './oauth';
 import { deliverDeletionNotices } from './deletion-notices';
 import { serviceForResource } from './services';
+import { boundKey, challenge, checkAccessToken } from './token-check';
 
 export { PromptshareDirectory } from './directory';
 export { OrganizationDirectory } from './org-directory';
@@ -40,14 +41,50 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
     if (!serviceForResource(this.env, resource)) {
       throw new Error('resource must name one registered protected resource');
     }
-    return authorizationServer(this.env).validateToken(resource, token, this.env) as Promise<{
+    const validated = await authorizationServer(this.env).validateToken<GrantProps>(
+      resource,
+      token,
+      this.env,
+    );
+    // A DPoP-bound token is never accepted as a bearer token: validateRequest checks its proof.
+    if (!validated || boundKey(validated.props)) return null;
+    return validated as {
       props: GrantProps;
       audience: string;
       expiresAt: number;
       scope: string[];
       userId: string;
       clientId: string;
-    } | null>;
+    };
+  }
+
+  /**
+   * Validates the access token of one request to a resource (DESIGN §4.15): `Authorization` with
+   * `Bearer` or `DPoP`, and the `DPoP` proof header. For resources that check DPoP proofs
+   * (`dpop: true` in src/services.ts). The answer names the error and the `WWW-Authenticate` value
+   * to send, so the resource needs no DPoP code of its own.
+   */
+  async validateRequest(
+    resource: string,
+    request: { authorization: string | null; dpop: string | null; method: string; url: string },
+  ) {
+    if (!serviceForResource(this.env, resource)) {
+      throw new Error('resource must name one registered protected resource');
+    }
+    const checked = await checkAccessToken(
+      this.env,
+      Math.floor(Date.now() / 1000),
+      resource,
+      request,
+    );
+    return checked.ok
+      ? { ok: true as const, token: checked.token }
+      : {
+          ok: false as const,
+          error: checked.error,
+          description: checked.description,
+          wwwAuthenticate: challenge(checked.error),
+        };
   }
 
   /**
@@ -72,6 +109,8 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
         this.env.DB.prepare('DELETE FROM passkey_challenges WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM device_codes WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM org_invitations WHERE expires_at <= ?').bind(now),
+        this.env.DB.prepare('DELETE FROM pushed_requests WHERE expires_at <= ?').bind(now),
+        this.env.DB.prepare('DELETE FROM dpop_proofs WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM audit_events WHERE at < ?').bind(
           now - AUDIT_RETENTION_SECONDS,
         ),

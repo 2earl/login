@@ -4,6 +4,7 @@ import { randomToken, sha256Hex, timingSafeEqual } from './crypto';
 import { clientIp, type AppContext, type AppEnv } from './http';
 import { authorizationServer, type GrantProps } from './oauth';
 import { acrFor, amrFor, signInOf } from './oidc';
+import { boundKey } from './token-check';
 
 /**
  * Token introspection, RFC 7662 (DESIGN §4.12). For resource servers that can't use a Service
@@ -145,10 +146,13 @@ export function registerIntrospection(app: Hono<AppEnv>, deps: Deps): void {
     const validated = await authorizationServer(c.env).validateToken(server.resource, token, c.env);
     if (!validated) return c.json({ active: false }, 200, NO_STORE);
     const props = validated.props as GrantProps;
+    // A DPoP-bound token (DESIGN §4.15): the resource server checks the proof against this key.
+    const jkt = boundKey(props);
     return c.json(
       {
         active: true,
-        token_type: 'Bearer',
+        token_type: jkt ? 'DPoP' : 'Bearer',
+        ...(jkt ? { cnf: { jkt } } : {}),
         scope: validated.scope.join(' '),
         client_id: validated.clientId,
         sub: props.uid,

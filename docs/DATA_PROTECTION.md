@@ -46,6 +46,8 @@ with German law on telemedia: TDDDG for cookies, DDG for the imprint **[verify]*
 | Second-factor steps in progress (passkey challenge, TOTP secret being set up, new recovery codes before they are shown) | D1 `mfa_pending` | System | ≤ 10 minutes, deleted with the session |
 | Organizations: name, status, members and their roles, when each joined | D1 `organizations`, `org_members` | Users who create or join one | Let a team use 2earl together. Members see each other's name and email address; services see account IDs and roles; sites see the organizations only with the `organizations` scope |
 | Organization invitations (invitee's address, role, who invited, HMAC of the link's token) | D1 `org_invitations` | The inviting member | Invite someone by email; at most 7 days, then deleted; also deleted when accepted, declined or withdrawn |
+| Pushed authorization requests (the app's request parameters, which may include an address the app suggests in `login_hint`) | D1 `pushed_requests` | The app | Start a sign-in the app prepared; at most 10 minutes, deleted daily |
+| DPoP proofs seen (a hash of the app's key and the proof's ID) | D1 `dpop_proofs` | The app | Refuse a replayed proof; 2 minutes, no personal data |
 | Request logs | Cloudflare (Workers logs, if enabled) | Request | Operations; configured without tokens or full query strings |
 
 IP addresses are stored only truncated (/24 IPv4, /48 IPv6).

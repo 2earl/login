@@ -196,7 +196,9 @@ describe('signing in with 2earl', () => {
   it('refuses UserInfo without a token, or with a token for another resource', async () => {
     const none = await call(app, '/userinfo');
     expect(none.status).toBe(401);
-    expect(none.headers.get('WWW-Authenticate')).toBe('Bearer error="invalid_token"');
+    expect(none.headers.get('WWW-Authenticate')).toBe(
+      'Bearer error="invalid_token", DPoP algs="ES256 EdDSA RS256 PS256"',
+    );
 
     // A token for the MCP gateway is bound to the gateway: useless here (RFC 8707).
     const mcp = await authorizePath({

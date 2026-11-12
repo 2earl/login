@@ -4,7 +4,8 @@ import {
   OAuthError,
 } from '@cloudflare/workers-oauth-provider';
 import { audit } from './audit';
-import { ALL_SCOPES, IDENTITY, allResources, scopeLabel } from './services';
+import { dpopOf } from './dpop';
+import { ALL_SCOPES, IDENTITY, allResources, scopeLabel, serviceForResource } from './services';
 import { isUserActive } from './users';
 
 /**
@@ -42,6 +43,10 @@ export interface GrantProps {
    */
   signedInAt?: number;
   method?: 'google' | 'email' | 'passkey' | null;
+  /** The key this grant's refresh tokens are bound to (DPoP, DESIGN §4.15). */
+  dpopJkt?: string;
+  /** Access tokens only: the key the token is bound to (RFC 9449 §6.1). */
+  cnf?: { jkt: string };
   /** OpenID Connect grants only (DESIGN §4.11). */
   oidc?: {
     /** The pairwise subject this app knows the user by (`oidc_subjects`). */
@@ -52,6 +57,37 @@ export interface GrantProps {
     signedInAt?: number;
     method?: 'google' | 'email' | 'passkey' | null;
   };
+}
+
+/**
+ * DPoP at the token endpoint (DESIGN §4.15, RFC 9449 §5). The token endpoint checked the proof and
+ * put its key in `env` (src/dpop.ts); here the grant and the token are bound to it.
+ * - A grant bound to a key (`dpopJkt`) is refreshed only with a proof from that key.
+ * - The first proof binds the grant, so its refresh tokens are useless without the key.
+ * - The access token is bound (`cnf.jkt`) only for a resource that checks proofs; otherwise the
+ *   client gets a bearer token, as RFC 9449 allows.
+ */
+function dpopBinding(
+  env: Env,
+  props: GrantProps,
+  resource: string,
+): { newProps?: GrantProps; accessTokenProps?: GrantProps } | undefined {
+  const dpop = dpopOf(env);
+  const bound = props.dpopJkt ?? null;
+  if (bound && dpop?.jkt !== bound) {
+    throw new OAuthError('invalid_grant', {
+      description: 'This grant is bound to a key: send a DPoP proof made with it.',
+    });
+  }
+  if (!dpop) return undefined;
+  const result: { newProps?: GrantProps; accessTokenProps?: GrantProps } = {};
+  const grantProps = bound ? props : { ...props, dpopJkt: dpop.jkt };
+  if (!bound) result.newProps = grantProps;
+  if (serviceForResource(env, resource)?.dpop) {
+    result.accessTokenProps = { ...grantProps, cnf: { jkt: dpop.jkt } };
+    dpop.accessTokenBound = true;
+  }
+  return result;
 }
 
 /** `acr_values` an app sends to require a recent second factor before login approves. */
@@ -86,7 +122,7 @@ export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
       accessTokenTTL: ACCESS_TOKEN_TTL_SECONDS,
       refreshTokenTTL: REFRESH_TOKEN_TTL_SECONDS,
       refreshTokenIdleTTL: REFRESH_TOKEN_IDLE_TTL_SECONDS,
-      tokenExchangeCallback: async ({ grantType, props, userId, grantId, env }) => {
+      tokenExchangeCallback: async ({ grantType, props, userId, grantId, env, resource }) => {
         // Every code exchange and refresh checks that the account still exists and is active.
         // Deletion and suspension revoke grants, but a grant created while that was running (a
         // consent submitted in another tab) is caught here, at the latest 15 minutes later.
@@ -97,7 +133,8 @@ export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
             description: 'This account is no longer active.',
           });
         }
-        if (grantType !== GrantType.REFRESH_TOKEN) return;
+        const binding = dpopBinding(env, props as GrantProps, resource);
+        if (grantType !== GrantType.REFRESH_TOKEN) return binding;
         // Absolute grant lifetime: however often a grant is refreshed, it ends 90 days after
         // the user approved it, and the user signs in again.
         const { authTime } = props as GrantProps;
@@ -107,7 +144,10 @@ export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
             description: 'This authorization has expired. Sign in again.',
           });
         }
-        return { refreshTokenIdleTTL: Math.min(REFRESH_TOKEN_IDLE_TTL_SECONDS, remaining) };
+        return {
+          ...binding,
+          refreshTokenIdleTTL: Math.min(REFRESH_TOKEN_IDLE_TTL_SECONDS, remaining),
+        };
       },
       onError: ({ code, status, internal }) => {
         // Stable reason codes only; never request data or credentials.

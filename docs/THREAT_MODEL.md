@@ -197,6 +197,17 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | O7 | Cross-site changes (CSRF) | Every change checks `Origin`/`Sec-Fetch-Site` (tested), as everywhere else (§7) |
 | O8 | Sites link people through organization IDs | Only with the `organizations` scope, which the consent page names; IDs are the same for every site by design |
 
+### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| D1 | A stolen access token or refresh token is used elsewhere | Tokens from a request with a DPoP proof are bound to the key: a bound access token needs a fresh proof with `ath`, and a bound refresh token a proof from the same key. Presenting a refresh token without the key ends the grant (tested) |
+| D2 | A captured proof is replayed | `jti` remembered for 2 minutes and accepted once; `iat` window of 60 s; `htm`/`htu` and, at resources, `ath` bind it to one request and one token (tested) |
+| D3 | Weak or forged proofs | Asymmetric algorithms only (HMAC refused, tested); the key in the header must be public; `typ` must be `dpop+jwt` |
+| D4 | A bound token used as a bearer token at a resource that doesn't check proofs | Access tokens are bound only for resources that check proofs; `validateToken` (the bearer path) refuses bound tokens (tested) |
+| D5 | A pushed request is used by another client or tampered with in the browser | The reference is a 256-bit random value stored as an HMAC, tied to its client ID; every parameter comes from what was pushed and nothing from the URL (tested); unknown or expired references show an error page instead of redirecting |
+| D6 | Pushed requests fill the database | The token endpoint's per-address limit, 8 KB per request, 10-minute expiry, daily clean-up |
+
 ### B5 — Gateway integration
 
 | Threat | Mitigation |
@@ -244,7 +255,7 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | R5a | Cloudflare Global API Key (`cfk_…`) was pasted into chat. It has full control of the Cloudflare account and cannot be scoped. | **Accepted** by owner, against recommendation | Roll it in the Cloudflare dashboard if it is ever needed again or exposure is suspected |
 | R5b | Cloudflare account token and Google client secret were pasted into chat. | **Deferred** by owner (2026-11-08); must be done before sign-up opens | Roll the Cloudflare token (same permissions) and update it in both GitHub `production` and HCP; add a new Google client secret, update GitHub, disable the old one. HCP team token: revoked 2026-11-08 |
 | R6 | No staging: first exposure of new code is production. | **Accepted**, mitigated by locked launch (D9) until 2026-11-10; since sign-up opened, by the sign-up switch on `/admin/invitations` (close it without a deploy) | — |
-| R7 | Library keeps the previous refresh token valid until the rotated one is used (retry safety). A stolen-and-raced refresh token may work once. | Accepted (library design) | Monitor via audit; consider DPoP later |
+| R7 | Library keeps the previous refresh token valid until the rotated one is used (retry safety). A stolen-and-raced refresh token may work once. | Accepted (library design); **mitigated** for clients that use DPoP (phase 9d): their refresh tokens need the key | Monitor via audit |
 | R8 | Old org-level secrets (`CLOUDFLARE_API_KEY`, Google pair) readable by every org repo. | **Resolved** 2026-11-08 (deleted) | — |
 | R9 | Account deletion is confirmed through Google (or, for accounts that sign in by email, a code to that address), but neither forces a password re-entry. Someone at an unlocked computer that is signed in to both 2earl and Google can delete the account. A stolen 2earl session cookie alone cannot. | **Mitigated** 2026-11-09 for users with a second factor: deletion also needs it, used in the last 5 minutes. **Accepted** for users without one | Users who want this protection add a passkey |
 

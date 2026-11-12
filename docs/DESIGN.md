@@ -672,6 +672,68 @@ organization. That is the point of the scope, and the consent page names it.
 Every change is same-origin and rate-limited (`orgs`). To anyone who isn't a member, an
 organization is a 404.
 
+### 4.15 DPoP and pushed authorization requests (phase 9d)
+
+**DPoP (RFC 9449).** A client that sends a `DPoP` proof to the token endpoint gets tokens bound to
+its key: a stolen token is useless without the private key. The library has no DPoP, so login
+checks the proof itself (`src/dpop.ts`) and binds through the library's `tokenExchangeCallback`
+(`src/oauth.ts`). The token endpoint passes the proof's key to the callback in a per-request `env`.
+
+- **The proof** is a JWT. login checks:
+  - `typ: dpop+jwt`, with an asymmetric `alg` (`ES256`, `EdDSA`, `RS256` or `PS256`) and a public
+    `jwk` in its header;
+  - `htm` and `htu` match the request; the query and fragment are ignored;
+  - `iat` is no more than 60 seconds old and no more than 10 seconds ahead;
+  - `jti` is new: proofs are remembered for 2 minutes in `dpop_proofs`, by a hash of the key's
+    thumbprint and the `jti`, so each proof works once;
+  - at a resource, `ath` matches the access token.
+
+  A bad proof gets `invalid_dpop_proof`.
+- **The grant** (its refresh tokens) is bound to the key of the first proof (`props.dpopJkt`). Any
+  later refresh needs a proof from that key. A refresh without one is treated as a stolen token:
+  the callback refuses it, and the library then ends the grant (tested). This protects public
+  clients, for which RFC 9449 §5 requires bound refresh tokens.
+- **The access token** carries `cnf.jkt` only for a resource that checks proofs (`dpop: true` in
+  `src/services.ts`), and the response then says `token_type: DPoP`. For any other resource the
+  client gets a bearer token (`token_type: bearer`, which RFC 9449 §5 allows), so a DPoP-capable
+  client keeps working with a resource that doesn't check proofs yet. Today only UserInfo checks
+  them. The MCP gateway can opt in once it uses `validateRequest`.
+- **Resources** (`src/token-check.ts`): a bound token is accepted only with the `DPoP` scheme and a
+  valid proof; an unbound token only with `Bearer`.
+  - `/userinfo` does this, and answers with `WWW-Authenticate` challenges for both schemes.
+  - Introspection reports `token_type: DPoP` and `cnf.jkt`.
+  - The Worker's RPC `validateRequest(resource, { authorization, dpop, method, url })` does the
+    whole check for a Service Binding caller and returns the `WWW-Authenticate` value to send.
+    `validateToken` stays for bearer tokens and refuses bound ones.
+- **Not implemented:** server-provided nonces (RFC 9449 §8), and binding the authorization code
+  with `dpop_jkt`. PKCE already binds the code to the client that started the request.
+
+**Pushed authorization requests (RFC 9126, `src/par.ts`).**
+- **Pushing.** A client posts the authorization request to `POST /oauth/par`. login checks what
+  the authorization endpoint's first step checks:
+  - a known public client;
+  - a registered redirect URI;
+  - PKCE with S256;
+  - no `request` object (`request_not_supported`).
+
+  It stores the parameters in `pushed_requests` under an HMAC of a 256-bit random value, and
+  answers `201` with `request_uri: urn:ietf:params:oauth:request_uri:<random>` and `expires_in`
+  600.
+- **Using it.** The browser then goes to `/authorize?client_id=…&request_uri=…`. login takes every
+  parameter from what was pushed; anything else in the URL is ignored. An unknown or expired
+  reference, or another client's, shows an error page; nothing is sent to an unchecked redirect
+  URI.
+- **Reuse.** A reference works until it expires, so a sign-in on the way comes back to the same
+  short URL. The code it leads to still needs the PKCE verifier. When `prompt=login` or `max_age`
+  sends the person to sign in again, the request comes back as a plain URL, because its prompt has
+  to change.
+- **Not required.** Clients may still send requests the plain way
+  (`require_pushed_authorization_requests: false`).
+
+Both are announced in the server metadata: `dpop_signing_alg_values_supported`,
+`pushed_authorization_request_endpoint`. `/oauth/par` uses the token endpoint's per-address limit.
+Expired pushed requests and proofs seen are deleted daily.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -775,6 +837,9 @@ org_members      (org_id FK, user_id FK) PK, role (owner|admin|member), joined_a
 org_invitations  id PK ('inv_…'), token_hash UNIQUE (HMAC), org_id FK, email, role
                  (admin|member), invited_by FK NULL, created_at, expires_at  (≤ 7 days)
 org_deletion_notices (service, org_id) PK, created_at, attempts, last_attempt_at, last_error
+pushed_requests  id_hash PK (HMAC of the request_uri's random part), client_id, params,
+                 created_at, expires_at                              (§4.15; ≤ 10 minutes)
+dpop_proofs      id_hash PK (SHA-256 of key thumbprint and jti), expires_at  (§4.15; 2 minutes)
 ```
 
 - `identities` is what allows email/phone and other social logins to be added later. Each is
@@ -982,7 +1047,7 @@ Resolved:
 | 9a | **Organizations and roles** (§4.14) |
 | 9b | **SCIM 2.0** provisioning into organizations (§13) |
 | 9c | **SAML 2.0**: organizations sign in through their own identity provider (§13) |
-| 9d | **DPoP and PAR** (§13) |
+| 9d | **DPoP and PAR** (§4.15) |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 
@@ -990,7 +1055,7 @@ login is the identity service and authorization server for 2earl. Every protocol
 permanent attack surface on the one service that guards every account, and one person runs it. A
 standard is added when something uses it, not to tick a list.
 
-**In place** (phases 4–9a):
+**In place** (phases 4–9a, 9d):
 
 | Standard | What it does here |
 |---|---|
@@ -1013,6 +1078,8 @@ standard is added when something uses it, not to tick a list.
 | RFC 9470 Step-up authentication challenge | `acr_values` and `max_age` for every request; tokens record `auth_time`, `acr`, `amr` (§4.12) |
 | RFC 8628 Device authorization grant | Sign in on a device without a browser by approving a short code elsewhere (§4.13); the 2earl CLI (`2earl/cli`) uses it |
 | Organizations and roles | Teams of accounts with owner, admin and member roles; services read them live over a Service Binding, sites through the `organizations` scope (§4.14) |
+| RFC 9449 DPoP | Refresh tokens bound to the client's key whenever it sends a proof; access tokens bound for resources that check proofs (UserInfo now; the gateway when it opts in) (§4.15) |
+| RFC 9126 PAR | The authorization request goes to login first; the browser carries only a reference (§4.15) |
 
 **Next** (the owner decided on 2026-11-12 to plan all of these; the order puts each one after
 what it depends on). Organizations (9a) are in place, so 9b and 9c have what they depend on:
@@ -1021,8 +1088,6 @@ what it depends on). Organizations (9a) are in place, so 9b and 9c have what the
 |---|---|---|---|
 | 9b | **SCIM 2.0** (RFC 7643, 7644) | An organization's own directory adds and removes its members | Organizations |
 | 9c | **SAML 2.0** | An organization's members sign in through the organization's own identity provider (login is the SAML service provider; their IdP proves who they are) | Organizations; an XML signature library reviewed for signature-wrapping attacks |
-| 9d | **RFC 9449 DPoP** | Tokens bound to the client's key, so a stolen token is useless elsewhere | Support in `@cloudflare/workers-oauth-provider`, or our own token-endpoint and resource-server wrapping; clients that send DPoP proofs |
-| 9d | **RFC 9126 PAR** | The authorization request goes to the server first, not through the browser | — |
 
 **Advisor's note (2026-11-12).** Every row above adds permanent attack surface to the service that
 guards every account, and none of them has a user yet. The order above is chosen so each phase
@@ -1041,6 +1106,7 @@ handling has a long record of signature-wrapping bypasses.
 | Client credentials grant | No machine-to-machine client; services talk over Service Bindings | A third-party backend needs its own access |
 | RFC 9101 JAR | Signed request objects; PAR (9d) already keeps the request off the browser | A FAPI-grade client |
 | Microsoft, GitHub, Apple and other social sign-in | The owner decided on 2026-11-12: Google, email codes and passkeys are the ways in | The owner decides otherwise |
+| DPoP server nonces (RFC 9449 §8) and `dpop_jkt` | Proofs already expire in 60 seconds and work once; PKCE binds the code | A client or resource needs them |
 | FedCM | Browser-mediated sign-in for third-party sites; only useful once sites embed "Sign in with 2earl" | A site asks for it |
 | Shared Signals (CAEP, RISC) | Pushes session and credential events to relying parties; there is one relying party, our own gateway, which already checks every token | Several independent relying parties |
 
