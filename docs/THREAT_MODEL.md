@@ -197,6 +197,18 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | O7 | Cross-site changes (CSRF) | Every change checks `Origin`/`Sec-Fetch-Site` (tested), as everywhere else (§7) |
 | O8 | Sites link people through organization IDs | Only with the `organizations` scope, which the consent page names; IDs are the same for every site by design |
 
+### L — SAML single sign-on (DESIGN §4.17, phase 9c)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| L1 | An organization's IdP signs in someone it has no authority over | Only addresses at the organization's verified domains (tested); it could already sign those in with email codes |
+| L2 | XML signature wrapping, unsigned or re-signed assertions | node-saml and xml-crypto check signatures, not our code; the assertion itself must be signed by the configured key (tested: unsigned, other key, tampered); Dependabot keeps both current |
+| L3 | Login CSRF, IdP-initiated or injected responses | SP-initiated only: `InResponseTo` must name the request of this sign-in, scoped to its state (tested); the state is bound to the browser by `__Host-saml_tx` (tested) |
+| L4 | Replayed responses or assertions | Request IDs and assertion IDs are used once; states are deleted when used (tested) |
+| L5 | An assertion meant for another service provider | The audience must be login's entity ID for this organization (tested); the recipient must be the ACS URL |
+| L6 | A malicious owner points SSO at their own IdP to take over members' accounts | Only for verified domains, whose mailboxes the owner's organization already controls; a second factor on the account is still required; changing the settings needs a recent proof, and the change is in the audit log |
+| L7 | Large or malformed XML | Responses are limited to 200 KB; parsing is node-saml's |
+
 ### S — Verified domains and SCIM (DESIGN §4.16, phase 9b)
 
 | # | Threat | Mitigation |

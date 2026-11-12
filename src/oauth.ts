@@ -5,6 +5,7 @@ import {
 } from '@cloudflare/workers-oauth-provider';
 import { audit } from './audit';
 import { dpopOf } from './dpop';
+import type { SignInMethod } from './sessions';
 import { ALL_SCOPES, IDENTITY, allResources, scopeLabel, serviceForResource } from './services';
 import { isUserActive } from './users';
 
@@ -42,7 +43,7 @@ export interface GrantProps {
    * OIDC `auth_time`/`amr`). Grants from before phase 8c don't have them.
    */
   signedInAt?: number;
-  method?: 'google' | 'email' | 'passkey' | null;
+  method?: SignInMethod | null;
   /** The key this grant's refresh tokens are bound to (DPoP, DESIGN §4.15). */
   dpopJkt?: string;
   /** Access tokens only: the key the token is bound to (RFC 9449 §6.1). */
@@ -55,7 +56,7 @@ export interface GrantProps {
     nonce: string | null;
     /** Phase 8b grants carried these here; newer grants have them at the top level. */
     signedInAt?: number;
-    method?: 'google' | 'email' | 'passkey' | null;
+    method?: SignInMethod | null;
   };
 }
 

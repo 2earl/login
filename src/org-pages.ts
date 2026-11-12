@@ -272,6 +272,7 @@ export function directoryPage(params: {
   domains: OrgDomain[];
   tokens: ScimTokenInfo[];
   provisioned: { active: number; waiting: number; inactive: number };
+  saml: { idpEntityId: string; ssoUrl: string; certificate: string; enabled: boolean } | null;
   newToken?: string;
   notice?: string | undefined;
   error?: string | undefined;
@@ -340,7 +341,45 @@ export function directoryPage(params: {
         ? `<form method="post" action="${base}/scim-tokens" class="actions"><button class="button secondary" type="submit">Create a token</button></form>` +
           '<p class="note">Up to two tokens, so you can rotate: create the new one, put it in your directory, then revoke the old one.</p>'
         : '<p class="note">Verify a domain first.</p>') +
-      '</section>',
+      '</section>' +
+      samlSection(base, params.issuer, params.org.id, verified, params.saml),
     { section: 'Organization' },
+  );
+}
+
+function samlSection(
+  base: string,
+  issuer: string,
+  orgId: string,
+  verified: boolean,
+  saml: { idpEntityId: string; ssoUrl: string; certificate: string; enabled: boolean } | null,
+): string {
+  const sp = `${issuer}/saml/${encodeURIComponent(orgId)}`;
+  return (
+    '<section class="section" aria-labelledby="saml-heading">' +
+    '<h2 id="saml-heading">Single sign-on (SAML 2.0)</h2>' +
+    '<p class="section-text">People with an address at your verified domains can sign in through your identity provider. A second factor they set up on 2earl is still asked for.</p>' +
+    '<dl class="details">' +
+    `<dt>Entity ID</dt><dd><code>${escapeHtml(sp)}</code></dd>` +
+    `<dt>Reply (ACS) URL</dt><dd><code>${escapeHtml(sp)}/acs</code> (HTTP-POST)</dd>` +
+    '<dt>Name ID</dt><dd>The work email address</dd>' +
+    (saml
+      ? `<dt>Metadata</dt><dd><a href="${escapeHtml(sp)}/metadata">${escapeHtml(sp)}/metadata</a></dd>`
+      : '') +
+    `<dt>Status</dt><dd>${saml?.enabled ? 'On' : 'Off'}</dd>` +
+    '</dl>' +
+    (verified
+      ? `<form method="post" action="${base}/saml" class="stack-form">` +
+        '<label class="field"><span>Identity provider entity ID (issuer)</span>' +
+        `<input name="idp_entity_id" type="text" required maxlength="500" autocomplete="off" spellcheck="false" value="${escapeHtml(saml?.idpEntityId ?? '')}"></label>` +
+        '<label class="field"><span>Sign-in URL (HTTP-Redirect)</span>' +
+        `<input name="sso_url" type="url" required maxlength="1000" autocomplete="off" spellcheck="false" value="${escapeHtml(saml?.ssoUrl ?? '')}"></label>` +
+        '<label class="field"><span>Signing certificate (PEM or base64)</span>' +
+        `<textarea name="certificate" rows="6" required spellcheck="false">${escapeHtml(saml?.certificate ?? '')}</textarea></label>` +
+        `<label class="confirm"><input type="checkbox" name="enabled" value="on"${saml?.enabled ? ' checked' : ''}><span>Let people sign in this way</span></label>` +
+        '<div class="consent-actions"><button class="button secondary" type="submit">Save single sign-on</button></div>' +
+        '</form>'
+      : '<p class="note">Verify a domain first.</p>') +
+    '</section>'
   );
 }

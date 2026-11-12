@@ -501,6 +501,7 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'org.domain_removed': 'Organization domain removed',
   'org.scim_token_created': 'Directory sync token created',
   'org.scim_token_revoked': 'Directory sync token revoked',
+  'org.saml_saved': 'Single sign-on settings saved',
   'scim.user_created': 'Directory provisioned a user',
   'scim.user_updated': 'Directory updated a user',
   'scim.user_deleted': 'Directory removed a user',

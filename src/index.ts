@@ -111,6 +111,8 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
         this.env.DB.prepare('DELETE FROM org_invitations WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM pushed_requests WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM dpop_proofs WHERE expires_at <= ?').bind(now),
+        this.env.DB.prepare('DELETE FROM saml_states WHERE expires_at <= ?').bind(now),
+        this.env.DB.prepare('DELETE FROM saml_cache WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM audit_events WHERE at < ?').bind(
           now - AUDIT_RETENTION_SECONDS,
         ),

@@ -67,6 +67,7 @@ export type AuditEvent =
   | 'org.domain_removed'
   | 'org.scim_token_created'
   | 'org.scim_token_revoked'
+  | 'org.saml_saved'
   | 'scim.user_created'
   | 'scim.user_updated'
   | 'scim.user_deleted'
