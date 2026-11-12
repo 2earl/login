@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SEND_LIMITS, maskEmail, newCode } from '../src/email-codes';
+import { codeMail, mailHtml, noticeMail } from '../src/mail';
 import { setOAuthClock } from '../src/oauth';
 import {
   FakeGoogle,
@@ -27,6 +28,8 @@ interface Sent {
   to: string;
   subject: string;
   text: string;
+  html?: string;
+  replyTo?: string;
 }
 
 let google: FakeGoogle;
@@ -424,6 +427,27 @@ describe('welcome, and deleting an account that signs in with email', () => {
     const response = await typeCode(code, lastCode(), {});
     expect(response.status).toBe(400);
     expect(await count('users')).toBe(1);
+  });
+});
+
+describe('emails', () => {
+  it('carry a plain and a matching HTML part, and replies reach a person', async () => {
+    await askCode('parts@example.com');
+    const mail = sent.at(-1);
+    expect(mail?.replyTo).toBe('legal@2earl.com');
+    expect(mail?.html).toContain(`>${lastCode()}</p>`);
+    expect(mail?.html).toContain('<a href="https://login.2earl.com/login/email/link?token=');
+    expect(mail?.html).not.toMatch(/<img|<script|https?:\/\/(?!([a-z0-9-]+\.)*2earl\.com)/);
+  });
+
+  it('escape what an app calls itself, and link only our own addresses', () => {
+    const notice = noticeMail({ kind: 'app_connected', app: '<b>Evil</b> https://evil.example' });
+    const html = mailHtml(notice.lines);
+    expect(html).toContain('&lt;b&gt;Evil&lt;/b&gt;');
+    expect(html).not.toContain('href="https://evil.example');
+    expect(mailHtml(codeMail('sign_in', '123456', 'https://login.2earl.com/x').lines)).toContain(
+      'letter-spacing:4px;margin:8px 0 16px">123456</p>',
+    );
   });
 });
 
