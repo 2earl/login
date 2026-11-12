@@ -100,6 +100,8 @@ export async function deviceTokenResponse(
   c: AppContext,
   now: number,
   form: FormData,
+  /** The env for the code exchange: with the DPoP context when the poll carried a proof. */
+  exchangeEnv: Env = c.env,
 ): Promise<Response> {
   const deviceCode = form.get('device_code');
   const clientId = form.get('client_id');
@@ -151,7 +153,7 @@ export async function deviceTokenResponse(
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: exchange,
     }),
-    c.env,
+    exchangeEnv,
     workerCtx(c),
   );
   return withIdToken(c.env, now, 'authorization_code', response);

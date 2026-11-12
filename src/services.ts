@@ -29,6 +29,12 @@ export interface Service {
    */
   organizationEvents?: boolean;
   /**
+   * Whether the resource checks DPoP proofs (DESIGN §4.15). Only then are its access tokens bound
+   * to the client's key; for any other resource a client with a proof gets a bearer token
+   * (`token_type: bearer`, RFC 9449 §5), and its refresh token is bound all the same.
+   */
+  dpop?: boolean;
+  /**
    * Narrower addresses of the same service, each its own resource with a subset of its scopes.
    * The MCP gateway serves every 2earl service at `/mcp` and each one alone at `/<service>`
    * (2earl/mcp docs/DESIGN.md §3): a token for one address is useless at another.
@@ -90,6 +96,8 @@ export const IDENTITY: Service = {
     organizations: 'See which organizations you belong to, and your role in each',
   },
   deletionBinding: '',
+  // /userinfo checks proofs (src/token-check.ts).
+  dpop: true,
 };
 
 /** Every scope of every service, with its consent wording. */
@@ -118,6 +126,7 @@ export function serviceForResource(env: Env, resource: string | undefined): Serv
           endpoint.scopes.map((scope) => [scope, service.scopes[scope] ?? scope]),
         ),
         deletionBinding: service.deletionBinding,
+        ...(service.dpop ? { dpop: true } : {}),
       };
     }
   }

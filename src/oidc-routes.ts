@@ -19,6 +19,8 @@ import {
   userClaims,
   userInfoResource,
 } from './oidc';
+import { checkAccessToken, challenge } from './token-check';
+import { DPOP_ALGS } from './dpop';
 import { DEVICE_GRANT } from './device';
 import { signedOutPage, signOutPage } from './pages';
 import { deleteSession } from './sessions';
@@ -38,7 +40,7 @@ const PUBLIC_JSON = {
 /** UserInfo answers bearer requests from browsers too; no cookies are involved. */
 const CORS_BEARER = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Authorization',
+  'Access-Control-Allow-Headers': 'Authorization, DPoP',
   'Access-Control-Allow-Methods': 'GET, POST',
 };
 
@@ -100,21 +102,14 @@ export async function withIdToken(
   return new Response(JSON.stringify({ ...body, id_token: idToken }), { status: 200, headers });
 }
 
-function bearerToken(c: AppContext): string | null {
-  const header = c.req.header('Authorization') ?? '';
-  // The library's tokens contain `:`, outside RFC 6750's b64token; any non-space value is read.
-  const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
-  return match?.[1] ?? null;
-}
-
 function bearerError(
   c: AppContext,
-  error: 'invalid_token' | 'insufficient_scope',
-  status: 401 | 403,
+  error: 'invalid_request' | 'invalid_token' | 'insufficient_scope' | 'invalid_dpop_proof',
+  status: 400 | 401 | 403,
 ) {
   return c.json({ error }, status, {
     ...CORS_BEARER,
-    'WWW-Authenticate': `Bearer error="${error}"`,
+    'WWW-Authenticate': challenge(error),
   });
 }
 
@@ -135,6 +130,10 @@ async function serverMetadata(c: AppContext): Promise<Record<string, unknown>> {
     introspection_endpoint: `${c.env.ISSUER}/oauth/introspect`,
     introspection_endpoint_auth_methods_supported: ['client_secret_basic'],
     device_authorization_endpoint: `${c.env.ISSUER}/oauth/device_authorization`,
+    // DESIGN §4.15: DPoP (RFC 9449) and pushed authorization requests (RFC 9126).
+    dpop_signing_alg_values_supported: DPOP_ALGS,
+    pushed_authorization_request_endpoint: `${c.env.ISSUER}/oauth/par`,
+    require_pushed_authorization_requests: false,
     grant_types_supported: [
       ...(Array.isArray(meta.grant_types_supported)
         ? (meta.grant_types_supported as string[])
@@ -188,15 +187,17 @@ export function registerOidcRoutes(app: Hono<AppEnv>, deps: Deps): void {
     // Called by sites' servers, many users behind one address: the token endpoint's limit.
     const { success } = await c.env.TOKEN_RATE_LIMITER.limit({ key: clientIp(c) ?? 'unknown' });
     if (!success) return c.json({ error: 'temporarily_unavailable' }, 429, CORS_BEARER);
-    const token = bearerToken(c);
-    if (!token) return bearerError(c, 'invalid_token', 401);
-    const validated = await authorizationServer(c.env).validateToken(
-      userInfoResource(c.env),
-      token,
-      c.env,
-    );
-    const props = validated?.props as GrantProps | undefined;
-    if (!validated || !props?.oidc) return bearerError(c, 'invalid_token', 401);
+    // A bearer token, or a DPoP-bound one with its proof (DESIGN §4.15).
+    const checked = await checkAccessToken(c.env, deps.now(), userInfoResource(c.env), {
+      authorization: c.req.header('Authorization') ?? null,
+      dpop: c.req.header('DPoP') ?? null,
+      method: c.req.method,
+      url: `${c.env.ISSUER}/userinfo`,
+    });
+    if (!checked.ok) return bearerError(c, checked.error, 401);
+    const validated = checked.token;
+    const props = validated.props;
+    if (!props.oidc) return bearerError(c, 'invalid_token', 401);
     const scope = validated.scope;
     if (!scope.includes('openid')) return bearerError(c, 'insufficient_scope', 403);
     const claims = await userClaims(c.env.DB, props.uid, scope);

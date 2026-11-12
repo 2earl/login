@@ -10,6 +10,8 @@ import type { JWTVerifyGetKey } from 'jose';
 import { exportAccount } from './account';
 import { exportFromServices } from './service-exports';
 import { registerOrgRoutes } from './org-routes';
+import { DpopError, dpopOf, verifyDpopProof, withDpop } from './dpop';
+import { pushedRequestUrl, registerParRoute } from './par';
 import { membershipsOf, ownershipPlan } from './orgs';
 import { audit } from './audit';
 import { hmacHex, pkceChallenge, timingSafeEqual } from './crypto';
@@ -67,6 +69,18 @@ import {
   upsertGoogleUser,
   userForGoogle,
 } from './users';
+
+/** A token response for a DPoP-bound access token says so (RFC 9449 §5). */
+async function asDpopTokenType(response: Response): Promise<Response> {
+  if (!response.ok) return response;
+  const body = await response.json<Record<string, unknown>>();
+  const headers = new Headers(response.headers);
+  headers.delete('Content-Length');
+  return new Response(JSON.stringify({ ...body, token_type: 'DPoP' }), {
+    status: response.status,
+    headers,
+  });
+}
 
 /** External dependencies, injectable so tests can stand in for Google. */
 export interface Deps {
@@ -646,9 +660,15 @@ export function createApp(deps: Deps): Hono<AppEnv> {
 
   app.get('/authorize', async (c) => {
     const oauth = authorizationServer(c.env).getOAuthApi(c.env);
+    // A pushed request (RFC 9126, DESIGN §4.15): the parameters come from what the client pushed,
+    // never from the browser's URL. Redirects to sign in keep the short URL with `request_uri`.
+    const original = new URL(c.req.url);
+    const pushed = await pushedRequestUrl(c.env, deps.now(), original);
+    if (pushed === 'invalid') return c.html(messagePage(MESSAGES.authorizeInvalid), 400);
+    const effective = pushed ?? original;
     let request: AuthRequest;
     try {
-      request = await oauth.parseAuthRequest(c.req.raw);
+      request = await oauth.parseAuthRequest(pushed ? new Request(pushed, c.req.raw) : c.req.raw);
     } catch (error) {
       return authorizeError(c, error);
     }
@@ -661,7 +681,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         302,
       );
     }
-    const query = new URL(c.req.url).searchParams;
+    const query = effective.searchParams;
     const openid = request.scope.includes('openid');
     // An OpenID Connect sign-in may leave out `resource`: its token is for UserInfo (DESIGN
     // §4.11). Every other request must name its resource (RFC 8707), as MCP requires.
@@ -725,8 +745,10 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       if (prompt.has('none')) {
         return c.redirect(oidcErrorRedirect(request, 'login_required'), 302);
       }
-      const url = new URL(c.req.url);
-      return c.redirect(`/login?return_to=${encodeURIComponent(url.pathname + url.search)}`, 303);
+      return c.redirect(
+        `/login?return_to=${encodeURIComponent(original.pathname + original.search)}`,
+        303,
+      );
     }
 
     // prompt=login, or a sign-in older than max_age: the person signs in again first. The
@@ -736,7 +758,8 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       if (prompt.has('none')) {
         return c.redirect(oidcErrorRedirect(request, 'login_required'), 302);
       }
-      const back = new URL(c.req.url);
+      // A pushed request comes back as a plain one here: its prompt has to change.
+      const back = new URL(effective);
       prompt.delete('login');
       if (prompt.size > 0) back.searchParams.set('prompt', [...prompt].join(' '));
       else back.searchParams.delete('prompt');
@@ -750,13 +773,12 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     // An app can require a recent second factor, e.g. for its admin area. login asks for it
     // first; the app checks `aal2At` in the grant's props, so this step is for the user, not the
     // only check.
-    const requested = new URL(c.req.url);
-    const acr = (requested.searchParams.get('acr_values') ?? '').split(' ');
+    const acr = (query.get('acr_values') ?? '').split(' ');
     if (acr.includes(ACR_AAL2) && !isStepUpFresh(session, deps.now())) {
       if (prompt.has('none')) {
         return c.redirect(oidcErrorRedirect(request, 'interaction_required'), 302);
       }
-      const back = encodeURIComponent(requested.pathname + requested.search);
+      const back = encodeURIComponent(original.pathname + original.search);
       return c.redirect(
         session.hasFactor
           ? `/mfa?step_up=1&return_to=${back}`
@@ -950,18 +972,40 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       .formData()
       .catch(() => null);
     const grantType = form?.get('grant_type');
+    const now = deps.now();
+    // DPoP (RFC 9449, DESIGN §4.15): a proof binds what this request issues to the client's key.
+    let exchangeEnv: Env = c.env;
+    const proof = c.req.header('DPoP');
+    if (proof !== undefined) {
+      try {
+        const { jkt } = await verifyDpopProof(c.env.DB, now, {
+          proof,
+          method: 'POST',
+          url: `${c.env.ISSUER}/oauth/token`,
+        });
+        exchangeEnv = withDpop(c.env, jkt);
+      } catch (error) {
+        if (!(error instanceof DpopError)) throw error;
+        return c.json({ error: 'invalid_dpop_proof', error_description: error.description }, 400, {
+          'Cache-Control': 'no-store',
+        });
+      }
+    }
     // The device grant (RFC 8628) is login's own, around the library's code flow (§4.13).
-    if (grantType === DEVICE_GRANT && form) return deviceTokenResponse(c, deps.now(), form);
-    const response = await authorizationServer(c.env).fetch(c.req.raw, c.env, workerCtx(c));
-    // OpenID Connect: an ID token beside the access token when the grant includes `openid`.
-    return withIdToken(
-      c.env,
-      deps.now(),
-      typeof grantType === 'string' ? grantType : null,
-      response,
-    );
+    const response =
+      grantType === DEVICE_GRANT && form
+        ? await deviceTokenResponse(c, now, form, exchangeEnv)
+        : await withIdToken(
+            c.env,
+            now,
+            typeof grantType === 'string' ? grantType : null,
+            // OpenID Connect: an ID token beside the access token when the grant includes `openid`.
+            await authorizationServer(c.env).fetch(c.req.raw, exchangeEnv, workerCtx(c)),
+          );
+    return dpopOf(exchangeEnv)?.accessTokenBound ? asDpopTokenType(response) : response;
   });
   registerIntrospection(app, deps);
+  registerParRoute(app, deps);
   registerDeviceRoutes(app, deps);
   app.all('/oauth/*', (c) => authorizationServer(c.env).fetch(c.req.raw, c.env, workerCtx(c)));
   registerOidcRoutes(app, deps);
