@@ -14,9 +14,10 @@ resource "cloudflare_ruleset" "custom_firewall" {
 
   rules = [
     {
+      # SCIM 2.0 (DESIGN §4.16) updates and deletes users with PUT, PATCH and DELETE.
       ref         = "login_block_unexpected_methods"
-      description = "login: only GET, HEAD, POST and OPTIONS are used"
-      expression  = "(http.host eq \"${var.login_hostname}\" and not http.request.method in {\"GET\" \"HEAD\" \"POST\" \"OPTIONS\"})"
+      description = "login: only GET, HEAD, POST and OPTIONS are used, plus PUT, PATCH and DELETE for SCIM"
+      expression  = "(http.host eq \"${var.login_hostname}\" and not http.request.method in {\"GET\" \"HEAD\" \"POST\" \"OPTIONS\"} and not (starts_with(http.request.uri.path, \"/scim/v2/\") and http.request.method in {\"PUT\" \"PATCH\" \"DELETE\"}))"
       action      = "block"
       enabled     = true
     },

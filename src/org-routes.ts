@@ -12,7 +12,9 @@ import {
 } from './http';
 import { invitationMail, sendMail } from './mail';
 import { changeCheck } from './mfa-routes';
-import { deleteOrgPage, invitationPage, newOrgPage, orgPage } from './org-pages';
+import { deleteOrgPage, directoryPage, invitationPage, newOrgPage, orgPage } from './org-pages';
+import { addDomain, listDomains, normaliseDomain, removeDomain, verifyDomain } from './org-domains';
+import { createScimToken, listScimTokens, revokeScimToken } from './scim';
 import {
   MAX_INVITATIONS_PER_DAY,
   acceptInvitation,
@@ -434,6 +436,152 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     await deleteOrganization(c.env.DB, now, ctx.orgId);
     await record(c, ctx.session, 'org.deleted', { org: ctx.orgId });
     return c.redirect('/account?saved=org_deleted', 303);
+  });
+
+  // ---- Domains and directory sync (DESIGN §4.16) ---------------------------------------------------
+
+  async function showDirectory(
+    c: AppContext,
+    orgId: string,
+    flash: { notice?: string; error?: string; newToken?: string } = {},
+    status: 200 | 400 | 403 | 409 = 200,
+  ) {
+    const session = c.get('session');
+    const found = session ? await membership(c.env.DB, orgId, session.user.id) : null;
+    if (!found || !canManageOrganization(found.role)) return c.html(notFoundPage(), 404);
+    const counts = await c.env.DB.prepare(
+      `SELECT
+         SUM(CASE WHEN active = 1 AND user_id IS NOT NULL THEN 1 ELSE 0 END) AS active,
+         SUM(CASE WHEN active = 1 AND user_id IS NULL THEN 1 ELSE 0 END) AS waiting,
+         SUM(CASE WHEN active = 0 THEN 1 ELSE 0 END) AS inactive
+       FROM scim_users WHERE org_id = ?`,
+    )
+      .bind(orgId)
+      .first<{ active: number | null; waiting: number | null; inactive: number | null }>();
+    return c.html(
+      directoryPage({
+        org: found.org,
+        issuer: c.env.ISSUER,
+        domains: await listDomains(c.env.DB, orgId),
+        tokens: await listScimTokens(c.env.DB, orgId),
+        provisioned: {
+          active: counts?.active ?? 0,
+          waiting: counts?.waiting ?? 0,
+          inactive: counts?.inactive ?? 0,
+        },
+        ...flash,
+      }),
+      status,
+    );
+  }
+
+  /** For directory changes: an owner of an active organization. */
+  async function ownerChange(c: AppContext) {
+    const ctx = await forChange(c);
+    if (ctx instanceof Response) return ctx;
+    if (!canManageOrganization(ctx.role)) return c.html(notFoundPage(), 404);
+    return ctx;
+  }
+
+  const DIRECTORY_DONE: Record<string, string> = {
+    added: 'Domain added. Publish the TXT record, then check it.',
+    verified: 'Domain verified.',
+    removed: 'Domain removed.',
+    revoked: 'Token revoked. Your directory can no longer use it.',
+  };
+
+  app.get('/orgs/:org/directory', async (c) => {
+    if (!c.get('session')) return signIn(c);
+    const done = DIRECTORY_DONE[c.req.query('done') ?? ''];
+    return showDirectory(c, c.req.param('org'), done ? { notice: done } : {});
+  });
+
+  const directory = (orgId: string, done: string) =>
+    `/orgs/${encodeURIComponent(orgId)}/directory?done=${done}`;
+
+  app.post('/orgs/:org/domains', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    const domain = normaliseDomain(ctx.form.get('domain'));
+    if (!domain)
+      return showDirectory(
+        c,
+        ctx.orgId,
+        { error: 'Enter a domain name, such as example.com.' },
+        400,
+      );
+    const result = await addDomain(c.env.DB, deps.now(), ctx.orgId, domain);
+    if (result === 'full')
+      return showDirectory(
+        c,
+        ctx.orgId,
+        { error: 'An organization can have up to 10 domains.' },
+        409,
+      );
+    if (result === 'added')
+      await record(c, ctx.session, 'org.domain_added', { org: ctx.orgId, domain });
+    return c.redirect(directory(ctx.orgId, 'added'), 303);
+  });
+
+  app.post('/orgs/:org/domains/verify', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    const domain = normaliseDomain(ctx.form.get('domain'));
+    if (!domain) return c.redirect(`/orgs/${encodeURIComponent(ctx.orgId)}/directory`, 303);
+    const result = await verifyDomain(c.env.DB, deps.fetch, deps.now(), ctx.orgId, domain);
+    if (result === 'verified') {
+      await record(c, ctx.session, 'org.domain_verified', { org: ctx.orgId, domain });
+      return c.redirect(directory(ctx.orgId, 'verified'), 303);
+    }
+    const error = {
+      not_found:
+        'The TXT record isn’t there yet. DNS changes can take a while to appear; check again later.',
+      taken: 'Another organization has already verified this domain.',
+      dns_error: 'We couldn’t look the record up just now. Try again in a minute.',
+      unknown: 'That domain isn’t on this organization.',
+    }[result];
+    return showDirectory(c, ctx.orgId, { error }, 409);
+  });
+
+  app.post('/orgs/:org/domains/remove', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    const domain = normaliseDomain(ctx.form.get('domain'));
+    if (domain && (await removeDomain(c.env.DB, ctx.orgId, domain))) {
+      await record(c, ctx.session, 'org.domain_removed', { org: ctx.orgId, domain });
+    }
+    return c.redirect(directory(ctx.orgId, 'removed'), 303);
+  });
+
+  app.post('/orgs/:org/scim-tokens', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    // A directory token adds and removes members: only with a recent proof it's you.
+    const redirect = changeCheck(ctx.session, deps.now(), `/orgs/${ctx.orgId}/directory`);
+    if (redirect) return c.redirect(redirect, 303);
+    const verified = (await listDomains(c.env.DB, ctx.orgId)).some((d) => d.verifiedAt !== null);
+    if (!verified) return showDirectory(c, ctx.orgId, { error: 'Verify a domain first.' }, 409);
+    const created = await createScimToken(c.env.DB, deps.now(), ctx.orgId);
+    if (!created) {
+      return showDirectory(
+        c,
+        ctx.orgId,
+        { error: 'This organization has two tokens. Revoke one first.' },
+        409,
+      );
+    }
+    await record(c, ctx.session, 'org.scim_token_created', { org: ctx.orgId, token: created.id });
+    return showDirectory(c, ctx.orgId, { newToken: created.token });
+  });
+
+  app.post('/orgs/:org/scim-tokens/revoke', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    const id = ctx.form.get('token');
+    if (typeof id === 'string' && (await revokeScimToken(c.env.DB, ctx.orgId, id))) {
+      await record(c, ctx.session, 'org.scim_token_revoked', { org: ctx.orgId, token: id });
+    }
+    return c.redirect(directory(ctx.orgId, 'revoked'), 303);
   });
 
   // ---- Answering an invitation ------------------------------------------------------------------

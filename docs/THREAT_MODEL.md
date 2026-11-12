@@ -197,6 +197,18 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | O7 | Cross-site changes (CSRF) | Every change checks `Origin`/`Sec-Fetch-Site` (tested), as everywhere else (§7) |
 | O8 | Sites link people through organization IDs | Only with the `organizations` scope, which the consent page names; IDs are the same for every site by design |
 
+### S — Verified domains and SCIM (DESIGN §4.16, phase 9b)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| S1 | An organization provisions people it has no authority over (adds a stranger's account, learns whether an address has an account) | Only addresses at domains it proved with DNS (tested); accounts are never created; a domain is verified by one organization at a time (tested) |
+| S2 | Account squatting: a directory claims an address before its owner signs up | Provisioning creates no account; the person links on their own sign-in |
+| S3 | A stolen SCIM token | 256 bits, stored as SHA-256, scoped to one organization (tested), revocable at once; creating one needs an owner's recent proof; it can only add or remove members (role `member`), never owners or roles |
+| S4 | A directory removes the last owner | Refused with `409` (tested); the owner count is checked in the same SQL statement |
+| S5 | DNS spoofing during verification | DNS over HTTPS to Cloudflare's resolver over TLS; the record must hold a random value login issued |
+| S6 | New HTTP methods widen the edge surface | PUT, PATCH and DELETE are allowed by the zone firewall on `/scim/v2/` only; everything else keeps GET, HEAD, POST, OPTIONS |
+| S7 | Oversized or abusive requests | 64 KB bodies, 100 results a page, 50 operations per PATCH, the per-address limit |
+
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
 
 | # | Threat | Mitigation |
