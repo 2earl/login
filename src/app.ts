@@ -13,8 +13,8 @@ import { audit } from './audit';
 import { hmacHex, pkceChallenge, timingSafeEqual } from './crypto';
 import { GoogleSignInError, buildGoogleAuthUrl, exchangeCode, verifyGoogleIdToken } from './google';
 import { LOGIN_TX_TTL_SECONDS, consumeLoginTx, createLoginTx } from './login-tx';
-import { isStepUpFresh, listFactors, mfaGate, type MfaGate } from './mfa';
-import { registerMfaRoutes } from './mfa-routes';
+import { isStepUpFresh, listFactors, listPasskeys, mfaGate, type MfaGate } from './mfa';
+import { mfaHtml, registerMfaRoutes } from './mfa-routes';
 import { isOwnerUser, registerAdminRoutes } from './admin';
 import { ACR_AAL2, authorizationServer, type GrantProps } from './oauth';
 import { ALL_SCOPES, scopeLabel, scopesFor, serviceForResource, type Service } from './services';
@@ -48,6 +48,7 @@ import { CONSENT_CSP, applySecurityHeaders } from './security-headers';
 import { deleteSession, getSession } from './sessions';
 import { registerEmailRoutes, sendCode } from './email-routes';
 import { registerMethodRoutes } from './method-routes';
+import { registerPasskeyRoutes } from './passkey-routes';
 import { signupMode } from './settings';
 import { finishDeletion, notifyLater, startSession } from './sign-in';
 import {
@@ -191,7 +192,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.get('/', async (c) =>
     c.get('session')
       ? c.redirect('/account', 303)
-      : c.html(signInPage({ mode: await signupMode(c.env) })),
+      : mfaHtml(signInPage({ mode: await signupMode(c.env) })),
   );
 
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
@@ -203,15 +204,16 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     const session = c.get('session');
     const reauth = c.req.query('reauth') === '1';
     if (session && !reauth) return c.redirect(safeReturnTo(returnTo), 303);
-    let methods: { google: boolean; email: string | null } | null = null;
+    let methods: { google: boolean; email: string | null; passkey: boolean } | null = null;
     if (session && reauth) {
       const identities = await listIdentities(c.env, session.user.id);
       methods = {
         google: identities.some((i) => i.provider === 'google'),
         email: identities.find((i) => i.provider === 'email')?.email ?? null,
+        passkey: (await listPasskeys(c.env.DB, session.user.id)).length > 0,
       };
     }
-    return c.html(signInPage({ returnTo, mode: await signupMode(c.env), reauth: methods }));
+    return mfaHtml(signInPage({ returnTo, mode: await signupMode(c.env), reauth: methods }));
   });
 
   app.get('/login/google', async (c) => {
@@ -380,7 +382,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
 
     if (!(await isUserActive(c.env.DB, userId))) return fail('user_suspended', 403);
 
-    return startSession(c, now, userId, tx.returnTo, { welcome: created });
+    return startSession(c, now, userId, tx.returnTo, { welcome: created, method: 'google' });
   });
 
   app.post('/logout', async (c) => {
@@ -559,6 +561,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   registerEmailRoutes(app, deps);
   registerMethodRoutes(app, deps);
   registerMfaRoutes(app, deps);
+  registerPasskeyRoutes(app, deps);
   registerAdminRoutes(app, deps);
 
   // ---- OAuth authorization server (DESIGN §4.1, §4.3) ------------------------------------

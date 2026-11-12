@@ -59,11 +59,14 @@ async function interceptGoogle(page: Page): Promise<void> {
   );
 }
 
-/** Chromium's built-in virtual authenticator: a platform passkey that always says yes. */
-async function addVirtualAuthenticator(page: Page): Promise<void> {
+/**
+ * Chromium's built-in virtual authenticator: a platform passkey that says yes at once. Returns a
+ * switch for that: while it is off, requests wait, as for a person who hasn't touched anything.
+ */
+async function addVirtualAuthenticator(page: Page): Promise<(on: boolean) => Promise<void>> {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('WebAuthn.enable');
-  await cdp.send('WebAuthn.addVirtualAuthenticator', {
+  const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
     options: {
       protocol: 'ctap2',
       transport: 'internal',
@@ -73,6 +76,9 @@ async function addVirtualAuthenticator(page: Page): Promise<void> {
       automaticPresenceSimulation: true,
     },
   });
+  return async (on) => {
+    await cdp.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId, enabled: on });
+  };
 }
 
 test('the owner’s whole journey', async ({ page }) => {
@@ -85,7 +91,7 @@ test('the owner’s whole journey', async ({ page }) => {
     }
   });
   page.on('pageerror', (error) => problems.push(error.message));
-  await addVirtualAuthenticator(page);
+  const touch = await addVirtualAuthenticator(page);
   await interceptGoogle(page);
 
   await test.step('an uninvited Google account is turned away', async () => {
@@ -121,6 +127,8 @@ test('the owner’s whole journey', async ({ page }) => {
   });
 
   await test.step('signs out', async () => {
+    // Nobody touches the passkey yet: the sign-in page's autofill request just waits.
+    await touch(false);
     await page.goto('/account');
     await page.getByRole('button', { name: 'Sign out' }).click();
     await expect(page.getByRole('link', { name: 'Continue with Google' })).toBeVisible();
@@ -130,10 +138,26 @@ test('the owner’s whole journey', async ({ page }) => {
     expect(account.headers().location).toBe('/login?return_to=%2Faccount');
   });
 
-  await test.step('signs in again and passes the second step with the passkey', async () => {
-    await page.goto('/');
+  await test.step('signs in with the passkey alone, from the email field’s autofill', async () => {
+    // The virtual authenticator answers the page's autofill request (mediation: conditional)
+    // at once, so the page navigates away while it loads; a person would pick the passkey from
+    // the email field's suggestions.
+    await touch(true);
+    await page.goto('/', { waitUntil: 'commit' }).catch(() => null);
+    await expect(page).toHaveURL('/account');
+    await page.getByRole('link', { name: 'Signed-in devices' }).click();
+    await expect(page.getByText(/with a passkey/)).toBeVisible();
+    await expect(page.getByText('This device')).toBeVisible();
+    await touch(false);
+    await page.goto('/account');
+    await page.getByRole('button', { name: 'Sign out' }).click();
+    await expect(page.getByRole('link', { name: 'Continue with Google' })).toBeVisible();
+  });
+
+  await test.step('signs in with Google and passes the second step with the passkey', async () => {
     await page.getByRole('link', { name: 'Continue with Google' }).click();
     await expect(page).toHaveURL(/\/mfa\?return_to=/);
+    await touch(true);
     await page.getByRole('button', { name: 'Use a passkey' }).click();
     await expect(page).toHaveURL('/account');
   });

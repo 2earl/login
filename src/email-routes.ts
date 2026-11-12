@@ -25,6 +25,7 @@ import {
   type AppEnv,
 } from './http';
 import { codeMail, sendMail, type CodePurpose } from './mail';
+import { mfaHtml } from './mfa-routes';
 import {
   MESSAGES,
   emailCodePage,
@@ -108,7 +109,7 @@ export function registerEmailRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const typed = typeof form.get('email') === 'string' ? (form.get('email') as string) : '';
     const email = normaliseEmail(typed);
     if (!email) {
-      return c.html(
+      return mfaHtml(
         signInPage({
           returnTo,
           mode: await signupMode(c.env),
@@ -256,7 +257,7 @@ export function registerEmailRoutes(app: Hono<AppEnv>, deps: Deps): void {
       });
       return c.html(messagePage(MESSAGES.notInvited), 403);
     }
-    return startSession(c, now, userId, row.returnTo, { welcome: created });
+    return startSession(c, now, userId, row.returnTo, { welcome: created, method: 'email' });
   }
 
   async function completeDeletion(c: AppContext, now: number, row: EmailCodeRow) {

@@ -1,6 +1,7 @@
-// Passkeys on /account/security (add) and /mfa (sign in). The server makes and checks every
-// challenge; this script only carries them between the server and the browser's WebAuthn API.
-// Loaded only on those two pages (script-src 'self', connect-src 'self').
+// Passkeys on /account/security (add), /mfa (second factor) and the sign-in page (sign in with a
+// passkey alone, from a button or from the browser's autofill on the email field). The server
+// makes and checks every challenge; this script only carries them between the server and the
+// browser's WebAuthn API. Loaded only on those pages (script-src 'self', connect-src 'self').
 
 const supported =
   typeof window.PublicKeyCredential === 'function' &&
@@ -126,7 +127,86 @@ async function authenticate(button) {
   return result.redirect;
 }
 
+function assertionJson(credential) {
+  return {
+    id: credential.id,
+    rawId: toB64url(credential.rawId),
+    type: credential.type,
+    authenticatorAttachment: credential.authenticatorAttachment ?? undefined,
+    clientExtensionResults: credential.getClientExtensionResults(),
+    response: {
+      clientDataJSON: toB64url(credential.response.clientDataJSON),
+      authenticatorData: toB64url(credential.response.authenticatorData),
+      signature: toB64url(credential.response.signature),
+      userHandle: credential.response.userHandle
+        ? toB64url(credential.response.userHandle)
+        : undefined,
+    },
+  };
+}
+
+function publicKeyRequest(options) {
+  return {
+    ...options,
+    challenge: fromB64url(options.challenge),
+    allowCredentials: (options.allowCredentials ?? []).map((c) => ({
+      ...c,
+      id: fromB64url(c.id),
+    })),
+  };
+}
+
+// The autofill request waits quietly in the background; a click on the button replaces it.
+let autofill = null;
+
+async function signIn(button, mediation, signal) {
+  const reauth = button.dataset.reauth === '1';
+  // The background autofill request stays silent if it can't start: nobody asked for it yet.
+  const options = await post('/login/passkey/options', { reauth }).catch((error) => {
+    if (mediation === 'conditional') return null;
+    throw error;
+  });
+  if (!options) return null;
+  const credential = await navigator.credentials.get({
+    publicKey: publicKeyRequest(options),
+    ...(mediation ? { mediation } : {}),
+    ...(signal ? { signal } : {}),
+  });
+  if (!credential) return null;
+  const result = await post('/login/passkey', {
+    returnTo: button.dataset.returnTo ?? '',
+    response: assertionJson(credential),
+  });
+  return result.redirect;
+}
+
+async function offerAutofill(button) {
+  if (button.dataset.reauth === '1') return;
+  if (!document.querySelector('input[autocomplete~="webauthn"]')) return;
+  const available = await window.PublicKeyCredential.isConditionalMediationAvailable?.().catch(
+    () => false,
+  );
+  if (!available) return;
+  autofill = new window.AbortController();
+  try {
+    const next = await signIn(button, 'conditional', autofill.signal);
+    if (next) window.location.assign(next);
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    const status = document.getElementById(button.dataset.status);
+    if (status) status.textContent = explain(error);
+  }
+}
+
 for (const button of document.querySelectorAll('[data-passkey="register"]')) wire(button, register);
+for (const button of document.querySelectorAll('[data-passkey="sign-in"]')) {
+  wire(button, (b) => {
+    autofill?.abort();
+    autofill = null;
+    return signIn(b);
+  });
+  if (supported) void offerAutofill(button);
+}
 for (const button of document.querySelectorAll('[data-passkey="authenticate"]')) {
   wire(button, authenticate);
 }

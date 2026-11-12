@@ -118,7 +118,8 @@ export async function exportAccount(
       .bind(userId),
     db
       .prepare(
-        `SELECT id_hash, aal, created_at, last_seen_at, expires_at, ip_prefix, user_agent_hash
+        `SELECT id_hash, aal, created_at, last_seen_at, expires_at, ip_prefix, user_agent_hash,
+                device, method
          FROM sessions WHERE user_id = ? ORDER BY created_at`,
       )
       .bind(userId),
@@ -198,6 +199,8 @@ export async function exportAccount(
     sessions: (sessions?.results ?? []).map((row) => ({
       thisBrowser: row.id_hash === currentSessionHash,
       assurance: row.aal,
+      device: row.device ?? null,
+      signedInWith: row.method ?? null,
       createdAt: iso(row.created_at as number),
       lastActiveAt: iso(row.last_seen_at as number),
       expiresAt: iso(row.expires_at as number),

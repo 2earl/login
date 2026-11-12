@@ -59,19 +59,19 @@ const NOTICES: Record<string, string> = {
   removed: 'Second factor removed.',
 };
 
-function relyingParty(env: Env): { rpID: string; origin: string } {
+export function relyingParty(env: Env): { rpID: string; origin: string } {
   const url = new URL(env.ISSUER);
   return { rpID: url.hostname, origin: url.origin };
 }
 
-function fromBase64url(text: string): Uint8Array<ArrayBuffer> {
+export function fromBase64url(text: string): Uint8Array<ArrayBuffer> {
   const b64 = text.replace(/-/g, '+').replace(/_/g, '/');
   const binary = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4));
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
-/** A second-factor page: the only pages allowed to run /passkey.js. */
-function mfaHtml(html: string, status = 200): Response {
+/** A page allowed to run /passkey.js: second-factor pages and the sign-in page. */
+export function mfaHtml(html: string, status = 200): Response {
   return new Response(html, {
     status,
     headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': MFA_CSP },

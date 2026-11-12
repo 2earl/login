@@ -130,6 +130,21 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | Owner's Google account taken over → full admin | `/admin` always requires the second factor, whatever `MFA_REQUIRED` says (D11) |
 | Admin MFA reset abused | Owner-only, audited; the user is notified by email (when email sending exists) |
 
+### B1/B3 — Sign-in with a passkey, and signed-in devices (DESIGN §4.10, phase 8a)
+
+| Threat | Mitigation |
+|---|---|
+| Phishing site relays the passkey sign-in | WebAuthn binds the assertion to the origin and RP ID `login.2earl.com`; a relayed answer fails verification (tested) |
+| A stolen or unlocked device signs in with a tap | `userVerification: required`: biometric or device PIN on every sign-in; an assertion without the UV flag is refused (tested) |
+| Replayed assertion | The challenge is single use (deleted when read), 5 minutes, bound to the browser by `__Host-passkey_tx`; the signature counter is checked |
+| Credential enumeration | Unknown credential IDs get the same refusal and an audit entry; the options endpoint reveals nothing about accounts (no `allowCredentials` outside reauth) |
+| Reauth with someone else's passkey | The reauth challenge names the signed-in account; only its passkeys are accepted (tested) |
+| Suspended account signs in with a passkey | Refused like every other method (tested) |
+| Flood of challenge rows | Per-network rate limit (`passkey`), expired rows deleted on each request and by the daily clean-up; the zone rate limit covers `/login/passkey` and `/login/passkey/options` (`infra/firewall.tf`) |
+| Script on the sign-in page widens XSS impact | The sign-in page now runs `/passkey.js` under `MFA_CSP` (`script-src 'self'`, no inline script, `connect-src 'self'`); every value is escaped server-side |
+| Stolen session stays signed in unnoticed | Signed-in devices list with coarse device names and last activity; sign out one or all others (audited); security notices for method and factor changes |
+| Signing out a device used to end someone else's session | The form names a session by an HMAC reference, matched only among the signed-in account's own sessions; same-origin check (tested) |
+
 ### B5 — Gateway integration
 
 | Threat | Mitigation |

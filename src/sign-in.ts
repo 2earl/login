@@ -15,21 +15,25 @@ import { notify, sendMail, noticeMail, type Notice } from './mail';
 import { authorizationServer } from './oauth';
 import { MESSAGES, messagePage, type Message } from './pages';
 import { safeReturnTo } from './return-to';
-import { createSession, deleteSession } from './sessions';
+import { createSession, deleteSession, type SignInMethod } from './sessions';
+import { deviceLabel } from './devices';
 
 /**
  * What every way of signing in shares (DESIGN §4.2, §4.9): a fresh session, and the end of a
  * deletion once the user has proved it's them.
  */
 
-/** A fresh session for `userId`; any session the browser already had is ended. */
-export async function startSession(
+/**
+ * Opens a fresh session for `userId` and sets its cookie; any session the browser already had is
+ * ended. Returns nothing to redirect to: `startSession` does that for form flows, the passkey
+ * flow answers with JSON.
+ */
+export async function openSession(
   c: AppContext,
   now: number,
   userId: string,
-  returnTo: string | null,
-  options: { welcome?: boolean } = {},
-): Promise<Response> {
+  meta: { method: SignInMethod; aal2?: boolean },
+): Promise<void> {
   const ip = clientIp(c);
   const previous = c.get('session');
   if (previous) await deleteSession(c.env.DB, previous.idHash);
@@ -37,9 +41,27 @@ export async function startSession(
   const session = await createSession(c.env.DB, c.env.SESSION_PEPPER, now, userId, {
     ipPrefix: ip,
     userAgentHash: userAgent ? (await sha256Hex(userAgent)).slice(0, 16) : null,
+    device: deviceLabel(userAgent),
+    method: meta.method,
+    aal2: meta.aal2 ?? false,
   });
   setCookie(c, SESSION_COOKIE, session.cookieValue, session.expiresAt - now);
-  await audit(c.env.DB, now, 'login.succeeded', { actorUserId: userId, ipPrefix: ip });
+  await audit(c.env.DB, now, 'login.succeeded', {
+    actorUserId: userId,
+    ipPrefix: ip,
+    detail: { method: meta.method },
+  });
+}
+
+/** A fresh session for `userId`, then on to `returnTo` (or the welcome page for a new account). */
+export async function startSession(
+  c: AppContext,
+  now: number,
+  userId: string,
+  returnTo: string | null,
+  options: { welcome?: boolean; method: SignInMethod },
+): Promise<Response> {
+  await openSession(c, now, userId, { method: options.method });
   // A new account stops at the welcome page first (a name, a second factor), then goes on.
   return c.redirect(
     options.welcome

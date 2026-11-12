@@ -130,7 +130,7 @@ export async function startLogin(app: App, ip: string, query = '') {
 export async function signIn(
   app: App,
   google: FakeGoogle,
-  options: { ip?: string; claims?: JWTPayload; query?: string } = {},
+  options: { ip?: string; claims?: JWTPayload; query?: string; userAgent?: string } = {},
 ) {
   const ip = options.ip ?? freshIp();
   const login = await startLogin(app, ip, options.query);
@@ -138,7 +138,11 @@ export async function signIn(
   const callback = await call(
     app,
     `/callback/google?code=auth-code&state=${encodeURIComponent(login.state)}`,
-    { ip, cookies: { '__Host-login_tx': login.txCookie } },
+    {
+      ip,
+      cookies: { '__Host-login_tx': login.txCookie },
+      ...(options.userAgent ? { headers: { 'User-Agent': options.userAgent } } : {}),
+    },
   );
   return { login, callback, session: setCookies(callback)['__Host-session'] };
 }
@@ -147,6 +151,7 @@ export async function resetDatabase(): Promise<void> {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM deletion_notices'),
     env.DB.prepare('DELETE FROM mfa_pending'),
+    env.DB.prepare('DELETE FROM passkey_challenges'),
     env.DB.prepare('DELETE FROM recovery_codes'),
     env.DB.prepare('DELETE FROM mfa_factors'),
     env.DB.prepare('DELETE FROM sessions'),
