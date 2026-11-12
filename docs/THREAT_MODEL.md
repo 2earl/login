@@ -172,6 +172,18 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | Stale credentials keep working | Revoking deletes the row at once; `last_used_at` shows unused credentials in /admin |
 | Refresh tokens exposed through introspection | Never introspected: always inactive (tested) |
 
+### B2 — Device authorization grant (DESIGN §4.13, phase 8d)
+
+| Threat | Mitigation |
+|---|---|
+| Device-code phishing: an attacker starts a request and sends the victim the link | A link only fills in the code; the person must sign in, press Continue and approve on the ordinary consent page that names the app; `/device` warns to continue only for a request they started; codes expire in 10 minutes |
+| User code guessing | ~34.6 bits per code, valid 10 minutes, only while pending; per-address limit on `/device` plus the zone rate limit |
+| Device code theft from the database | Only its HMAC is stored; the authorization code it waits for can't be exchanged without the PKCE verifier, which needs the device code and `SESSION_PEPPER` |
+| Polling floods | `slow_down` adds 5 seconds per early poll; the token endpoint's per-address limit |
+| A web app abuses the device grant | Only clients that registered `/device/callback` may start one (tested); polls by any other client get `invalid_grant` (tested) |
+| Code collected twice | Atomic delete-and-return; a second poll gets `invalid_grant` (tested) |
+| Tokens minted outside the library's checks | login never mints tokens: approval goes through `/authorize` (second factor, step-up, consent) and tokens come from the library's own code exchange |
+
 ### B5 — Gateway integration
 
 | Threat | Mitigation |

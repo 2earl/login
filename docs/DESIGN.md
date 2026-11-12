@@ -546,6 +546,56 @@ WWW-Authenticate: Bearer error="insufficient_user_authentication", acr_values="�
   them into `auth_time`, `acr` and `amr`. Grants approved before 8c fall back to the approval
   time.
 
+### 4.13 Device authorization grant (phase 8d)
+
+RFC 8628, for devices without a browser, first the 2earl CLI. The library has no device grant, so
+login builds it around the ordinary code flow and never mints tokens itself.
+
+**Which apps.** Only a client that registered `https://login.2earl.com/device/callback` as a
+redirect URI may use the device grant. That is its explicit opt-in.
+
+**Steps:**
+
+1. **The device asks.** It calls `POST /oauth/device_authorization` with `client_id`, `scope` and
+   `resource` (or `openid` without a resource, as in §4.11). Scopes and resource are checked like
+   `/authorize`. login stores the request in `device_codes`:
+   - the HMAC of a 256-bit `device_code`, never the code itself;
+   - an 8-letter `user_code` (`BCDF-GHJK`: 20 consonants, so it spells no words, about 34.6 bits);
+   - a random `state`.
+
+   It answers with both codes, `verification_uri` (`/device`), `verification_uri_complete`,
+   `expires_in` 600 and `interval` 5.
+2. **The person approves** at `/device`:
+   - They sign in, enter the code (any case, with or without the dash) and press Continue. A
+     prefilled `?user_code=` only fills the field; a link alone never approves anything.
+   - The page warns: only continue if you started this yourself.
+   - login then sends the browser through the ordinary `/authorize`: second factor, step-up,
+     consent with the app's name and verified badge, everything as in §4.3. The redirect URI is
+     `/device/callback`, and the PKCE challenge comes from a verifier derived as
+     `HMAC(SESSION_PEPPER, device_code hash)`, never stored.
+   - The callback finds the request by `state` and stores the authorization code, or marks the
+     request denied.
+3. **The device polls** `POST /oauth/token` with
+   `grant_type=urn:ietf:params:oauth:grant-type:device_code`, `device_code` and `client_id`:
+
+   | Request state | Answer |
+   |---|---|
+   | Pending | `authorization_pending`; polling faster than `interval` gets `slow_down` and 5 more seconds |
+   | Denied | `access_denied` |
+   | Expired | `expired_token` |
+   | Approved | login takes the code once (atomic delete) and exchanges it with the library, using the derived verifier; the answer is the library's token response, with an ID token for `openid` (§4.11) |
+   | Unknown code, or another client | `invalid_grant` |
+
+**What an attacker gets.** Someone with read access to D1 sees, at most, an authorization code
+for up to 10 minutes. Exchanging it also needs the verifier, which needs the device code (not
+stored) and `SESSION_PEPPER` (not in D1).
+
+**Limits.**
+- `/oauth/device_authorization` and polling use the token endpoint's per-address limit.
+- Code entry at `/device` has its own (`device`).
+- The zone rate limit covers `/device` and `/oauth/device_authorization`.
+- Expired requests are deleted daily.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -623,6 +673,9 @@ oidc_subjects    sub PK (random), user_id FK, sector, created_at, UNIQUE(user_id
                                                                      (§4.11; with the account)
 resource_servers id PK ('rs_…'), name, resource, secret_hash (SHA-256), created_at,
                  last_used_at                                        (§4.12; no personal data)
+device_codes     id_hash PK (HMAC of device_code), user_code UNIQUE, state UNIQUE, client_id,
+                 scope, resource NULL, status, code NULL, interval, last_polled_at,
+                 created_at, expires_at                              (§4.13; ≤ 10 minutes)
 login_tx         id_hash PK, state, nonce, pkce_verifier, return_to, created_at, expires_at,
                  purpose ('sign_in'|'delete_account'), user_id NULL (deletion only)
 mfa_factors      id PK, user_id FK, kind ('webauthn'|'totp'), label, created_at, last_used_at,
@@ -842,7 +895,7 @@ Resolved:
 | 8a | **Passkey sign-in and signed-in devices** (§4.10) |
 | 8b | **OpenID Connect provider** (§4.11) |
 | 8c | **Introspection and step-up** (§4.12) |
-| 8d | **Device authorization grant** and the **2earl CLI** (`2earl/cli`) (§13) |
+| 8d | **Device authorization grant** (§4.13) and the **2earl CLI** (`2earl/cli`) |
 | 8e | **More social sign-in**: Microsoft, GitHub, Apple (§13) |
 | 9a | **Organizations and roles** (§13) |
 | 9b | **SCIM 2.0** provisioning into organizations (§13) |
@@ -855,7 +908,7 @@ login is the identity service and authorization server for 2earl. Every protocol
 permanent attack surface on the one service that guards every account, and one person runs it. A
 standard is added when something uses it, not to tick a list.
 
-**In place** (phases 4–8c):
+**In place** (phases 4–8d):
 
 | Standard | What it does here |
 |---|---|
@@ -876,14 +929,14 @@ standard is added when something uses it, not to tick a list.
 | OIDC RP-Initiated Logout 1.0 | An app can ask to end the 2earl session too; the person confirms |
 | RFC 7662 Token introspection | Resource servers without a Service Binding check tokens with their own credentials, only for their own resource (§4.12) |
 | RFC 9470 Step-up authentication challenge | `acr_values` and `max_age` for every request; tokens record `auth_time`, `acr`, `amr` (§4.12) |
+| RFC 8628 Device authorization grant | Sign in on a device without a browser by approving a short code elsewhere (§4.13) |
 
 **Next** (the owner decided on 2026-11-12 to plan all of these; the order puts each one after
 what it depends on):
 
 | Phase | Standard | Why | Depends on |
 |---|---|---|---|
-| 8d | **RFC 8628 Device authorization grant** | Sign in on a terminal by opening a short code on another device | — |
-| 8d | **2earl CLI** (`2earl/cli`, public repo) | `2earl login` with the device grant; then Prompt share from the terminal through the gateway | Device grant |
+| 8d | **2earl CLI** (`2earl/cli`, public repo) | `2earl login` with the device grant; then Prompt share from the terminal through the gateway | Device grant (done) |
 | 8e | **Microsoft, GitHub, Apple sign-in** | More ways in for people without Google | The owner registers an app with each provider (client ID and secret); each one is a sign-in method like Google, never joined by address (B3) |
 | 9a | **Organizations and roles** | A team owns resources together; members have roles (owner, admin, member) that services can read from the token | A product that teams use |
 | 9b | **SCIM 2.0** (RFC 7643, 7644) | An organization's own directory adds and removes its members | Organizations |

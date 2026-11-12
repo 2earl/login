@@ -20,6 +20,7 @@ import { ACR_AAL2, authorizationServer, type GrantProps } from './oauth';
 import { pairwiseSubject, sectorFor } from './oidc';
 import { registerOidcRoutes, withIdToken } from './oidc-routes';
 import { registerIntrospection } from './introspection';
+import { DEVICE_GRANT, deviceTokenResponse, registerDeviceRoutes } from './device';
 import { ALL_SCOPES, scopeLabel, scopesFor, serviceForResource, type Service } from './services';
 import {
   MESSAGES,
@@ -941,6 +942,8 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       .formData()
       .catch(() => null);
     const grantType = form?.get('grant_type');
+    // The device grant (RFC 8628) is login's own, around the library's code flow (§4.13).
+    if (grantType === DEVICE_GRANT && form) return deviceTokenResponse(c, deps.now(), form);
     const response = await authorizationServer(c.env).fetch(c.req.raw, c.env, workerCtx(c));
     // OpenID Connect: an ID token beside the access token when the grant includes `openid`.
     return withIdToken(
@@ -951,6 +954,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     );
   });
   registerIntrospection(app, deps);
+  registerDeviceRoutes(app, deps);
   app.all('/oauth/*', (c) => authorizationServer(c.env).fetch(c.req.raw, c.env, workerCtx(c)));
   registerOidcRoutes(app, deps);
   app.get('/.well-known/*', (c) =>

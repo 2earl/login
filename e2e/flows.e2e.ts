@@ -146,8 +146,10 @@ test('the owner’s whole journey', async ({ page }) => {
     await page.goto('/', { waitUntil: 'commit' }).catch(() => null);
     await expect(page).toHaveURL('/account');
     await page.getByRole('link', { name: 'Signed-in devices' }).click();
-    await expect(page.getByText(/with a passkey/)).toBeVisible();
-    await expect(page.getByText('This device')).toBeVisible();
+    // The sign-in page's earlier autofill request may finish too once the authenticator answers,
+    // so look at this device's row only.
+    const thisDevice = page.getByRole('listitem').filter({ hasText: 'This device' });
+    await expect(thisDevice).toContainText('with a passkey');
     await touch(false);
     await page.goto('/account');
     await page.getByRole('button', { name: 'Sign out' }).click();
