@@ -36,6 +36,7 @@ with German law on telemedia: TDDDG for cookies, DDG for the imprint **[verify]*
 | Security notices sent by email (sign-in method or second factor changed, new recovery codes, first approval of an app, account deleted) | Cloudflare Email Service (not stored by us) | System | Tell the user about changes to their account (Art. 6(1)(b), (f)) |
 | Session records (hashed ID, timestamps, IP prefix, user-agent hash, a coarse device name such as "Firefox on Windows", how the session signed in) | D1 `sessions` | Request | Keep the user signed in; detect abuse; let the user see and sign out their devices |
 | Per-site IDs for "Sign in with 2earl" (a random ID per account and site host) | D1 `oidc_subjects` | When you first sign in to a site with 2earl | Give each site its own ID for you, so sites can't link you to each other |
+| Pending device sign-ins (hashed device code, the short code, the app, scopes and, once approved, a one-time authorization code) | D1 `device_codes` | Request | Sign a device in after you approve it elsewhere; at most 10 minutes |
 | Pending passkey sign-in challenges (hashed browser cookie, random challenge, account ID only when confirming it's you) | D1 `passkey_challenges` | Request | Check a passkey sign-in; at most 5 minutes |
 | Login transaction (`state`, `nonce`, PKCE verifier) | D1 `login_tx` | Generated | Secure the sign-in, ≤ 10 min |
 | OAuth grants and tokens (hashed, encrypted props `{uid, authTime}`) | KV | Generated | Authorise apps the user approved |
@@ -61,6 +62,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 |---|---|
 | Login transactions | 10 minutes, then deleted |
 | Passkey sign-in challenges | 5 minutes, then deleted |
+| Device sign-in requests | Until collected, denied or 10 minutes, then deleted |
 | Email codes | Usable 10 minutes; the row is deleted 2 days after creation (send limits count it), or with the account |
 | Sessions | 12 h idle / 7 days absolute |
 | OAuth grants | 7 days idle / 90 days absolute, or until revoked |

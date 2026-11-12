@@ -19,6 +19,7 @@ import {
   userClaims,
   userInfoResource,
 } from './oidc';
+import { DEVICE_GRANT } from './device';
 import { signedOutPage, signOutPage } from './pages';
 import { deleteSession } from './sessions';
 import { ALL_SCOPES } from './services';
@@ -132,6 +133,13 @@ async function serverMetadata(c: AppContext): Promise<Record<string, unknown>> {
     ...meta,
     introspection_endpoint: `${c.env.ISSUER}/oauth/introspect`,
     introspection_endpoint_auth_methods_supported: ['client_secret_basic'],
+    device_authorization_endpoint: `${c.env.ISSUER}/oauth/device_authorization`,
+    grant_types_supported: [
+      ...(Array.isArray(meta.grant_types_supported)
+        ? (meta.grant_types_supported as string[])
+        : ['authorization_code', 'refresh_token']),
+      DEVICE_GRANT,
+    ],
   };
 }
 
@@ -152,7 +160,6 @@ export function registerOidcRoutes(app: Hono<AppEnv>, deps: Deps): void {
         scopes_supported: Object.keys(ALL_SCOPES),
         response_types_supported: ['code'],
         response_modes_supported: ['query'],
-        grant_types_supported: ['authorization_code', 'refresh_token'],
         subject_types_supported: ['pairwise'],
         id_token_signing_alg_values_supported: ['ES256'],
         acr_values_supported: [ACR_AAL1, ACR_AAL2],

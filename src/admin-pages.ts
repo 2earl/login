@@ -389,6 +389,7 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'allowlist.pinned': 'Invitation used',
   'user.created': 'Account created',
   logout: 'Signed out',
+  'device.approved': 'Signed in on a device',
   'session.ended': 'Signed out other devices',
   'consent.approved': 'App allowed',
   'consent.denied': 'App refused by the user',

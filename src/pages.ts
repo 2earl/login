@@ -477,6 +477,40 @@ export function sessionsPage(params: {
   );
 }
 
+/** Device sign-in (DESIGN §4.13): the person enters the code their device shows. */
+export function devicePage(params: { userCode: string; error?: string }): string {
+  return page(
+    'Sign in on a device',
+    '<h1>Sign in on a device</h1>' +
+      '<p class="lede">Enter the code your device shows, for example the 2earl command-line tool in your terminal.</p>' +
+      '<form method="post" action="/device" class="stack-form">' +
+      '<label class="field"><span>Code</span>' +
+      `<input name="user_code" type="text" required maxlength="20" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" placeholder="BCDF-GHJK" value="${escapeHtml(params.userCode)}"${params.error ? ' aria-invalid="true" aria-describedby="device-error"' : ''}></label>` +
+      (params.error
+        ? `<p class="field-error" id="device-error">${escapeHtml(params.error)}</p>`
+        : '') +
+      '<button class="button primary" type="submit">Continue</button></form>' +
+      '<p class="warning">Only continue if you started this yourself, on a device in front of you. 2earl never asks you for this code by email, chat or phone.</p>',
+  );
+}
+
+export function deviceDonePage(result: 'approved' | 'denied' | 'expired'): string {
+  const texts: Record<typeof result, [string, string]> = {
+    approved: [
+      'Your device is signed in',
+      'Go back to your device: it continues on its own in a few seconds. You can close this page.',
+    ],
+    denied: ['Nothing was approved', 'Your device stays signed out. You can close this page.'],
+    expired: ['This request has expired', 'Start again on your device to get a new code.'],
+  };
+  const text = texts[result];
+  return page(
+    text[0],
+    `<h1>${text[0]}</h1><p class="lede">${text[1]}</p>` +
+      '<a class="button secondary" href="/account">Go to your account</a>',
+  );
+}
+
 /** RP-Initiated Logout: an app asks to sign the person out of 2earl too (DESIGN §4.11). */
 export function signOutPage(params: { appName: string | null; query: string }): string {
   return page(
