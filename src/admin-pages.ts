@@ -1,5 +1,6 @@
 import type { AuditEvent } from './audit';
 import type { PendingNotices } from './deletion-notices';
+import type { ResourceServer } from './introspection';
 import { escapeHtml, formatDate, page } from './pages';
 
 /** Server-rendered pages for /admin (DESIGN §4.6). Owner-only; every value is escaped. */
@@ -243,9 +244,45 @@ export interface AdminRegisteredApp {
 export function adminAppsPage(params: {
   trusted: AdminTrustedApp[];
   registered: AdminRegisteredApp[];
+  resourceServers?: ResourceServer[];
+  /** Resources a resource server can be created for. */
+  resources?: { resource: string; label: string }[];
+  /** Just-created credentials: the only time the secret is shown. */
+  created?: { id: string; secret: string } | undefined;
   notice?: string | undefined;
   error?: string | undefined;
 }): string {
+  const servers = params.resourceServers ?? [];
+  const resourceServers =
+    (params.created
+      ? '<div class="secret-once" role="status">' +
+        '<p><strong>Copy the secret now.</strong> It isn’t stored and won’t be shown again.</p>' +
+        `<p>ID <code>${escapeHtml(params.created.id)}</code></p>` +
+        `<p>Secret <code>${escapeHtml(params.created.secret)}</code></p></div>`
+      : '') +
+    (servers.length === 0
+      ? '<p class="empty">No resource servers.</p>'
+      : `<ul class="admin-list">${servers
+          .map(
+            (rs) =>
+              '<li class="admin-row">' +
+              `<div class="app-main"><p class="app-name">${escapeHtml(rs.name)}</p>` +
+              `<p class="app-meta">ID <code>${escapeHtml(rs.id)}</code> · for <code>${escapeHtml(rs.resource)}</code></p>` +
+              `<p class="app-meta">Created ${formatDate(rs.createdAt)} · ${rs.lastUsedAt ? `last used ${formatDate(rs.lastUsedAt)}` : 'never used'}</p></div>` +
+              `<div class="row-actions">${actionForm('/admin/apps', { action: 'rs_delete', id: rs.id }, 'Revoke', 'danger')}</div>` +
+              '</li>',
+          )
+          .join('')}</ul>`) +
+    '<form method="post" action="/admin/apps" class="stack-form">' +
+    '<input type="hidden" name="action" value="rs_create">' +
+    '<label class="field"><span>Name</span>' +
+    '<input name="name" type="text" required maxlength="100" autocomplete="off" placeholder="e.g. Prompt share backup server"></label>' +
+    '<label class="field"><span>Checks tokens for</span><select name="resource" required>' +
+    (params.resources ?? [])
+      .map((r) => `<option value="${escapeHtml(r.resource)}">${escapeHtml(r.label)}</option>`)
+      .join('') +
+    '</select></label>' +
+    '<button class="button secondary" type="submit">Create credentials</button></form>';
   const trusted =
     params.trusted.length === 0
       ? '<p class="empty">No verified apps.</p>'
@@ -306,6 +343,11 @@ export function adminAppsPage(params: {
       '<label class="field"><span>Redirect URIs, one per line (https, or http on localhost)</span>' +
       '<textarea name="redirect_uris" rows="3" required spellcheck="false"></textarea></label>' +
       '<button class="button secondary" type="submit">Register app</button></form>' +
+      '</section>' +
+      '<section class="section" aria-labelledby="rs-heading">' +
+      '<h2 id="rs-heading">Resource servers</h2>' +
+      '<p class="section-text">Credentials for a service that checks tokens at <code>/oauth/introspect</code> (RFC 7662) instead of a Service Binding. Each sees only tokens issued for its own resource.</p>' +
+      resourceServers +
       '</section>',
     params,
   );
@@ -375,6 +417,8 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'admin.client_untrusted': 'App unmarked',
   'admin.client_registered': 'App registered',
   'admin.client_deleted': 'App removed',
+  'admin.resource_server_created': 'Resource server credentials created',
+  'admin.resource_server_deleted': 'Resource server credentials revoked',
   'admin.signup_changed': 'Sign-up switched',
 };
 

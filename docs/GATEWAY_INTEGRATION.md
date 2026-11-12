@@ -116,7 +116,7 @@ Worker's real entry point:
 
 | Situation | Result |
 |---|---|
-| Valid token for this resource | `{ props: { uid, authTime, aal2At }, audience, expiresAt, scope, userId, clientId }`. `userId === props.uid`. `aal2At`: when the approving session last verified a second factor, or `null` |
+| Valid token for this resource | `{ props: { uid, authTime, aal2At, signedInAt?, method? }, audience, expiresAt, scope, userId, clientId }`. `userId === props.uid`. `aal2At`: when the approving session last verified a second factor, or `null`. Since phase 8c, `signedInAt` (when the person signed in, RFC 9470 `auth_time`) and `method` (`google`, `email` or `passkey`); grants approved earlier don't have them |
 | Unknown, malformed, expired or revoked token | `null`, and the library answers `401` |
 | A `resource` login doesn't serve (typo, trailing slash, other host) | **Throws** `resource must name one registered protected resource`, and the library answers `503` on every request. If the gateway returns 503 for everything, compare its resource with login's `MCP_RESOURCE` first |
 | KV unavailable | Throws, so `503` (fails closed) |
@@ -251,3 +251,22 @@ guarantee to it.
 2. Deleting an account deletes the user's data in every service (§5).
 3. Each service has its own permission set. The gateway starts with the two scopes above; finer
    ones are added to its registry entry when tools need them (§7).
+
+## Step-up challenges (RFC 9470, phase 8c)
+
+When a tool needs a fresher or stronger sign-in than the token shows, the gateway can answer in
+the standard way instead of a 2earl-specific error:
+
+```
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer error="insufficient_user_authentication",
+  error_description="A recent second factor is required",
+  acr_values="urn:2earl:aal2", max_age=300
+```
+
+- `acr_values="urn:2earl:aal2"` when `props.aal2At` is null.
+- `max_age=N` when `now - (props.signedInAt ?? props.authTime)` is more than N.
+
+The MCP client starts a new authorization request with the same `acr_values` and `max_age`. login
+honours both for every request (DESIGN §4.7, §4.11): it asks for the second factor or a fresh
+sign-in, and the new grant records it.

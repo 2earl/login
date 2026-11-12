@@ -155,7 +155,13 @@ describe('an app requiring a recent second factor (acr_values)', () => {
       scope: 'promptshare:account',
     });
     const result = await exports.default.validateToken(env.PROMPTSHARE_RESOURCE, token);
-    expect(result?.props).toEqual({ uid: userId, authTime: NOW, aal2At: NOW - 60 });
+    expect(result?.props).toEqual({
+      uid: userId,
+      authTime: NOW,
+      aal2At: NOW - 60,
+      signedInAt: NOW,
+      method: 'google',
+    });
   });
 });
 
@@ -173,7 +179,14 @@ describe('validateToken over the Worker entry point (Service Binding)', () => {
       props: { uid: userId, authTime: NOW, aal2At: null },
     });
     // Only an internal ID and times: no email or name crosses to the gateway.
-    expect(Object.keys(result?.props ?? {}).sort()).toEqual(['aal2At', 'authTime', 'uid']);
+    // Additive only: the gateway reads uid, authTime and aal2At; the rest is optional (§3).
+    expect(Object.keys(result?.props ?? {}).sort()).toEqual([
+      'aal2At',
+      'authTime',
+      'method',
+      'signedInAt',
+      'uid',
+    ]);
     expect(result?.expiresAt).toBeGreaterThanOrEqual(before + ACCESS_TOKEN_TTL_SECONDS - 5);
     expect(result?.expiresAt).toBeLessThanOrEqual(before + ACCESS_TOKEN_TTL_SECONDS + 5);
   });

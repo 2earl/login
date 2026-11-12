@@ -43,6 +43,8 @@ export type AuditEvent =
   | 'admin.client_untrusted'
   | 'admin.client_registered'
   | 'admin.client_deleted'
+  | 'admin.resource_server_created'
+  | 'admin.resource_server_deleted'
   | 'admin.signup_changed';
 
 export async function audit(

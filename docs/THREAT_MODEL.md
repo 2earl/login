@@ -161,6 +161,17 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | Name or address leaked to an app that wasn't allowed them | Claims follow the granted scopes; `profile` and `email` can be unticked on the consent page; UserInfo reads the account now |
 | UserInfo abuse | Bearer only, no cookies (CORS `*` is safe); limited per address like the token endpoint |
 
+### B2 — Token introspection (DESIGN §4.12, phase 8c)
+
+| Threat | Mitigation |
+|---|---|
+| A resource server reads other services' tokens | Each credential is bound to one resource; a token for any other resource answers `{"active": false}`, identical to an unknown token (tested) |
+| Introspection used as a token oracle | Requires credentials; limited per address; no answer distinguishes "revoked", "expired", "other resource" or "never existed" |
+| Credential theft from the database | Only the SHA-256 of a 256-bit random secret is stored; the secret is shown once (tested) |
+| Credential brute force | 256-bit secrets; constant-time comparison; the hash is computed for unknown IDs too |
+| Stale credentials keep working | Revoking deletes the row at once; `last_used_at` shows unused credentials in /admin |
+| Refresh tokens exposed through introspection | Never introspected: always inactive (tested) |
+
 ### B5 — Gateway integration
 
 | Threat | Mitigation |
