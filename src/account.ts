@@ -116,68 +116,86 @@ export async function exportAccount(
   currentSessionHash: string,
   now: number,
 ): Promise<Record<string, unknown>> {
-  const [user, identities, sessions, invitation, events, factors, codes, subjects, orgs, sent] =
-    await db.batch<Record<string, unknown>>([
-      db
-        .prepare(
-          'SELECT id, status, display_name, primary_email, created_at, updated_at FROM users WHERE id = ?',
-        )
-        .bind(userId),
-      db
-        .prepare(
-          `SELECT provider, subject, email, email_verified, created_at, last_login_at
+  const [
+    user,
+    identities,
+    sessions,
+    invitation,
+    events,
+    factors,
+    codes,
+    subjects,
+    orgs,
+    sent,
+    scim,
+  ] = await db.batch<Record<string, unknown>>([
+    db
+      .prepare(
+        'SELECT id, status, display_name, primary_email, created_at, updated_at FROM users WHERE id = ?',
+      )
+      .bind(userId),
+    db
+      .prepare(
+        `SELECT provider, subject, email, email_verified, created_at, last_login_at
          FROM identities WHERE user_id = ? ORDER BY created_at`,
-        )
-        .bind(userId),
-      db
-        .prepare(
-          `SELECT id_hash, aal, created_at, last_seen_at, expires_at, ip_prefix, user_agent_hash,
+      )
+      .bind(userId),
+    db
+      .prepare(
+        `SELECT id_hash, aal, created_at, last_seen_at, expires_at, ip_prefix, user_agent_hash,
                 device, method
          FROM sessions WHERE user_id = ? ORDER BY created_at`,
-        )
-        .bind(userId),
-      db
-        .prepare(
-          `SELECT a.added_by, a.created_at FROM allowlist a
+      )
+      .bind(userId),
+    db
+      .prepare(
+        `SELECT a.added_by, a.created_at FROM allowlist a
          JOIN identities i ON i.provider = 'google' AND a.kind = 'google_sub' AND a.value = i.subject
          WHERE i.user_id = ?`,
-        )
-        .bind(userId),
-      db
-        .prepare(
-          `SELECT at, event, client_id, ip_prefix, detail FROM audit_events
+      )
+      .bind(userId),
+    db
+      .prepare(
+        `SELECT at, event, client_id, ip_prefix, detail FROM audit_events
          WHERE actor_user_id = ? ORDER BY at`,
-        )
-        .bind(userId),
-      db
-        .prepare(
-          `SELECT kind, label, created_at, last_used_at FROM mfa_factors
+      )
+      .bind(userId),
+    db
+      .prepare(
+        `SELECT kind, label, created_at, last_used_at FROM mfa_factors
          WHERE user_id = ? ORDER BY created_at`,
-        )
-        .bind(userId),
-      db
-        .prepare(
-          'SELECT COUNT(*) AS unused FROM recovery_codes WHERE user_id = ? AND used_at IS NULL',
-        )
-        .bind(userId),
-      db
-        .prepare(
-          'SELECT sector, sub, created_at FROM oidc_subjects WHERE user_id = ? ORDER BY created_at',
-        )
-        .bind(userId),
-      db
-        .prepare(
-          `SELECT o.id, o.name, o.status, m.role, m.joined_at FROM org_members m
+      )
+      .bind(userId),
+    db
+      .prepare(
+        'SELECT COUNT(*) AS unused FROM recovery_codes WHERE user_id = ? AND used_at IS NULL',
+      )
+      .bind(userId),
+    db
+      .prepare(
+        'SELECT sector, sub, created_at FROM oidc_subjects WHERE user_id = ? ORDER BY created_at',
+      )
+      .bind(userId),
+    db
+      .prepare(
+        `SELECT o.id, o.name, o.status, m.role, m.joined_at FROM org_members m
          JOIN organizations o ON o.id = m.org_id WHERE m.user_id = ? ORDER BY m.joined_at`,
-        )
-        .bind(userId),
-      db
-        .prepare(
-          `SELECT i.org_id, i.email, i.role, i.created_at, i.expires_at FROM org_invitations i
+      )
+      .bind(userId),
+    db
+      .prepare(
+        `SELECT i.org_id, i.email, i.role, i.created_at, i.expires_at FROM org_invitations i
          WHERE i.invited_by = ? ORDER BY i.created_at`,
-        )
-        .bind(userId),
-    ]);
+      )
+      .bind(userId),
+    db
+      .prepare(
+        `SELECT org_id, user_name, external_id, display_name, given_name, family_name, active,
+                  created_at, updated_at
+           FROM scim_users WHERE user_id = ? ORDER BY created_at`,
+      )
+      .bind(userId),
+  ]);
 
   const account = user?.results[0];
   const apps = [];
@@ -238,6 +256,18 @@ export async function exportAccount(
       role: row.role,
       sentAt: iso(row.created_at as number),
       expiresAt: iso(row.expires_at as number),
+    })),
+    // What organizations' directories said about you (DESIGN §4.16).
+    directoryRecords: (scim?.results ?? []).map((row) => ({
+      organization: row.org_id,
+      userName: row.user_name,
+      externalId: row.external_id,
+      displayName: row.display_name,
+      givenName: row.given_name,
+      familyName: row.family_name,
+      active: row.active === 1,
+      createdAt: iso(row.created_at as number),
+      updatedAt: iso(row.updated_at as number),
     })),
     signInMethods: (identities?.results ?? []).map((row) => ({
       provider: row.provider,

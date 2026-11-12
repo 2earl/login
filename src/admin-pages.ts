@@ -431,6 +431,7 @@ export const LOG_FILTERS: [string, string][] = [
   ['account.', 'Account'],
   ['user.', 'Users'],
   ['org.', 'Organizations'],
+  ['scim.', 'Directory sync'],
   ['admin.', 'Admin actions'],
 ];
 
@@ -495,6 +496,16 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'org.member_removed': 'Removed from an organization',
   'org.left': 'Left an organization',
   'org.ownership_passed': 'Became owner (previous owner deleted)',
+  'org.domain_added': 'Organization domain added',
+  'org.domain_verified': 'Organization domain verified',
+  'org.domain_removed': 'Organization domain removed',
+  'org.scim_token_created': 'Directory sync token created',
+  'org.scim_token_revoked': 'Directory sync token revoked',
+  'scim.user_created': 'Directory provisioned a user',
+  'scim.user_updated': 'Directory updated a user',
+  'scim.user_deleted': 'Directory removed a user',
+  'scim.member_added': 'Directory added a member',
+  'scim.member_removed': 'Directory removed a member',
 };
 
 /** Events worth a second look when scanning the log. */

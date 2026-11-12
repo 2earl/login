@@ -10,6 +10,7 @@ import type { JWTVerifyGetKey } from 'jose';
 import { exportAccount } from './account';
 import { exportFromServices } from './service-exports';
 import { registerOrgRoutes } from './org-routes';
+import { registerScimRoutes } from './scim-routes';
 import { DpopError, dpopOf, verifyDpopProof, withDpop } from './dpop';
 import { pushedRequestUrl, registerParRoute } from './par';
 import { membershipsOf, ownershipPlan } from './orgs';
@@ -655,6 +656,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   registerPasskeyRoutes(app, deps);
   registerAdminRoutes(app, deps);
   registerOrgRoutes(app, deps);
+  registerScimRoutes(app, deps);
 
   // ---- OAuth authorization server (DESIGN §4.1, §4.3) ------------------------------------
 

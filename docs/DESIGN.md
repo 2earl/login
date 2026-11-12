@@ -734,6 +734,62 @@ Both are announced in the server metadata: `dpop_signing_alg_values_supported`,
 `pushed_authorization_request_endpoint`. `/oauth/par` uses the token endpoint's per-address limit.
 Expired pushed requests and proofs seen are deleted daily.
 
+### 4.16 Verified domains and SCIM provisioning (phase 9b)
+
+An organization's own directory (Okta, Microsoft Entra ID, Google Workspace via a connector, any
+SCIM 2.0 client) adds and removes its members. login is the SCIM service provider for Users.
+
+**Verified domains** (`src/org-domains.ts`).
+- An owner adds a domain on `/orgs/:id/directory`. login gives a TXT record to publish at
+  `_2earl-challenge.<domain>`, with the value `2earl-verification=<random>`.
+- "Check DNS" looks the record up over DNS over HTTPS (`cloudflare-dns.com`, through
+  `deps.fetch`). If it's there, the domain is verified.
+- A domain is verified by one organization at a time: a unique index on verified rows. An
+  organization can have up to 10 domains.
+- Host names are normalised to lower-case ASCII (punycode). IP addresses and single labels are
+  refused.
+
+**Credentials.**
+- A directory authenticates with a bearer token (`scim_…`, 256 bits), stored as SHA-256 and shown
+  once.
+- Only an owner can create one, after a recent proof it's them, and only once a domain is
+  verified.
+- An organization can hold two tokens, so it can rotate them. Revoking a token is immediate.
+- A suspended organization's tokens stop working.
+
+**What provisioning does** (`src/scim.ts`):
+- **Addresses.** A SCIM User is an address (`userName`, normalised like an email) at one of the
+  organization's verified domains. Anything else is refused (`invalidValue`), so an organization
+  can't touch anyone it has no authority over.
+- **No new accounts.** Provisioning **never creates a 2earl account**. The account that signs in
+  with the address (one active account with it as a verified address) is linked. With none yet,
+  the record waits, and the person is linked at their first sign-in with that address
+  (`claimProvisioned` in `openSession`). The sign-up switch still applies (§4.9).
+- **Active means member.** While a record is active, its account is a member (role `member`,
+  within the 50-organization cap). Deactivating it (`active: false`, or `"False"` as Entra sends
+  it) or deleting it removes the membership.
+- **The last owner stays.** That change is refused with `409 mutability`; an owner hands over
+  first.
+- **Roles.** They stay in 2earl: SCIM adds members, and an owner promotes them.
+- **Changing `userName`** moves the membership to the account with the new address.
+
+**API** (`src/scim-routes.ts`, RFC 7644):
+- `GET /scim/v2/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas`.
+- `GET|POST /scim/v2/Users`; `GET|PUT|PATCH|DELETE /scim/v2/Users/:id`.
+- Filters: `userName eq` and `externalId eq` (what directories use). Paging with `startIndex` and
+  `count` (at most 100).
+- PATCH: `add`, `replace` and `remove`, with or without a path. Attributes login doesn't keep are
+  accepted and ignored.
+- Groups, bulk, sort and ETags are not supported (`501`).
+- Bodies are limited to 64 KB. Limit: 1,000 requests a minute per address (the token
+  endpoint's).
+- The zone firewall allows PUT, PATCH and DELETE on `/scim/v2/` only (`infra/firewall.tf`).
+
+**Data.** Kept per provisioned user: the address, the directory's `externalId`, given, family and
+display name, active, and the linked account. It is deleted when the directory deletes the user or
+the organization is deleted. When the account is deleted, the link is cleared. The person's export
+lists every record linked to them (`directoryRecords`).
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -837,6 +893,12 @@ org_members      (org_id FK, user_id FK) PK, role (owner|admin|member), joined_a
 org_invitations  id PK ('inv_…'), token_hash UNIQUE (HMAC), org_id FK, email, role
                  (admin|member), invited_by FK NULL, created_at, expires_at  (≤ 7 days)
 org_deletion_notices (service, org_id) PK, created_at, attempts, last_attempt_at, last_error
+org_domains      (org_id FK, domain) PK, challenge, verified_at NULL, created_at
+                 UNIQUE(domain) WHERE verified                       (§4.16)
+scim_tokens      id PK ('st_…'), org_id FK, token_hash UNIQUE (SHA-256), created_at, last_used_at
+scim_users       id PK ('scu_…'), org_id FK, user_name, external_id, display_name, given_name,
+                 family_name, active, user_id FK NULL (SET NULL), created_at, updated_at,
+                 UNIQUE(org_id, user_name)
 pushed_requests  id_hash PK (HMAC of the request_uri's random part), client_id, params,
                  created_at, expires_at                              (§4.15; ≤ 10 minutes)
 dpop_proofs      id_hash PK (SHA-256 of key thumbprint and jti), expires_at  (§4.15; 2 minutes)
@@ -1045,7 +1107,7 @@ Resolved:
 | 8c | **Introspection and step-up** (§4.12) |
 | 8d | **Device authorization grant** (§4.13) and the **2earl CLI** (`2earl/cli`) |
 | 9a | **Organizations and roles** (§4.14) |
-| 9b | **SCIM 2.0** provisioning into organizations (§13) |
+| 9b | **SCIM 2.0** provisioning into organizations, with verified domains (§4.16) |
 | 9c | **SAML 2.0**: organizations sign in through their own identity provider (§13) |
 | 9d | **DPoP and PAR** (§4.15) |
 
@@ -1055,7 +1117,7 @@ login is the identity service and authorization server for 2earl. Every protocol
 permanent attack surface on the one service that guards every account, and one person runs it. A
 standard is added when something uses it, not to tick a list.
 
-**In place** (phases 4–9a, 9d):
+**In place** (phases 4–9b, 9d):
 
 | Standard | What it does here |
 |---|---|
@@ -1078,15 +1140,16 @@ standard is added when something uses it, not to tick a list.
 | RFC 9470 Step-up authentication challenge | `acr_values` and `max_age` for every request; tokens record `auth_time`, `acr`, `amr` (§4.12) |
 | RFC 8628 Device authorization grant | Sign in on a device without a browser by approving a short code elsewhere (§4.13); the 2earl CLI (`2earl/cli`) uses it |
 | Organizations and roles | Teams of accounts with owner, admin and member roles; services read them live over a Service Binding, sites through the `organizations` scope (§4.14) |
+| SCIM 2.0 (RFC 7643, 7644) | An organization's directory adds and removes members at its verified domains; never creates accounts (§4.16) |
 | RFC 9449 DPoP | Refresh tokens bound to the client's key whenever it sends a proof; access tokens bound for resources that check proofs (UserInfo now; the gateway when it opts in) (§4.15) |
 | RFC 9126 PAR | The authorization request goes to login first; the browser carries only a reference (§4.15) |
 
 **Next** (the owner decided on 2026-11-12 to plan all of these; the order puts each one after
-what it depends on). Organizations (9a) are in place, so 9b and 9c have what they depend on:
+what it depends on). Organizations (9a) and verified domains (9b) are in place, so 9c has what it
+depends on:
 
 | Phase | Standard | Why | Depends on |
 |---|---|---|---|
-| 9b | **SCIM 2.0** (RFC 7643, 7644) | An organization's own directory adds and removes its members | Organizations |
 | 9c | **SAML 2.0** | An organization's members sign in through the organization's own identity provider (login is the SAML service provider; their IdP proves who they are) | Organizations; an XML signature library reviewed for signature-wrapping attacks |
 
 **Advisor's note (2026-11-12).** Every row above adds permanent attack surface to the service that
@@ -1106,6 +1169,7 @@ handling has a long record of signature-wrapping bypasses.
 | Client credentials grant | No machine-to-machine client; services talk over Service Bindings | A third-party backend needs its own access |
 | RFC 9101 JAR | Signed request objects; PAR (9d) already keeps the request off the browser | A FAPI-grade client |
 | Microsoft, GitHub, Apple and other social sign-in | The owner decided on 2026-11-12: Google, email codes and passkeys are the ways in | The owner decides otherwise |
+| SCIM Groups, bulk operations, roles from the directory | Members are what organizations need now; roles stay in 2earl | A directory customer needs group-based roles |
 | DPoP server nonces (RFC 9449 §8) and `dpop_jkt` | Proofs already expire in 60 seconds and work once; PKCE binds the code | A client or resource needs them |
 | FedCM | Browser-mediated sign-in for third-party sites; only useful once sites embed "Sign in with 2earl" | A site asks for it |
 | Shared Signals (CAEP, RISC) | Pushes session and credential events to relying parties; there is one relying party, our own gateway, which already checks every token | Several independent relying parties |

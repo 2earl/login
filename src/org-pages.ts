@@ -12,7 +12,9 @@ import {
   type Organization,
   type InvitationView,
 } from './orgs';
+import { challengeRecordName, type OrgDomain } from './org-domains';
 import { escapeHtml, formatDate, page } from './pages';
+import type { ScimTokenInfo } from './scim';
 
 /** Server-rendered pages for organizations (DESIGN §4.14). Every value is escaped. */
 
@@ -195,6 +197,7 @@ export function orgPage(params: {
           `<input name="name" type="text" required maxlength="${String(ORG_NAME_MAX)}" value="${escapeHtml(org.name)}"></label>` +
           '<button class="button secondary" type="submit">Rename</button></form>' +
           `<p class="section-text">Created ${formatDate(org.createdAt)}.</p>` +
+          `<p class="section-text"><a href="${base}/directory">Domains and directory sync</a>: let your company directory add and remove members.</p>` +
           `<div class="data-actions"><a class="danger-link" href="${base}/delete">Delete organization</a></div>` +
           '</section>'
         : '') +
@@ -258,6 +261,86 @@ export function invitationPage(params: {
           '<button class="button secondary" type="submit" name="decision" value="decline">Decline</button>' +
           '</form>') +
       `<p class="fine">This invitation works until ${formatDate(inv.expiresAt)}.</p>`,
+    { section: 'Organization' },
+  );
+}
+
+/** Domains and directory sync (SCIM, DESIGN §4.16), for owners. */
+export function directoryPage(params: {
+  org: Organization;
+  issuer: string;
+  domains: OrgDomain[];
+  tokens: ScimTokenInfo[];
+  provisioned: { active: number; waiting: number; inactive: number };
+  newToken?: string;
+  notice?: string | undefined;
+  error?: string | undefined;
+}): string {
+  const base = `/orgs/${escapeHtml(params.org.id)}`;
+  const domainRows = params.domains
+    .map(
+      (d) =>
+        '<li class="admin-row"><div class="app-main">' +
+        `<p class="app-name">${escapeHtml(d.domain)} ` +
+        (d.verifiedAt !== null
+          ? '<span class="tag">Verified</span>'
+          : '<span class="tag tag-muted">Not verified</span>') +
+        '</p>' +
+        (d.verifiedAt !== null
+          ? `<p class="app-meta">Verified ${formatDate(d.verifiedAt)}</p>`
+          : '<p class="app-meta">Add this TXT record to the domain’s DNS, then check:</p>' +
+            `<p class="app-meta"><code>${escapeHtml(challengeRecordName(d.domain))}</code> TXT <code>${escapeHtml(d.challenge)}</code></p>`) +
+        '</div><div class="row-actions">' +
+        (d.verifiedAt === null
+          ? `<form method="post" action="${base}/domains/verify">${hidden({ domain: d.domain })}<button class="button secondary small" type="submit">Check DNS</button></form>`
+          : '') +
+        `<form method="post" action="${base}/domains/remove">${hidden({ domain: d.domain })}<button class="button secondary small" type="submit">Remove</button></form>` +
+        '</div></li>',
+    )
+    .join('');
+  const tokenRows = params.tokens
+    .map(
+      (t) =>
+        '<li class="admin-row"><div class="app-main">' +
+        `<p class="app-name"><code>${escapeHtml(t.id)}</code></p>` +
+        `<p class="app-meta">Created ${formatDate(t.createdAt)} · ${t.lastUsedAt ? `last used ${formatDate(t.lastUsedAt)}` : 'never used'}</p>` +
+        '</div><div class="row-actions">' +
+        `<form method="post" action="${base}/scim-tokens/revoke">${hidden({ token: t.id })}<button class="button secondary small" type="submit">Revoke</button></form>` +
+        '</div></li>',
+    )
+    .join('');
+  const verified = params.domains.some((d) => d.verifiedAt !== null);
+  const p = params.provisioned;
+  return page(
+    'Domains and directory sync',
+    `<p class="crumb"><a href="${base}">${escapeHtml(params.org.name)}</a></p>` +
+      flash(params) +
+      '<h1>Domains and directory sync</h1>' +
+      '<p class="lede">Your company directory (Okta, Microsoft Entra ID or any other SCIM 2.0 client) can add people to this organization and remove them, for addresses at domains you’ve verified. It never creates 2earl accounts: people join with their own account when they sign in with that address.</p>' +
+      '<section class="section" aria-labelledby="domains-heading">' +
+      '<h2 id="domains-heading">Domains</h2>' +
+      (domainRows ? `<ul class="admin-list">${domainRows}</ul>` : '') +
+      `<form method="post" action="${base}/domains" class="inline-form">` +
+      '<label class="field"><span>Domain</span><input name="domain" type="text" required maxlength="253" placeholder="example.com" autocomplete="off" spellcheck="false"></label>' +
+      '<button class="button secondary" type="submit">Add domain</button></form>' +
+      '</section>' +
+      '<section class="section" aria-labelledby="scim-heading">' +
+      '<h2 id="scim-heading">Directory sync (SCIM 2.0)</h2>' +
+      '<dl class="details">' +
+      `<dt>Base URL</dt><dd><code>${escapeHtml(params.issuer)}/scim/v2</code></dd>` +
+      '<dt>Authentication</dt><dd>Bearer token (below)</dd>' +
+      `<dt>From your directory</dt><dd>${String(p.active)} active · ${String(p.waiting)} without a 2earl account yet · ${String(p.inactive)} deactivated</dd>` +
+      '</dl>' +
+      (params.newToken
+        ? '<div class="secret-once" role="status"><p><strong>Your new token.</strong> Copy it into your directory now: it isn’t shown again.</p>' +
+          `<p><code class="secret">${escapeHtml(params.newToken)}</code></p></div>`
+        : '') +
+      (tokenRows ? `<ul class="admin-list">${tokenRows}</ul>` : '') +
+      (verified
+        ? `<form method="post" action="${base}/scim-tokens" class="actions"><button class="button secondary" type="submit">Create a token</button></form>` +
+          '<p class="note">Up to two tokens, so you can rotate: create the new one, put it in your directory, then revoke the old one.</p>'
+        : '<p class="note">Verify a domain first.</p>') +
+      '</section>',
     { section: 'Organization' },
   );
 }

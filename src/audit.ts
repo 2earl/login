@@ -61,7 +61,17 @@ export type AuditEvent =
   | 'org.role_changed'
   | 'org.member_removed'
   | 'org.left'
-  | 'org.ownership_passed';
+  | 'org.ownership_passed'
+  | 'org.domain_added'
+  | 'org.domain_verified'
+  | 'org.domain_removed'
+  | 'org.scim_token_created'
+  | 'org.scim_token_revoked'
+  | 'scim.user_created'
+  | 'scim.user_updated'
+  | 'scim.user_deleted'
+  | 'scim.member_added'
+  | 'scim.member_removed';
 
 export async function audit(
   db: D1Database,

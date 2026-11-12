@@ -1,5 +1,6 @@
 import { deleteAccount } from './account';
 import type { OwnershipPlan } from './orgs';
+import { claimProvisioned } from './scim';
 import { audit } from './audit';
 import { sha256Hex } from './crypto';
 import { deliverDeletionNotices } from './deletion-notices';
@@ -47,6 +48,8 @@ export async function openSession(
     aal2: meta.aal2 ?? false,
   });
   setCookie(c, SESSION_COOKIE, session.cookieValue, session.expiresAt - now);
+  // Organizations whose directory provisioned this account's address (DESIGN §4.16).
+  await claimProvisioned(c.env.DB, now, userId);
   await audit(c.env.DB, now, 'login.succeeded', {
     actorUserId: userId,
     ipPrefix: ip,
