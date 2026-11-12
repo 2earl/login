@@ -184,6 +184,19 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | Code collected twice | Atomic delete-and-return; a second poll gets `invalid_grant` (tested) |
 | Tokens minted outside the library's checks | login never mints tokens: approval goes through `/authorize` (second factor, step-up, consent) and tokens come from the library's own code exchange |
 
+### O — Organizations (DESIGN §4.14, phase 9a)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| O1 | A forwarded or leaked invitation link lets someone else join | Accepting (and declining) needs an account that signs in with the invited address (tested); the token is stored only as an HMAC; 7 days; single use |
+| O2 | Invitation emails as a phishing or spam channel: attacker-chosen organization names and many recipients | Names are plain words (no links, `www.`, domain-like endings, control or bidi characters); the email names the inviter's address and has only our link; 50 invitations per account per day, 100 open per organization; the owner can suspend or delete an organization |
+| O3 | An admin takes over the organization | Only owners make or remove owners, rename or delete (tested); making an owner and deleting need a recent proof it's them (`changeCheck`, tested) |
+| O4 | The organization loses its last owner (race, account deletion) | The owner count is checked inside the same SQL statement as the change (tested); account deletion passes ownership to the next admin or member, or deletes an empty organization (tested) |
+| O5 | Enumeration of organizations or members | Every organization route answers 404 to non-members (tested); IDs are random (96 bits) |
+| O6 | Stale memberships in services | Services read memberships live (`OrganizationDirectory`); tokens carry none. The `orgs` OIDC claim is read when the token is issued, so a removed member's next token drops it |
+| O7 | Cross-site changes (CSRF) | Every change checks `Origin`/`Sec-Fetch-Site` (tested), as everywhere else (§7) |
+| O8 | Sites link people through organization IDs | Only with the `organizations` scope, which the consent page names; IDs are the same for every site by design |
+
 ### B5 — Gateway integration
 
 | Threat | Mitigation |

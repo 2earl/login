@@ -13,6 +13,11 @@ export interface AccountEventsBinding {
   deleteUser(userId: string): Promise<void>;
   /** The service's part of "Download your data" (src/service-exports.ts). */
   exportUser(userId: string): Promise<unknown>;
+  /**
+   * Only for services with `organizationEvents` (src/services.ts): an organization was deleted;
+   * delete what the service keeps for it (DESIGN §4.14).
+   */
+  deleteOrganization?(orgId: string): Promise<void>;
 }
 
 export interface DeliveryResult {
@@ -69,7 +74,50 @@ export async function deliverDeletionNotices(env: Env, now: number): Promise<Del
     // Names the service only: the deleted account's ID is not kept anywhere once delivered.
     await audit(env.DB, now, 'user.deletion_delivered', { detail: { service: notice.service } });
   }
+  await deliverOrganizationNotices(env, now, result);
   return result;
+}
+
+/** The same for deleted organizations, to the services that keep data for them. */
+async function deliverOrganizationNotices(
+  env: Env,
+  now: number,
+  result: DeliveryResult,
+): Promise<void> {
+  const { results } = await env.DB.prepare(
+    'SELECT service, org_id FROM org_deletion_notices ORDER BY created_at LIMIT ?',
+  )
+    .bind(BATCH)
+    .all<{ service: string; org_id: string }>();
+  for (const notice of results) {
+    const service = serviceById(notice.service);
+    const binding = service ? accountEventsBinding(env, service.deletionBinding) : null;
+    if (!binding?.deleteOrganization) {
+      result.waiting += 1;
+      continue;
+    }
+    try {
+      await binding.deleteOrganization(notice.org_id);
+    } catch (error) {
+      result.failed += 1;
+      const name = error instanceof Error ? error.name : 'unknown';
+      console.error('organization deletion notice failed', notice.service, name);
+      await env.DB.prepare(
+        `UPDATE org_deletion_notices SET attempts = attempts + 1, last_attempt_at = ?, last_error = ?
+         WHERE service = ? AND org_id = ?`,
+      )
+        .bind(now, name, notice.service, notice.org_id)
+        .run();
+      continue;
+    }
+    result.delivered += 1;
+    await env.DB.prepare('DELETE FROM org_deletion_notices WHERE service = ? AND org_id = ?')
+      .bind(notice.service, notice.org_id)
+      .run();
+    await audit(env.DB, now, 'org.deletion_delivered', {
+      detail: { service: notice.service, org: notice.org_id },
+    });
+  }
 }
 
 export interface PendingNotices {
@@ -81,14 +129,18 @@ export interface PendingNotices {
   lastError: string | null;
 }
 
-/** For /admin: notices still waiting, per service. */
+/** For /admin: notices still waiting, per service (accounts and organizations together). */
 export async function pendingNotices(db: D1Database): Promise<PendingNotices[]> {
   const { results } = await db
     .prepare(
-      `SELECT service, COUNT(*) AS count, MIN(created_at) AS oldest, MAX(attempts) AS attempts,
-              (SELECT last_error FROM deletion_notices d2 WHERE d2.service = d.service
+      `WITH d AS (
+         SELECT service, created_at, attempts, last_attempt_at, last_error FROM deletion_notices
+         UNION ALL
+         SELECT service, created_at, attempts, last_attempt_at, last_error FROM org_deletion_notices)
+       SELECT service, COUNT(*) AS count, MIN(created_at) AS oldest, MAX(attempts) AS attempts,
+              (SELECT last_error FROM d d2 WHERE d2.service = d.service
                  AND d2.last_error IS NOT NULL ORDER BY last_attempt_at DESC LIMIT 1) AS last_error
-       FROM deletion_notices d GROUP BY service ORDER BY service`,
+       FROM d GROUP BY service ORDER BY service`,
     )
     .all<{
       service: string;

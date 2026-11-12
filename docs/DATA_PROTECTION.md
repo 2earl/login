@@ -44,6 +44,8 @@ with German law on telemedia: TDDDG for cookies, DDG for the imprint **[verify]*
 | Audit events (event, time, IP prefix, client ID, user ID) | D1 `audit_events` | Generated | Security and accountability |
 | Second-factor data (passkey public keys, IDs, names and counters; encrypted TOTP secret; hashed recovery codes; wrong-attempt counter and lock time) | D1 `mfa_factors`, `recovery_codes`, `users` | User (enrolment) | Protect the account. Deleted with the factor or the account; included in the export without secrets |
 | Second-factor steps in progress (passkey challenge, TOTP secret being set up, new recovery codes before they are shown) | D1 `mfa_pending` | System | ≤ 10 minutes, deleted with the session |
+| Organizations: name, status, members and their roles, when each joined | D1 `organizations`, `org_members` | Users who create or join one | Let a team use 2earl together. Members see each other's name and email address; services see account IDs and roles; sites see the organizations only with the `organizations` scope |
+| Organization invitations (invitee's address, role, who invited, HMAC of the link's token) | D1 `org_invitations` | The inviting member | Invite someone by email; at most 7 days, then deleted; also deleted when accepted, declined or withdrawn |
 | Request logs | Cloudflare (Workers logs, if enabled) | Request | Operations; configured without tokens or full query strings |
 
 IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
@@ -68,6 +70,8 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | OAuth grants | 7 days idle / 90 days absolute, or until revoked |
 | Audit events | 90 days, then deleted (daily cron) |
 | Account data | Until the user deletes the account or the owner deletes it |
+| Organizations and memberships | Until the organization is deleted, or the member leaves or deletes their account |
+| Organization invitations | Until accepted, declined, withdrawn or 7 days, then deleted (daily cron) |
 | Invitations (allowlist) | Until the invitation is withdrawn or the invited user deletes their account |
 | Deletion notices (`deletion_notices`: a deleted account's internal ID, per service) | Until that service confirms it deleted the user's data; then nothing about the account is kept |
 | After account deletion | Deleted immediately from D1 and KV. D1 point-in-time recovery may hold copies for up to 30 days **[verify the Time Travel window]**; not restored except for disaster recovery |
@@ -81,6 +85,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | Google | Independent controller for the user's Google account | We receive identity claims when the user chooses "Sign in with Google". Google's privacy terms apply to the user's Google account |
 | GitHub, HashiCorp | Not recipients of user data | Hold code, infrastructure state and secrets only. **Terraform state must not contain user data** |
 | OAuth clients (MCP apps) | Separate controllers | Receive only what the user approves. In v1 the gateway receives the internal user ID and scopes, not email or name |
+| Other members of an organization | Not processors; members of the same team | See each member's name, email address and role. An invitee sees the inviter's name and address in the email |
 | Sites using "Sign in with 2earl" (OpenID Connect) | Separate controllers | Receive, when the user approves: that site's own ID for the user, how and when they signed in, and the name and address only if the user left those ticked. Their own privacy terms apply to what they do with it |
 
 ## 6. Data subject rights — how the system supports them

@@ -5,11 +5,12 @@ import { escapeHtml, formatDate, page } from './pages';
 
 /** Server-rendered pages for /admin (DESIGN §4.6). Owner-only; every value is escaped. */
 
-export type AdminTab = 'users' | 'invitations' | 'apps' | 'log';
+export type AdminTab = 'users' | 'invitations' | 'orgs' | 'apps' | 'log';
 
 const TABS: [AdminTab, string, string][] = [
   ['users', 'Users', '/admin/users'],
   ['invitations', 'Invitations', '/admin/invitations'],
+  ['orgs', 'Organizations', '/admin/orgs'],
   ['apps', 'Apps', '/admin/apps'],
   ['log', 'Security log', '/admin/log'],
 ];
@@ -226,6 +227,63 @@ export function adminInvitationsPage(params: {
   );
 }
 
+// ---- Organizations (DESIGN §4.14) -----------------------------------------------------------
+
+export interface AdminOrg {
+  id: string;
+  name: string;
+  status: 'active' | 'suspended';
+  members: number;
+  invitations: number;
+  owners: string[];
+  createdAt: number;
+}
+
+function orgRow(org: AdminOrg): string {
+  const meta = [
+    `${String(org.members)} ${org.members === 1 ? 'member' : 'members'}`,
+    org.invitations > 0 ? `${String(org.invitations)} open invitations` : null,
+    org.owners.length > 0 ? `owners: ${org.owners.map(escapeHtml).join(', ')}` : null,
+    `created ${formatDate(org.createdAt)}`,
+    `<code>${escapeHtml(org.id)}</code>`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    '<li class="admin-row">' +
+    `<div class="app-main"><p class="app-name">${escapeHtml(org.name)}` +
+    (org.status === 'suspended' ? '<span class="tag tag-alert">Suspended</span>' : '') +
+    `</p><p class="app-meta">${meta}</p></div>` +
+    '<div class="row-actions">' +
+    (org.status === 'suspended'
+      ? actionForm('/admin/orgs', { action: 'reactivate', org: org.id }, 'Reactivate')
+      : actionForm('/admin/orgs', { action: 'suspend', org: org.id }, 'Suspend')) +
+    '<details class="confirm-delete"><summary>Delete…</summary>' +
+    '<form method="post" action="/admin/orgs">' +
+    '<input type="hidden" name="action" value="delete">' +
+    `<input type="hidden" name="org" value="${escapeHtml(org.id)}">` +
+    `<label class="confirm"><input type="checkbox" name="confirm" value="on" required><span>Delete ${escapeHtml(org.name)}, its memberships and invitations. Members keep their accounts. This can’t be undone.</span></label>` +
+    '<button class="button danger small" type="submit">Delete organization</button></form></details>' +
+    '</div></li>'
+  );
+}
+
+export function adminOrgsPage(params: {
+  orgs: AdminOrg[];
+  notice?: string | undefined;
+  error?: string | undefined;
+}): string {
+  return adminPage(
+    'orgs',
+    'Organizations',
+    `<p class="section-text">${String(params.orgs.length)} ${params.orgs.length === 1 ? 'organization' : 'organizations'}. Suspending one freezes it: members can only leave, and 2earl services stop seeing it.</p>` +
+      (params.orgs.length > 0
+        ? `<ul class="admin-list">${params.orgs.map(orgRow).join('')}</ul>`
+        : '<p class="empty">No organizations yet.</p>'),
+    params,
+  );
+}
+
 // ---- Apps -----------------------------------------------------------------------------------
 
 export interface AdminTrustedApp {
@@ -372,6 +430,7 @@ export const LOG_FILTERS: [string, string][] = [
   ['grant.', 'App access'],
   ['account.', 'Account'],
   ['user.', 'Users'],
+  ['org.', 'Organizations'],
   ['admin.', 'Admin actions'],
 ];
 
@@ -421,6 +480,21 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'admin.resource_server_created': 'Resource server credentials created',
   'admin.resource_server_deleted': 'Resource server credentials revoked',
   'admin.signup_changed': 'Sign-up switched',
+  'admin.org_suspended': 'Organization suspended',
+  'admin.org_reactivated': 'Organization reactivated',
+  'admin.org_deleted': 'Organization deleted by admin',
+  'org.created': 'Organization created',
+  'org.renamed': 'Organization renamed',
+  'org.deleted': 'Organization deleted',
+  'org.deletion_delivered': 'Organization deletion delivered to a service',
+  'org.invited': 'Invited to an organization',
+  'org.invitation_revoked': 'Organization invitation withdrawn',
+  'org.invitation_declined': 'Organization invitation declined',
+  'org.joined': 'Joined an organization',
+  'org.role_changed': 'Organization role changed',
+  'org.member_removed': 'Removed from an organization',
+  'org.left': 'Left an organization',
+  'org.ownership_passed': 'Became owner (previous owner deleted)',
 };
 
 /** Events worth a second look when scanning the log. */

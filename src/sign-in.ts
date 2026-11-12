@@ -1,4 +1,5 @@
 import { deleteAccount } from './account';
+import type { OwnershipPlan } from './orgs';
 import { audit } from './audit';
 import { sha256Hex } from './crypto';
 import { deliverDeletionNotices } from './deletion-notices';
@@ -83,7 +84,8 @@ export async function finishDeletion(
     .first<{ primary_email: string | null }>();
   const oauth = authorizationServer(c.env).getOAuthApi(c.env);
   try {
-    await deleteAccount(c.env.DB, oauth, userId, now, clientIp(c));
+    const plan = await deleteAccount(c.env.DB, oauth, userId, now, clientIp(c));
+    tellNewOwners(c, plan);
     // Tell every service now; the cron retries whatever doesn't go through.
     workerCtx(c).waitUntil(deliverDeletionNotices(c.env, now));
   } catch (error) {
@@ -108,4 +110,10 @@ export function notifyLater(c: AppContext, userId: string, notice: Notice): void
 /** A message page with its status, for the many ways sign-in can stop. */
 export function stopped(c: AppContext, message: Message, status: 400 | 403 | 429 | 500 = 400) {
   return c.html(messagePage(message), status);
+}
+
+/** Tells each person who became an owner because the only owner deleted their account. */
+export function tellNewOwners(c: AppContext, plan: OwnershipPlan): void {
+  for (const passed of plan.passed)
+    notifyLater(c, passed.to, { kind: 'org_owner', org: passed.name });
 }

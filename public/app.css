@@ -739,6 +739,22 @@ h2 .tag {
   margin: 0;
 }
 
+/* A member's role: the choice and its button side by side, the same height (organizations). */
+.role-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.role-select {
+  min-height: 2.25rem;
+  padding: 0 0.625rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.625rem;
+  background: var(--surface);
+  color: var(--fg);
+  font: 500 0.875rem/1 var(--body);
+}
+
 .confirm-delete summary {
   display: inline-flex;
   align-items: center;

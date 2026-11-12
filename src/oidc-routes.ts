@@ -58,6 +58,7 @@ export const CLAIMS_SUPPORTED = [
   'email',
   'email_verified',
   'updated_at',
+  'orgs',
 ];
 
 /**

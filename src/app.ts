@@ -9,6 +9,8 @@ import { Hono } from 'hono';
 import type { JWTVerifyGetKey } from 'jose';
 import { exportAccount } from './account';
 import { exportFromServices } from './service-exports';
+import { registerOrgRoutes } from './org-routes';
+import { membershipsOf, ownershipPlan } from './orgs';
 import { audit } from './audit';
 import { hmacHex, pkceChallenge, timingSafeEqual } from './crypto';
 import { GoogleSignInError, buildGoogleAuthUrl, exchangeCode, verifyGoogleIdToken } from './google';
@@ -479,6 +481,9 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       email: 'You can now sign in with a code sent to that address too.',
       removed: 'Sign-in method removed.',
       name: 'Name saved.',
+      left: 'You left the organization.',
+      org_deleted: 'Organization deleted.',
+      declined: 'Invitation declined.',
     };
     const key =
       c.req.query('disconnected') === '1'
@@ -495,6 +500,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         factors: await listFactors(c.env.DB, session.user.id),
         isOwner: await isOwnerUser(c.env, session.user.id),
         methods: await listIdentities(c.env, session.user.id),
+        orgs: await membershipsOf(c.env.DB, session.user.id),
         ...(notice ? { notice } : {}),
       }),
     );
@@ -566,6 +572,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
           google: identities.some((i) => i.provider === 'google'),
           email: identities.find((i) => i.provider === 'email')?.email ?? null,
         },
+        organizations: await ownershipPlan(c.env.DB, session.user.id),
       }),
     );
   });
@@ -633,6 +640,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   registerMfaRoutes(app, deps);
   registerPasskeyRoutes(app, deps);
   registerAdminRoutes(app, deps);
+  registerOrgRoutes(app, deps);
 
   // ---- OAuth authorization server (DESIGN §4.1, §4.3) ------------------------------------
 

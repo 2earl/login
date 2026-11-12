@@ -183,6 +183,28 @@ guarantee to it.
     { "binding": "MCP_GATEWAY_EVENTS", "service": "mcp", "entrypoint": "AccountEvents" }
     ```
 
+### 5.1 Organizations (phase 9a, DESIGN §4.14)
+
+A service that gives teams shared access binds login's `OrganizationDirectory` entrypoint and asks
+it on each request. Memberships are read live: a removed member loses access at the next call.
+Tokens carry no memberships.
+
+```jsonc
+// the service's wrangler.jsonc
+{ "binding": "ORGANIZATIONS", "service": "login", "entrypoint": "OrganizationDirectory" }
+```
+
+| Method | Answer |
+|---|---|
+| `membershipsOf(userId)` | `[{ orgId, name, role }]`: active organizations of an active account |
+| `roleOf(orgId, userId)` | `'owner' \| 'admin' \| 'member'`, or `null` (not a member, or suspended) |
+| `members(orgId)` | `[{ userId, role }]` (up to 1,000), or `null` for an unknown or suspended organization |
+
+- Key organization data by `orgId` (`org_…`), stable for the organization's life.
+- A service that keeps data for organizations sets `organizationEvents: true` on its entry in
+  login's `src/services.ts` and adds `deleteOrganization(orgId)` to its `AccountEvents`. That method
+  has the same rules as `deleteUser`: idempotent, and it throws until done.
+
 ## 6. Infrastructure constraints
 
 - **Zone:** `2earl.com` is managed in `2earl/login` `infra/` (HCP workspace `2earl-login-prod`):
@@ -208,6 +230,7 @@ guarantee to it.
 | Another service (any app that accepts 2earl tokens) | a new entry in `src/services.ts`: its own resource, scopes and deletion binding | Each service validates with its own resource and has its own permissions |
 | Email or profile for the gateway | `GrantProps`, `completeAuthorization`, privacy policy | Personal data crosses to the gateway; needs a privacy-policy change |
 | Another service's deletion and export | its `AccountEvents` binding in `services` in `wrangler.jsonc` (§5) | Deletions reach it; "Download your data" includes it |
+| A service keeps data for organizations | `organizationEvents: true` on its entry in `src/services.ts` (§5.1) | Deleting an organization reaches its `deleteOrganization` |
 
 ## 8. Developing and testing the gateway
 

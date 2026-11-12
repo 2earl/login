@@ -107,7 +107,8 @@ export type Notice =
   | { kind: 'factor_removed'; factor: string }
   | { kind: 'recovery_codes' }
   | { kind: 'app_connected'; app: string }
-  | { kind: 'account_deleted' };
+  | { kind: 'account_deleted' }
+  | { kind: 'org_owner'; org: string };
 
 export function noticeMail(notice: Notice): { subject: string; lines: string[] } {
   const notYou =
@@ -148,6 +149,14 @@ export function noticeMail(notice: Notice): { subject: string; lines: string[] }
           notYou,
         ],
       };
+    case 'org_owner':
+      return {
+        subject: 'You’re now an owner of an organization on 2earl',
+        lines: [
+          `You’re now an owner of the organization “${notice.org}”, because its only owner deleted their 2earl account.`,
+          'You can manage its members, or hand ownership to someone else, at https://login.2earl.com/account.',
+        ],
+      };
     case 'account_deleted':
       return {
         subject: 'Your 2earl account was deleted',
@@ -170,4 +179,28 @@ export async function notify(env: Env, userId: string, notice: Notice): Promise<
   if (!row?.primary_email) return;
   const mail = noticeMail(notice);
   await sendMail(env, row.primary_email, mail.subject, mail.lines);
+}
+
+/**
+ * An invitation to join an organization (DESIGN §4.14). The organization's name and the inviter
+ * are chosen by users, so the email says plainly who sent it, and its only link is ours.
+ */
+export function invitationMail(params: {
+  org: string;
+  inviter: string | null;
+  role: 'admin' | 'member';
+  link: string;
+}): { subject: string; lines: string[] } {
+  const who = params.inviter ?? 'Someone';
+  return {
+    subject: `Join “${params.org}” on 2earl`,
+    lines: [
+      `${who} invited you to join the organization “${params.org}” on 2earl, as ${params.role === 'admin' ? 'an admin' : 'a member'}.`,
+      '',
+      'To accept or decline, open this link and sign in with this email address:',
+      params.link,
+      '',
+      'The invitation works for 7 days, and only for this address. If you don’t know who sent it, you can ignore this email.',
+    ],
+  };
 }

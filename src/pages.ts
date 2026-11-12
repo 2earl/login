@@ -8,6 +8,8 @@ import { ASSET_URLS } from './assets.generated';
 import type { SignupMode } from './settings';
 import type { DeviceSession } from './sessions';
 import type { Identity } from './users';
+import { organizationsSection } from './org-pages';
+import type { OrgSummary, OwnershipPlan } from './orgs';
 
 export function escapeHtml(value: string): string {
   return value
@@ -354,6 +356,7 @@ export function accountPage(params: {
   /** The owner sees a link to /admin. */
   isOwner?: boolean;
   methods?: Identity[];
+  orgs?: OrgSummary[];
 }): string {
   const heading = params.name ?? 'Your account';
   const methods = params.methods ?? [];
@@ -379,6 +382,7 @@ export function accountPage(params: {
       '<h2 id="apps-heading">Connected apps</h2>' +
       connectedApps(params.apps) +
       '</section>' +
+      organizationsSection(params.orgs ?? []) +
       '<section class="section" aria-labelledby="methods-heading">' +
       '<h2 id="methods-heading">How you sign in</h2>' +
       methodsList(methods) +
@@ -622,8 +626,11 @@ export function deleteAccountPage(params: {
   invited: boolean;
   /** How the user can confirm: the account's methods. Defaults to Google. */
   confirmWith?: { google: boolean; email: string | null };
+  /** Organizations the account alone owns (DESIGN §4.14). */
+  organizations?: OwnershipPlan;
 }): string {
   const confirmWith = params.confirmWith ?? { google: true, email: null };
+  const orgs = params.organizations ?? { passed: [], deleted: [] };
   const apps =
     params.appCount === 0
       ? 'Connected apps: none right now'
@@ -639,6 +646,15 @@ export function deleteAccountPage(params: {
       `<li>Your name and email address${params.email ? ` (${escapeHtml(params.email)})` : ''}, and how you sign in</li>` +
       `<li>${escapeHtml(apps)}</li>` +
       '<li>Every signed-in browser, including this one</li>' +
+      orgs.deleted
+        .map((o) => `<li>The organization “${escapeHtml(o.name)}”, which has no other members</li>`)
+        .join('') +
+      orgs.passed
+        .map(
+          (o) =>
+            `<li>Your ownership of “${escapeHtml(o.name)}”: ${escapeHtml(o.toLabel ?? 'the next member')} becomes its owner</li>`,
+        )
+        .join('') +
       (params.invited
         ? '<li>Your invitation. While sign-up is closed, signing in again needs a new one</li>'
         : '') +

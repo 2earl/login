@@ -6,8 +6,10 @@ import {
   adminInvitationsPage,
   adminLogPage,
   adminNeedsFactorPage,
+  adminOrgsPage,
   adminUsersPage,
   type AdminInvitation,
+  type AdminOrg,
   type AdminRegisteredApp,
   type AdminUser,
 } from './admin-pages';
@@ -29,6 +31,8 @@ import { setSignupMode, signupMode } from './settings';
 import { authorizationServer } from './oauth';
 import { notFoundPage } from './pages';
 import type { Session } from './sessions';
+import { tellNewOwners } from './sign-in';
+import { deleteOrganization } from './orgs';
 
 /**
  * /admin (DESIGN §4.6): only the user whose Google account is OWNER_GOOGLE_SUB, and only with a
@@ -54,6 +58,9 @@ const NOTICES: Record<string, string> = {
   rs_deleted: 'Resource server credentials revoked.',
   signup_open: 'Sign-up is open. Anyone can create an account.',
   signup_invite: 'Sign-up is closed. New accounts need an invitation.',
+  org_suspended: 'Organization suspended.',
+  org_reactivated: 'Organization reactivated.',
+  org_deleted: 'Organization deleted.',
 };
 
 function isLoopback(url: URL): boolean {
@@ -245,7 +252,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
         return c.redirect('/admin/users?done=mfa_reset', 303);
       case 'delete':
         if (form.get('confirm') !== 'on') return fail('Tick the box to confirm the deletion.');
-        await deleteAccount(c.env.DB, oauth(c), userId, now, clientIp(c));
+        tellNewOwners(c, await deleteAccount(c.env.DB, oauth(c), userId, now, clientIp(c)));
         workerCtx(c).waitUntil(deliverDeletionNotices(c.env, now));
         // The target's own events were re-keyed by deleteAccount; this one names no one.
         await record(c, session, 'admin.user_deleted', {});
@@ -390,6 +397,80 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
       ...extra,
     });
   }
+
+  // ---- Organizations (DESIGN §4.14) --------------------------------------------------------
+
+  async function listOrgs(c: AppContext): Promise<AdminOrg[]> {
+    const { results } = await c.env.DB.prepare(
+      `SELECT o.id, o.name, o.status, o.created_at,
+              (SELECT COUNT(*) FROM org_members m WHERE m.org_id = o.id) AS members,
+              (SELECT COUNT(*) FROM org_invitations i WHERE i.org_id = o.id AND i.expires_at > ?) AS invitations,
+              (SELECT GROUP_CONCAT(COALESCE(u.primary_email, u.id), ', ') FROM org_members m
+                 JOIN users u ON u.id = m.user_id WHERE m.org_id = o.id AND m.role = 'owner') AS owners
+       FROM organizations o ORDER BY o.created_at LIMIT 1000`,
+    )
+      .bind(deps.now())
+      .all<{
+        id: string;
+        name: string;
+        status: 'active' | 'suspended';
+        created_at: number;
+        members: number;
+        invitations: number;
+        owners: string | null;
+      }>();
+    return results.map((r) => ({
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      members: r.members,
+      invitations: r.invitations,
+      owners: r.owners ? r.owners.split(', ') : [],
+      createdAt: r.created_at,
+    }));
+  }
+
+  app.get('/admin/orgs', async (c) => {
+    const session = await owner(c);
+    if (session instanceof Response) return session;
+    return c.html(adminOrgsPage({ orgs: await listOrgs(c), ...flash(c) }));
+  });
+
+  app.post('/admin/orgs', async (c) => {
+    const session = await ownerForChange(c, '/admin/orgs');
+    if (session instanceof Response) return session;
+    const form = await c.req.raw.formData();
+    const orgId = form.get('org');
+    const fail = async (error: string) =>
+      c.html(adminOrgsPage({ orgs: await listOrgs(c), error }), 400);
+    if (typeof orgId !== 'string') return fail('No organization given.');
+    const exists = await c.env.DB.prepare('SELECT 1 AS ok FROM organizations WHERE id = ?')
+      .bind(orgId)
+      .first<{ ok: number }>();
+    if (!exists) return fail('That organization no longer exists.');
+    const now = deps.now();
+    switch (form.get('action')) {
+      case 'suspend':
+      case 'reactivate': {
+        const suspend = form.get('action') === 'suspend';
+        await c.env.DB.prepare('UPDATE organizations SET status = ?, updated_at = ? WHERE id = ?')
+          .bind(suspend ? 'suspended' : 'active', now, orgId)
+          .run();
+        await record(c, session, suspend ? 'admin.org_suspended' : 'admin.org_reactivated', {
+          org: orgId,
+        });
+        return c.redirect(`/admin/orgs?done=${suspend ? 'org_suspended' : 'org_reactivated'}`, 303);
+      }
+      case 'delete':
+        if (form.get('confirm') !== 'on') return fail('Tick the box to confirm the deletion.');
+        await deleteOrganization(c.env.DB, now, orgId);
+        workerCtx(c).waitUntil(deliverDeletionNotices(c.env, now));
+        await record(c, session, 'admin.org_deleted', { org: orgId });
+        return c.redirect('/admin/orgs?done=org_deleted', 303);
+      default:
+        return fail('Unknown action.');
+    }
+  });
 
   app.get('/admin/apps', async (c) => {
     const session = await owner(c);

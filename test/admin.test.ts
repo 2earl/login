@@ -377,3 +377,34 @@ describe('resource servers (DESIGN §4.12)', () => {
     expect(await count('resource_servers')).toBe(0);
   });
 });
+
+describe('organizations in /admin (DESIGN §4.14)', () => {
+  it('lists them, suspends and reactivates, and deletes', async () => {
+    await giveOwnerAFactor();
+    const other = await inviteAndSignInOther();
+    const created = await post('/orgs', { name: 'Other’s team' }, other.session);
+    const orgId = /\/orgs\/([^?]+)/.exec(created.headers.get('Location') ?? '')?.[1] ?? '';
+
+    const list = await (await call(app, '/admin/orgs', { cookies: as(owner) })).text();
+    expect(list).toContain('Other’s team');
+    expect(list).toContain('owners: other@example.com');
+
+    expect((await post('/admin/orgs', { action: 'suspend', org: orgId })).status).toBe(303);
+    expect(await count('organizations', "status = 'suspended'")).toBe(1);
+    const frozen = await post(`/orgs/${orgId}/name`, { name: 'Renamed' }, other.session);
+    expect(frozen.status).toBe(403);
+    expect((await post('/admin/orgs', { action: 'reactivate', org: orgId })).status).toBe(303);
+    expect(await count('organizations', "status = 'active'")).toBe(1);
+
+    expect((await post('/admin/orgs', { action: 'delete', org: orgId })).status).toBe(400);
+    const deleted = await post('/admin/orgs', { action: 'delete', org: orgId, confirm: 'on' });
+    expect(deleted.headers.get('Location')).toBe('/admin/orgs?done=org_deleted');
+    expect(await count('organizations')).toBe(0);
+    expect(await count('audit_events', "event = 'admin.org_deleted'")).toBe(1);
+  });
+
+  it('answers 404 to anyone but the owner', async () => {
+    const other = await inviteAndSignInOther();
+    expect((await call(app, '/admin/orgs', { cookies: as(other.session) })).status).toBe(404);
+  });
+});

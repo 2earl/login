@@ -46,7 +46,22 @@ export type AuditEvent =
   | 'admin.client_deleted'
   | 'admin.resource_server_created'
   | 'admin.resource_server_deleted'
-  | 'admin.signup_changed';
+  | 'admin.signup_changed'
+  | 'admin.org_suspended'
+  | 'admin.org_reactivated'
+  | 'admin.org_deleted'
+  | 'org.created'
+  | 'org.renamed'
+  | 'org.deleted'
+  | 'org.deletion_delivered'
+  | 'org.invited'
+  | 'org.invitation_revoked'
+  | 'org.invitation_declined'
+  | 'org.joined'
+  | 'org.role_changed'
+  | 'org.member_removed'
+  | 'org.left'
+  | 'org.ownership_passed';
 
 export async function audit(
   db: D1Database,

@@ -596,6 +596,82 @@ stored) and `SESSION_PEPPER` (not in D1).
 - The zone rate limit covers `/device` and `/oauth/device_authorization`.
 - Expired requests are deleted daily.
 
+### 4.14 Organizations and roles (phase 9a)
+
+A team of 2earl accounts. Everyone keeps their own account; the organization records who belongs
+to it, with which role, so 2earl services and "Sign in with 2earl" sites can give a team shared
+access. login doesn't hold anything *for* an organization beyond its name.
+
+**Roles** (`src/orgs.ts`, `can*` functions; the routes only ask them):
+
+| | Member | Admin | Owner |
+|---|---|---|---|
+| See members (name, email, role) | ✓ | ✓ | ✓ |
+| Invite, withdraw invitations | | ✓ (as member or admin) | ✓ |
+| Change roles between member and admin; remove members and admins | | ✓ | ✓ |
+| Make or unmake owners; remove owners | | | ✓, with a recent proof it's them (`changeCheck`) |
+| Rename; delete (type the name, recent proof) | | | ✓ |
+| Leave | ✓ | ✓ | ✓, unless the last owner |
+
+Nobody changes their own role on the page; to step down, an owner makes someone else owner, then
+leaves or is changed by them. **An organization always keeps an owner**: every statement that could
+remove the last one checks the owner count in the same SQL statement, so two requests at once
+can't both succeed.
+
+**Invitations.** By email address, as member or admin. Owners are made from members once they've
+joined, so an emailed link never grants full control.
+- The link holds a 256-bit token; D1 holds only `HMAC(SESSION_PEPPER, token)`. It works 7 days.
+- Accepting needs the signed-in account to sign in with the invited address (a verified address
+  of one of its methods). A forwarded link is useless to anyone else, who can't decline it
+  either. Someone without an account signs up first, under the sign-up switch (§4.9): an
+  organization invitation never opens sign-up.
+- The email names the inviter (name and address), the organization and the role, and its only
+  link is ours. Organization names are plain words: 1–60 characters, no control or bidi
+  characters, no `://`, `www.` or domain-like endings, so a name can't carry a link
+  (THREAT_MODEL O2).
+- Limits: 50 invitation emails per account per day (counted from the audit log), 100 open
+  invitations and 1,000 members plus invitations per organization, 50 organizations per account.
+
+**Deleting.** An owner deletes the organization after typing its name. Members and invitations
+go with it (`ON DELETE CASCADE`). Services with `organizationEvents: true` in `src/services.ts`
+get a notice in `org_deletion_notices`, delivered to `AccountEvents.deleteOrganization(orgId)`
+with the account-deletion notices (§4.8). None opts in yet.
+
+**When an owner deletes their account** (§6.3): where they are the only owner, the
+longest-standing admin becomes owner, else the longest-standing member, and that person gets an
+email. An organization with nobody else is deleted. The deletion page lists both beforehand.
+
+**Suspension** (`/admin/orgs`): the 2earl owner can suspend, reactivate or delete an
+organization. A suspended one can't be changed and services don't see it; members can still
+leave.
+
+**For services.** A named entrypoint, `OrganizationDirectory`, for Service Bindings only:
+- `membershipsOf(userId)`;
+- `roleOf(orgId, userId)`;
+- `members(orgId)`, which returns account IDs and roles, nothing else.
+
+It reads live on every call, so a removed member loses access at once. It leaves out suspended
+organizations and suspended accounts. Access tokens don't carry memberships, because they would go
+stale for 15 minutes.
+
+**For "Sign in with 2earl" sites** (§4.11): the `organizations` scope releases an `orgs` claim in
+the ID token and at `/userinfo`:
+- the shape is `[{ id, name, role }]`;
+- only active organizations are included;
+- it is read when the token is issued.
+
+Organization IDs are the same for every site: two sites can learn that their users share an
+organization. That is the point of the scope, and the consent page names it.
+
+**Routes:**
+- `/orgs/new` and `POST /orgs`;
+- `/orgs/:id`, plus `POST` to `/name`, `/invitations`, `/invitations/revoke`, `/members/role`,
+  `/members/remove`, `/leave` and `/delete`;
+- `/invite/:token`.
+
+Every change is same-origin and rate-limited (`orgs`). To anyone who isn't a member, an
+organization is a 404.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -694,6 +770,11 @@ email_codes      id_hash PK (HMAC of the cookie), email, code_hash, link_hash, p
                  ip_prefix, created_at, expires_at, used_at          (§4.9; kept 2 days)
 settings         key PK, value, updated_at                           ('signup': open|invite)
 audit_events     id PK, at, actor_user_id NULL, event, client_id NULL, ip_prefix, detail (JSON)
+organizations    id PK ('org_…'), name, status (active|suspended), created_at, updated_at  (§4.14)
+org_members      (org_id FK, user_id FK) PK, role (owner|admin|member), joined_at
+org_invitations  id PK ('inv_…'), token_hash UNIQUE (HMAC), org_id FK, email, role
+                 (admin|member), invited_by FK NULL, created_at, expires_at  (≤ 7 days)
+org_deletion_notices (service, org_id) PK, created_at, attempts, last_attempt_at, last_error
 ```
 
 - `identities` is what allows email/phone and other social logins to be added later. Each is
@@ -718,6 +799,8 @@ Account deletion (`src/account.ts`):
 2. in one D1 batch (a transaction): re-keys the user's audit events to a random correlation ID
    (`deleted:<uuid>`), deletes pending sign-in transactions, the invitation (allowlist entry),
    sessions, identities and the user row, and writes `user.deleted` (detail: number of grants);
+   Organizations it alone owns pass to the next person in line or, with nobody else in them, are
+   deleted, in the same batch (§4.14);
 3. sweeps grants again, for one created while step 2 ran (a consent submitted in another tab);
 4. clears the session cookie and the library's `__Host-oauth-approvals` cookie.
 
@@ -896,8 +979,7 @@ Resolved:
 | 8b | **OpenID Connect provider** (§4.11) |
 | 8c | **Introspection and step-up** (§4.12) |
 | 8d | **Device authorization grant** (§4.13) and the **2earl CLI** (`2earl/cli`) |
-| 8e | **More social sign-in**: Microsoft, GitHub, Apple (§13) |
-| 9a | **Organizations and roles** (§13) |
+| 9a | **Organizations and roles** (§4.14) |
 | 9b | **SCIM 2.0** provisioning into organizations (§13) |
 | 9c | **SAML 2.0**: organizations sign in through their own identity provider (§13) |
 | 9d | **DPoP and PAR** (§13) |
@@ -908,7 +990,7 @@ login is the identity service and authorization server for 2earl. Every protocol
 permanent attack surface on the one service that guards every account, and one person runs it. A
 standard is added when something uses it, not to tick a list.
 
-**In place** (phases 4–8d):
+**In place** (phases 4–9a):
 
 | Standard | What it does here |
 |---|---|
@@ -929,16 +1011,14 @@ standard is added when something uses it, not to tick a list.
 | OIDC RP-Initiated Logout 1.0 | An app can ask to end the 2earl session too; the person confirms |
 | RFC 7662 Token introspection | Resource servers without a Service Binding check tokens with their own credentials, only for their own resource (§4.12) |
 | RFC 9470 Step-up authentication challenge | `acr_values` and `max_age` for every request; tokens record `auth_time`, `acr`, `amr` (§4.12) |
-| RFC 8628 Device authorization grant | Sign in on a device without a browser by approving a short code elsewhere (§4.13) |
+| RFC 8628 Device authorization grant | Sign in on a device without a browser by approving a short code elsewhere (§4.13); the 2earl CLI (`2earl/cli`) uses it |
+| Organizations and roles | Teams of accounts with owner, admin and member roles; services read them live over a Service Binding, sites through the `organizations` scope (§4.14) |
 
 **Next** (the owner decided on 2026-11-12 to plan all of these; the order puts each one after
-what it depends on):
+what it depends on). Organizations (9a) are in place, so 9b and 9c have what they depend on:
 
 | Phase | Standard | Why | Depends on |
 |---|---|---|---|
-| 8d | **2earl CLI** (`2earl/cli`, public repo) | `2earl login` with the device grant; then Prompt share from the terminal through the gateway | Device grant (done) |
-| 8e | **Microsoft, GitHub, Apple sign-in** | More ways in for people without Google | The owner registers an app with each provider (client ID and secret); each one is a sign-in method like Google, never joined by address (B3) |
-| 9a | **Organizations and roles** | A team owns resources together; members have roles (owner, admin, member) that services can read from the token | A product that teams use |
 | 9b | **SCIM 2.0** (RFC 7643, 7644) | An organization's own directory adds and removes its members | Organizations |
 | 9c | **SAML 2.0** | An organization's members sign in through the organization's own identity provider (login is the SAML service provider; their IdP proves who they are) | Organizations; an XML signature library reviewed for signature-wrapping attacks |
 | 9d | **RFC 9449 DPoP** | Tokens bound to the client's key, so a stolen token is useless elsewhere | Support in `@cloudflare/workers-oauth-provider`, or our own token-endpoint and resource-server wrapping; clients that send DPoP proofs |
@@ -960,6 +1040,7 @@ handling has a long record of signature-wrapping bypasses.
 | RFC 7591 Dynamic client registration | Replaced by client metadata documents, which can't be abused to fill the database | Never, unless MCP requires it again |
 | Client credentials grant | No machine-to-machine client; services talk over Service Bindings | A third-party backend needs its own access |
 | RFC 9101 JAR | Signed request objects; PAR (9d) already keeps the request off the browser | A FAPI-grade client |
+| Microsoft, GitHub, Apple and other social sign-in | The owner decided on 2026-11-12: Google, email codes and passkeys are the ways in | The owner decides otherwise |
 | FedCM | Browser-mediated sign-in for third-party sites; only useful once sites embed "Sign in with 2earl" | A site asks for it |
 | Shared Signals (CAEP, RISC) | Pushes session and credential events to relying parties; there is one relying party, our own gateway, which already checks every token | Several independent relying parties |
 

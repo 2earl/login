@@ -150,6 +150,8 @@ export async function signIn(
 export async function resetDatabase(): Promise<void> {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM deletion_notices'),
+    env.DB.prepare('DELETE FROM org_deletion_notices'),
+    env.DB.prepare('DELETE FROM organizations'),
     env.DB.prepare('DELETE FROM mfa_pending'),
     env.DB.prepare('DELETE FROM passkey_challenges'),
     env.DB.prepare('DELETE FROM recovery_codes'),

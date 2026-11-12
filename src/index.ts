@@ -7,6 +7,7 @@ import { deliverDeletionNotices } from './deletion-notices';
 import { serviceForResource } from './services';
 
 export { PromptshareDirectory } from './directory';
+export { OrganizationDirectory } from './org-directory';
 
 const app = createApp({
   fetch: (input, init) => fetch(input, init),
@@ -70,6 +71,7 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
         this.env.DB.prepare('DELETE FROM login_tx WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM passkey_challenges WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM device_codes WHERE expires_at <= ?').bind(now),
+        this.env.DB.prepare('DELETE FROM org_invitations WHERE expires_at <= ?').bind(now),
         this.env.DB.prepare('DELETE FROM audit_events WHERE at < ?').bind(
           now - AUDIT_RETENTION_SECONDS,
         ),
