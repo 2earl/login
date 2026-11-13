@@ -47,6 +47,7 @@ import {
 } from './pages';
 import { safeReturnTo } from './return-to';
 import { MFA_CSP } from './security-headers';
+import { SECURITY_EVENTS } from './pages';
 import { listIdentities } from './users';
 import type { Session } from './sessions';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp';
@@ -160,6 +161,7 @@ export function registerMfaRoutes(app: Hono<AppEnv>, deps: Deps): void {
     return securityPage({
       factors: await listFactors(c.env.DB, session.user.id),
       methods: await listIdentities(c.env, session.user.id),
+      activity: await recentSecurityEvents(c.env.DB, session.user.id, deps.now()),
       recoveryRemaining: await remainingRecoveryCodes(c.env.DB, session.user.id),
       mfaRequired: mfaRequired(c.env),
       mustEnrol: mfaGate(c.env, session) === 'enrol',
@@ -646,4 +648,31 @@ export function registerMfaRoutes(app: Hono<AppEnv>, deps: Deps): void {
 function stringField(form: FormData, name: string): string | null {
   const value = form.get(name);
   return typeof value === 'string' ? value : null;
+}
+
+/** The account's security events of the last 30 days, newest first (DESIGN §4.5). */
+async function recentSecurityEvents(db: D1Database, userId: string, now: number) {
+  const { results } = await db
+    .prepare(
+      `SELECT at, event, ip_prefix, json_extract(detail, '$.method') AS method, client_id
+       FROM audit_events
+       WHERE actor_user_id = ? AND at > ?
+         AND event IN (${SECURITY_EVENTS.map(() => '?').join(', ')})
+       ORDER BY at DESC LIMIT 15`,
+    )
+    .bind(userId, now - 30 * 24 * 60 * 60, ...SECURITY_EVENTS)
+    .all<{
+      at: number;
+      event: string;
+      ip_prefix: string | null;
+      method: string | null;
+      client_id: string | null;
+    }>();
+  return results.map((r) => ({
+    at: r.at,
+    event: r.event,
+    ipPrefix: r.ip_prefix,
+    method: r.method,
+    client: null,
+  }));
 }

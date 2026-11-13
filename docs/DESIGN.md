@@ -191,9 +191,10 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
 
 **The signed-in app.** Every page under `/account`, `/orgs` and `/admin` shares one frame
 (`src/shell.ts`, `page()` in `src/pages.ts`):
-- a top bar with the account menu (a `<details>`: name, address, Prompt share, sign out);
-- navigation on the left, which becomes a strip under the top bar on phones: Overview,
-  Sign-in & security, Devices, Connected apps, Organizations, Your data, and Admin for the owner.
+- a top bar with the account menu, a `<details>` holding who is signed in and Sign out;
+- navigation on the left: Overview, Sign-in & security, Devices, Connected apps, Organizations,
+  Your data, and Admin for the owner. On phones it becomes one menu, named after the current page,
+  under the top bar.
 
 Who is signed in reaches `page()` through an `AsyncLocalStorage` set once per request by a
 middleware, so page functions don't pass it along. Every page still works without JavaScript and
@@ -202,8 +203,8 @@ one thing to do there has all the attention.
 
 | Page | What it holds |
 |---|---|
-| `/account` | Overview: profile, and the account at a glance (second factor, sign-in methods, connected apps, organizations), each with where to change it |
-| `/account/security` | How you sign in (add or remove methods), passkeys, authenticator app, recovery codes |
+| `/account` | Overview: who you are, and the account at a glance (second factor, sign-in methods, connected apps, organizations), each with where to change it |
+| `/account/security` | How you sign in (add or remove methods), passkeys, authenticator app, recovery codes, and recent activity: the account's security events of the last 30 days with the network they came from, so a person can spot what they didn't do |
 | `/account/sessions` | Signed-in devices |
 | `/account/apps` | Connected apps |
 | `/account/orgs` | Organizations; each has the tabs Members, Activity, Domains & SSO and Settings (§4.14) |

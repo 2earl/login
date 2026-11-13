@@ -464,3 +464,17 @@ describe('with an account that has a second factor', () => {
     expect(setCookies(authorize)['__Host-session']).toBeUndefined();
   });
 });
+
+describe('the security page', () => {
+  it('lists recent security activity, with where it came from', async () => {
+    await resetDatabase();
+    const google = new FakeGoogle();
+    const signed = makeApp(google, () => NOW);
+    const { session } = await signIn(signed, google);
+    const html = await (
+      await call(signed, '/account/security', { cookies: { '__Host-session': session ?? '' } })
+    ).text();
+    expect(html).toContain('Recent activity');
+    expect(html).toContain('Signed in with Google');
+  });
+});

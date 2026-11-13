@@ -139,7 +139,8 @@ describe('organizations', () => {
     expect(page).toContain('Organization created.');
     const account = await (await get(ada, '/account/orgs')).text();
     expect(account).toContain(`href="/orgs/${orgId}"`);
-    expect(account).toContain('Owner · 1 member');
+    expect(account).toContain('role-owner">Owner<');
+    expect(account).toContain('1 member<');
     expect(await (await get(ada, '/account')).text()).toContain('Acme Research');
   });
 

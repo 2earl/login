@@ -153,7 +153,9 @@ describe('account page', () => {
     const overview = await (
       await call(app, '/account', { cookies: { '__Host-session': session } })
     ).text();
-    expect(overview).toContain('href="https://promptshare.cc"');
+    // The overview is about the account itself; services are connected apps, not links here.
+    expect(overview).not.toContain('Use your account with');
+    expect(overview).toContain('Member since');
     for (const href of [
       '/account/security',
       '/account/sessions',
