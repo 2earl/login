@@ -458,6 +458,10 @@ describe('emails', () => {
     expect(
       mailHtml({ ...notice, action: { label: 'Go', url: 'https://evil.example/x' } }),
     ).not.toContain('href="https://evil.example');
+    // A full stop after a link ends the sentence, not the address.
+    expect(mailHtml({ ...notice, body: ['Open https://login.2earl.com/account.'] })).toContain(
+      'href="https://login.2earl.com/account"',
+    );
   });
 
   it('say when and from where a security change came, and leave out a deleted account', () => {

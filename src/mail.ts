@@ -58,9 +58,10 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-const OWN_URL = /https:\/\/(?:[a-z0-9-]+\.)*2earl\.com(?:\/[^\s<>"']*)?/g;
+const OWN_URL = /https:\/\/(?:[a-z0-9-]+\.)*2earl\.com(?:\/(?:[^\s<>"']*[^\s<>"'.,;:!?)])?)?/g;
 
-/** Our own https links become links; everything else is text. */
+/** Our own https links become links; everything else is text. A full stop or comma after a
+ * link ends the sentence, not the address. */
 const linkify = (escaped: string) =>
   escaped.replace(
     OWN_URL,
