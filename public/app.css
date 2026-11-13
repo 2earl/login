@@ -1324,6 +1324,7 @@ code {
 
 .app-frame {
   display: grid;
+  align-content: start;
   grid-template-columns: 14rem minmax(0, 46rem);
   gap: clamp(2rem, 5vw, 4rem);
   width: 100%;
@@ -1331,6 +1332,15 @@ code {
   margin: 0 auto;
   padding: 2.5rem clamp(1rem, 4vw, 2rem) 3rem;
   flex: 1;
+}
+
+/* On phones, the navigation is one menu named after the current page (no script needed). */
+.nav-mobile {
+  display: none;
+}
+
+.app-frame-wide {
+  grid-template-columns: 14rem minmax(0, 1fr);
 }
 
 .side-nav {
@@ -1744,28 +1754,57 @@ code {
   }
 
   .side-nav {
+    display: none;
+  }
+
+  .nav-mobile {
+    display: block;
     position: sticky;
     top: 3.6rem;
     z-index: 5;
-    flex-direction: row;
     margin: 0 calc(-1 * clamp(1rem, 4vw, 2rem));
     padding: 0.5rem clamp(1rem, 4vw, 2rem);
-    overflow-x: auto;
     background: var(--bg);
     border-bottom: 1px solid var(--rule);
-    scrollbar-width: none;
   }
 
-  .nav-link {
-    white-space: nowrap;
+  .nav-mobile summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--rule);
+    border-radius: 0.625rem;
+    background: var(--surface);
+    font: 500 1rem/1.4 var(--display);
+    cursor: pointer;
+    list-style: none;
   }
 
-  .nav-admin {
-    margin: 0 0 0 0.5rem;
-    padding-top: 0.5rem;
-    border-top: 0;
-    border-left: 1px solid var(--rule);
-    border-radius: 0;
+  .nav-mobile summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .nav-mobile summary::after {
+    content: '';
+    width: 0.5rem;
+    height: 0.5rem;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    rotate: 45deg;
+    translate: 0 -0.125rem;
+  }
+
+  .nav-mobile[open] summary::after {
+    rotate: 225deg;
+    translate: 0 0.125rem;
+  }
+
+  .nav-mobile-links {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    padding: 0.5rem 0 0.25rem;
   }
 
   .account-menu-name {
@@ -1811,4 +1850,62 @@ code {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+.identity-meta {
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.field-hint {
+  margin: -0.5rem 0 1rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.activity-where {
+  color: var(--muted);
+}
+
+.org-row {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.875rem 1.125rem;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.org-row:hover {
+  background: var(--surface-2);
+  text-decoration: none;
+}
+
+.people > li + li > .org-row {
+  border-top: 1px solid var(--rule);
+}
+
+.people > li:first-child > .org-row {
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.people > li:last-child > .org-row {
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.org-row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.avatar-square {
+  border-radius: 0.5rem;
+  background: var(--vermilion);
+}
+
+.people + .data-actions {
+  margin-top: 1rem;
 }

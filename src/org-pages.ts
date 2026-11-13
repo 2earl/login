@@ -13,7 +13,7 @@ import {
   type InvitationView,
 } from './orgs';
 import { challengeRecordName, type OrgDomain } from './org-domains';
-import { escapeHtml, formatDate, page } from './pages';
+import { escapeHtml, formatDate, formatDateTime, page } from './pages';
 import type { ScimTokenInfo } from './scim';
 
 /** Server-rendered pages for organizations (DESIGN §4.14). Every value is escaped. */
@@ -73,24 +73,26 @@ export function orgHeader(org: Organization, role: OrgRole, tab: OrgTab): string
 
 /** The account page's list of the account's organizations. */
 export function organizationsSection(orgs: OrgSummary[]): string {
+  // Each row is one link, the whole row: name, your role and its size.
   const items = orgs
     .map(
       (o) =>
-        '<li class="app"><div class="app-main">' +
-        `<p class="app-name"><a href="/orgs/${escapeHtml(o.id)}">${escapeHtml(o.name)}</a>` +
+        `<li><a class="org-row" href="/orgs/${escapeHtml(o.id)}">` +
+        `<span class="avatar avatar-sm avatar-square" aria-hidden="true">${escapeHtml(firstLetter(o.name))}</span>` +
+        `<span class="org-row-main"><span class="person-name">${escapeHtml(o.name)}` +
         (o.status === 'suspended' ? ' <span class="tag tag-alert">Suspended</span>' : '') +
-        '</p>' +
-        `<p class="app-meta">${escapeHtml(ROLE_LABEL[o.role])} · ${String(o.members)} ${o.members === 1 ? 'member' : 'members'}</p>` +
-        '</div></li>',
+        '</span>' +
+        `<span class="person-meta">${String(o.members)} ${o.members === 1 ? 'member' : 'members'}</span></span>` +
+        `<span class="role-badge role-${o.role}">${escapeHtml(ROLE_LABEL[o.role])}</span>` +
+        '</a></li>',
     )
     .join('');
   return (
-    '<section class="section" aria-labelledby="orgs-heading">' +
-    '<h2 id="orgs-heading">Organizations</h2>' +
+    '<section class="section section-first" aria-label="Your organizations">' +
     (orgs.length > 0
-      ? `<ul class="apps">${items}</ul>`
-      : '<p class="section-text">An organization lets a team use 2earl together: everyone keeps their own account, and the organization shows who belongs to it and with which role.</p>') +
-    '<div class="data-actions"><a class="button secondary" href="/orgs/new">Create an organization</a></div>' +
+      ? `<ul class="people">${items}</ul>`
+      : '<p class="empty">You’re not in an organization yet. Create one, or accept an invitation someone sends you.</p>') +
+    '<div class="data-actions"><a class="button primary" href="/orgs/new">Create an organization</a></div>' +
     '</section>'
   );
 }
@@ -98,7 +100,7 @@ export function organizationsSection(orgs: OrgSummary[]): string {
 export function newOrgPage(params: { name?: string; error?: string } = {}): string {
   return page(
     'Create an organization',
-    '<p class="crumb"><a href="/account">Your account</a></p>' +
+    '<p class="crumb"><a href="/account/orgs">Organizations</a></p>' +
       '<h1>Create an organization</h1>' +
       '<p class="lede">You become its owner. Then invite people by email; each one joins with their own 2earl account.</p>' +
       '<form method="post" action="/orgs" class="code-form" novalidate>' +
@@ -335,16 +337,6 @@ export function orgActivityPage(params: {
       '<p class="note">The last 90 days, newest first, up to 200 events.</p>' +
       '</section>',
     { section: 'Organization' },
-  );
-}
-
-function formatDateTime(unixSeconds: number): string {
-  return (
-    new Intl.DateTimeFormat('en-GB', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-      timeZone: 'UTC',
-    }).format(new Date(unixSeconds * 1000)) + ' UTC'
   );
 }
 

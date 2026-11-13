@@ -123,13 +123,13 @@ function appShell(shell: ShellContext, main: string): string {
     `<summary><span class="avatar" aria-hidden="true">${escapeHtml(initial(viewer.name, viewer.email))}</span><span class="account-menu-name">${escapeHtml(who)}</span></summary>` +
     '<div class="account-menu-panel">' +
     `<p class="account-menu-who"><strong>${escapeHtml(who)}</strong>${viewer.email && viewer.name ? `<span>${escapeHtml(viewer.email)}</span>` : ''}</p>` +
-    '<a href="/account">Your account</a>' +
-    '<a href="https://promptshare.cc">Prompt share</a>' +
     '<form method="post" action="/logout"><button type="submit">Sign out</button></form>' +
     '</div></details>' +
     '</header>' +
-    '<div class="app-frame">' +
+    `<div class="app-frame${active === 'admin' ? ' app-frame-wide' : ''}">` +
     `<nav class="side-nav" aria-label="Account">${links}</nav>` +
+    `<details class="nav-mobile"><summary>${escapeHtml(NAV.find((item) => item.key === active)?.label ?? 'Menu')}</summary>` +
+    `<nav class="nav-mobile-links" aria-label="Account">${links}</nav></details>` +
     `<main class="app-main" id="main">${main}</main>` +
     '</div>' +
     LEGAL_LINKS +
@@ -305,11 +305,12 @@ export function welcomePage(params: { email: string | null; returnTo: string | n
 export function namePage(name: string | null): string {
   return page(
     'Your name',
-    '<p class="crumb"><a href="/account">Your account</a></p>' +
+    '<p class="crumb"><a href="/account">Overview</a></p>' +
       '<h1>Your name</h1>' +
       '<form method="post" action="/account/name" class="code-form">' +
-      '<label class="field"><span>Name <span class="optional">leave empty to show only your address</span></span>' +
-      `<input name="name" type="text" autocomplete="name" maxlength="80" value="${escapeHtml(name ?? '')}"></label>` +
+      '<label class="field"><span>Name</span>' +
+      `<input name="name" type="text" autocomplete="name" maxlength="80" aria-describedby="name-hint" value="${escapeHtml(name ?? '')}"></label>` +
+      '<p class="field-hint" id="name-hint">Shown to apps you allow and to organizations you join. Leave it empty to show only your address.</p>' +
       '<div class="consent-actions"><button class="button primary" type="submit">Save</button>' +
       '<a class="button secondary" href="/account">Cancel</a></div>' +
       '</form>',
@@ -320,7 +321,7 @@ export function namePage(name: string | null): string {
 export function addEmailPage(params: { error?: string; email?: string }): string {
   return page(
     'Add an email address',
-    '<p class="crumb"><a href="/account">Your account</a></p>' +
+    '<p class="crumb"><a href="/account/security">Sign-in &amp; security</a></p>' +
       '<h1>Sign in with an email address</h1>' +
       '<p class="lede">We send a code to the address to check it’s yours. After that, you can sign in with a code sent there.</p>' +
       '<form method="post" action="/account/methods/email" class="email-form" novalidate>' +
@@ -468,7 +469,8 @@ export function accountPage(params: {
     noticeHtml(params.notice) +
       '<header class="identity">' +
       `<div class="badge" aria-hidden="true">${escapeHtml(initial(params.name, params.email))}</div>` +
-      `<div><h1>${escapeHtml(heading)}</h1><p>${escapeHtml(params.email ?? '')}</p></div>` +
+      `<div><h1>${escapeHtml(heading)}</h1><p>${escapeHtml(params.email ?? '')}</p>` +
+      `<p class="identity-meta">Member since ${formatDate(params.memberSince)} · <a href="/account/name">${params.name ? 'Change name' : 'Add your name'}</a></p></div>` +
       '</header>' +
       '<section class="section" aria-labelledby="glance-heading">' +
       '<h2 id="glance-heading">At a glance</h2>' +
@@ -501,27 +503,9 @@ export function accountPage(params: {
               .map((o) => escapeHtml(o.name))
               .join(', ') + (orgs.length > 3 ? ` and ${String(orgs.length - 3)} more` : ''),
         '/account/orgs',
-        orgs.length === 0 ? 'Create one' : 'Open',
+        orgs.length === 0 ? 'Create one' : 'Manage',
       ) +
       '</ul>' +
-      '</section>' +
-      '<section class="section" aria-labelledby="services-heading">' +
-      '<h2 id="services-heading">Use your account with</h2>' +
-      '<ul class="services">' +
-      '<li><a href="https://promptshare.cc"><span class="service-name">Prompt share</span><span class="service-what">Prompts and shared sessions for your assistants</span></a></li>' +
-      '<li><a href="https://promptshare.cc/connect"><span class="service-name">Claude and other assistants</span><span class="service-what">Add a 2earl connector, then allow it here</span></a></li>' +
-      (params.isOwner
-        ? '<li><a href="/admin"><span class="service-name">Admin</span><span class="service-what">Users, invitations, organizations, apps and the security log</span></a></li>'
-        : '') +
-      '</ul>' +
-      '</section>' +
-      '<section class="section" aria-labelledby="details-heading">' +
-      '<h2 id="details-heading">Profile</h2>' +
-      '<dl class="details">' +
-      `<dt>Name</dt><dd>${escapeHtml(params.name ?? 'Not set')} · <a href="/account/name">Change</a></dd>` +
-      `<dt>Email</dt><dd>${escapeHtml(params.email ?? 'Not set')}</dd>` +
-      `<dt>Member since</dt><dd>${formatDate(params.memberSince)}</dd>` +
-      '</dl>' +
       '</section>',
   );
 }
@@ -616,8 +600,7 @@ export function sessionsPage(params: {
     .join('');
   return page(
     'Signed-in devices',
-    '<p class="crumb"><a href="/account">Your account</a></p>' +
-      '<h1>Signed-in devices</h1>' +
+    '<h1>Signed-in devices</h1>' +
       '<p class="lede">Every browser where your 2earl account is signed in. If you don’t recognise one, sign it out, then check how you sign in and add a second factor.</p>' +
       (params.notice ? `<p class="notice" role="status">${escapeHtml(params.notice)}</p>` : '') +
       `<ul class="apps">${items}</ul>` +
@@ -625,7 +608,7 @@ export function sessionsPage(params: {
         ? '<form method="post" action="/account/sessions/end-others" class="actions">' +
           '<button class="button danger" type="submit">Sign out all other devices</button></form>'
         : '<p class="note">This is the only device signed in.</p>') +
-      '<p class="note">Apps you connected keep their access until you disconnect them on your account page. Signing out a device doesn’t disconnect apps.</p>',
+      '<p class="note">Signing out a device doesn’t disconnect apps: they keep their access until you disconnect them under <a href="/account/apps">Connected apps</a>.</p>',
   );
 }
 
@@ -872,11 +855,73 @@ function factorRow(factor: FactorView): string {
   );
 }
 
+export interface SecurityEvent {
+  at: number;
+  event: string;
+  ipPrefix: string | null;
+  method: string | null;
+  client: string | null;
+}
+
+const SECURITY_EVENT: Record<string, (e: SecurityEvent) => string> = {
+  'login.succeeded': (e) =>
+    e.method && METHOD_LABEL[e.method]
+      ? `Signed in with ${METHOD_LABEL[e.method] ?? ''}`
+      : 'Signed in',
+  'identity.added': () => 'Added a way to sign in',
+  'identity.removed': () => 'Removed a way to sign in',
+  'mfa.enrolled': () => 'Added a second factor',
+  'mfa.removed': () => 'Removed a second factor',
+  'mfa.recovery_codes_created': () => 'Created new recovery codes',
+  'mfa.recovery_code_used': () => 'Used a recovery code',
+  'mfa.locked': () => 'Second factor locked after too many wrong codes',
+  'consent.approved': (e) => (e.client ? `Allowed ${e.client}` : 'Allowed an app'),
+  'grant.revoked': (e) => (e.client ? `Disconnected ${e.client}` : 'Disconnected an app'),
+  'device.approved': () => 'Signed in a device with a code',
+  'session.ended': () => 'Signed out a device',
+  logout: () => 'Signed out',
+  'account.exported': () => 'Downloaded your data',
+};
+
+/** The events a person reviews to spot something they didn't do. */
+export const SECURITY_EVENTS = Object.keys(SECURITY_EVENT);
+
+function recentActivity(events: SecurityEvent[]): string {
+  const rows = events
+    .map((e) => {
+      const what = SECURITY_EVENT[e.event]?.(e) ?? e.event;
+      const where = e.ipPrefix ? ` · from ${e.ipPrefix.replace(/\.0\/24$|::\/48$/, '…')}` : '';
+      return (
+        '<li class="activity-row">' +
+        `<time datetime="${new Date(e.at * 1000).toISOString()}">${escapeHtml(formatDateTime(e.at))}</time>` +
+        `<p>${escapeHtml(what)}<span class="activity-where">${escapeHtml(where)}</span></p>` +
+        '</li>'
+      );
+    })
+    .join('');
+  return (
+    '<h2 class="group-title" id="activity-heading">Recent activity</h2>' +
+    '<p class="section-text">The last 30 days. If you see something you didn’t do, sign out the device under <a href="/account/sessions">Devices</a>, then add a second factor.</p>' +
+    (rows ? `<ol class="activity">${rows}</ol>` : '<p class="empty">Nothing yet.</p>')
+  );
+}
+
+/** "13 Nov 2026, 06:07 UTC". */
+export function formatDateTime(unixSeconds: number): string {
+  return `${new Intl.DateTimeFormat('en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'UTC',
+  }).format(new Date(unixSeconds * 1000))} UTC`;
+}
+
 export function securityPage(params: {
   factors: FactorView[];
   /** How the account signs in (not shown while a first factor must be added). */
   methods?: Identity[];
   hasGoogle?: boolean;
+  /** The account's recent security events, newest first. */
+  activity?: SecurityEvent[];
   recoveryRemaining: number;
   mfaRequired: boolean;
   /** The account can't be used until a factor is added (MFA_REQUIRED). */
@@ -951,6 +996,7 @@ export function securityPage(params: {
         ? '<p class="fine">2earl requires a second factor, so your only one can’t be removed. Add another first.</p>'
         : '') +
       '<p class="fine">Adding or removing a factor asks for your second factor again if you last used it more than 5 minutes ago.</p>' +
+      (params.activity ? recentActivity(params.activity) : '') +
       (params.methods
         ? ''
         : '<div class="actions"><a class="button secondary" href="/account">Back to your account</a></div>'),
