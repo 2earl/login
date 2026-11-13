@@ -80,7 +80,7 @@ export async function sendCode(
     code.code,
     `${c.env.ISSUER}/login/email/link?token=${encodeURIComponent(code.linkToken)}`,
   );
-  if (!(await sendMail(c.env, input.email, mail.subject, mail.lines))) {
+  if (!(await sendMail(c.env, input.email, mail))) {
     await discardEmailCode(c.env.DB, c.env.SESSION_PEPPER, code.cookieValue);
     return c.html(messagePage(MESSAGES.emailNotSent, 'No code sent'), 502);
   }

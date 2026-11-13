@@ -13,7 +13,7 @@ import {
   workerCtx,
   type AppContext,
 } from './http';
-import { notify, sendMail, noticeMail, type Notice } from './mail';
+import { notify, sendMail, noticeMail, type Notice, type NoticeContext } from './mail';
 import { authorizationServer } from './oauth';
 import { MESSAGES, messagePage, type Message } from './pages';
 import { safeReturnTo } from './return-to';
@@ -97,8 +97,8 @@ export async function finishDeletion(
   }
   // The account is gone, so the address is taken from before; this is the last email.
   if (address?.primary_email) {
-    const mail = noticeMail({ kind: 'account_deleted' });
-    workerCtx(c).waitUntil(sendMail(c.env, address.primary_email, mail.subject, mail.lines));
+    const mail = noticeMail({ kind: 'account_deleted' }, noticeContext(c, now));
+    workerCtx(c).waitUntil(sendMail(c.env, address.primary_email, mail));
   }
   clearCookie(c, SESSION_COOKIE);
   clearCookie(c, CONSENT_APPROVALS_COOKIE);
@@ -107,7 +107,16 @@ export async function finishDeletion(
 
 /** Sends a security notice after the response. */
 export function notifyLater(c: AppContext, userId: string, notice: Notice): void {
-  workerCtx(c).waitUntil(notify(c.env, userId, notice));
+  workerCtx(c).waitUntil(notify(c.env, userId, notice, noticeContext(c)));
+}
+
+/** When the change happened, and the device and network it came from (DESIGN §4.9). */
+export function noticeContext(c: AppContext, now = Math.floor(Date.now() / 1000)): NoticeContext {
+  return {
+    at: now,
+    device: deviceLabel(c.req.header('User-Agent')),
+    network: clientIp(c),
+  };
 }
 
 /** A message page with its status, for the many ways sign-in can stop. */
