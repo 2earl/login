@@ -119,8 +119,9 @@ The measures are in [THREAT_MODEL.md](THREAT_MODEL.md):
 - audit logging;
 - rate limiting.
 
-**Breach procedure (to write in phase 5).** Assess within 24 h. Notify the supervisory authority
-within 72 h where required (Art. 33). Notify users where there is high risk (Art. 34).
+**Breach procedure:** [OPERATIONS.md §2](OPERATIONS.md#2-incident-and-breach-procedure): assess
+within 24 h, notify the supervisory authority within 72 h where required (Art. 33), people where
+the risk is high (Art. 34), and organizations about their managed accounts within 48 h.
 
 ## 8. Owner to-dos before opening sign-up
 
