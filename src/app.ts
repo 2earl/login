@@ -10,6 +10,7 @@ import type { JWTVerifyGetKey } from 'jose';
 import { exportAccount } from './account';
 import { exportFromServices } from './service-exports';
 import { registerOrgRoutes } from './org-routes';
+import { isShellPath, withShell } from './shell';
 import { registerScimRoutes } from './scim-routes';
 import { registerSamlRoutes } from './saml-routes';
 import { DpopError, dpopOf, verifyDpopProof, withDpop } from './dpop';
@@ -32,6 +33,9 @@ import {
   MESSAGES,
   accountDeletedPage,
   accountPage,
+  appsPage,
+  dataPage,
+  orgsPage,
   consentPage,
   deleteAccountPage,
   messagePage,
@@ -279,6 +283,22 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     return c.redirect(`${target}?return_to=${encodeURIComponent(url.pathname + url.search)}`, 303);
   });
 
+  // The signed-in app shell (DESIGN §4.5): who is signed in, for the navigation on every account,
+  // organization and admin page.
+  app.use('*', async (c, next) => {
+    const session = c.get('session');
+    if (!session || !isShellPath(c.req.path) || mfaGate(c.env, session)) {
+      await next();
+      return;
+    }
+    const viewer = {
+      name: session.user.displayName,
+      email: session.user.primaryEmail,
+      isOwner: await isOwnerUser(c.env, session.user.id),
+    };
+    await withShell({ viewer, path: c.req.path }, () => next());
+  });
+
   app.get('/', async (c) =>
     c.get('session')
       ? c.redirect('/account', 303)
@@ -524,6 +544,38 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     );
   });
 
+  app.get('/account/apps', async (c) => {
+    const session = c.get('session');
+    if (!session) return c.redirect('/login?return_to=%2Faccount%2Fapps', 303);
+    const oauth = authorizationServer(c.env).getOAuthApi(c.env);
+    return c.html(
+      appsPage({
+        apps: await connectedApps(oauth, session.user.id),
+        notice: c.req.query('disconnected') === '1' ? 'App disconnected.' : null,
+      }),
+    );
+  });
+
+  app.get('/account/orgs', async (c) => {
+    const session = c.get('session');
+    if (!session) return c.redirect('/login?return_to=%2Faccount%2Forgs', 303);
+    const notices: Record<string, string> = {
+      left: 'You left the organization.',
+      org_deleted: 'Organization deleted.',
+      declined: 'Invitation declined.',
+    };
+    return c.html(
+      orgsPage({
+        orgs: await membershipsOf(c.env.DB, session.user.id),
+        notice: notices[c.req.query('saved') ?? ''] ?? null,
+      }),
+    );
+  });
+
+  app.get('/account/data', (c) =>
+    c.get('session') ? c.html(dataPage()) : c.redirect('/login?return_to=%2Faccount%2Fdata', 303),
+  );
+
   app.post('/account/apps/disconnect', async (c) => {
     if (!isSameOrigin(c)) return c.json({ error: 'forbidden' }, 403);
     const session = c.get('session');
@@ -540,7 +592,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       actorUserId: session.user.id,
       ipPrefix: clientIp(c),
     });
-    return c.redirect('/account?disconnected=1', 303);
+    return c.redirect('/account/apps?disconnected=1', 303);
   });
 
   // ---- Data-subject rights (DATA_PROTECTION §6, DESIGN §4.5) ------------------------------

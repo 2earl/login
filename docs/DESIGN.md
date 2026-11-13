@@ -189,7 +189,27 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
 
 ### 4.5 Account page
 
-`/account` provides:
+**The signed-in app.** Every page under `/account`, `/orgs` and `/admin` shares one frame
+(`src/shell.ts`, `page()` in `src/pages.ts`):
+- a top bar with the account menu (a `<details>`: name, address, Prompt share, sign out);
+- navigation on the left, which becomes a strip under the top bar on phones: Overview,
+  Sign-in & security, Devices, Connected apps, Organizations, Your data, and Admin for the owner.
+
+Who is signed in reaches `page()` through an `AsyncLocalStorage` set once per request by a
+middleware, so page functions don't pass it along. Every page still works without JavaScript and
+keeps the strict CSP. The sign-in, consent and second-factor pages stay outside the frame, so the
+one thing to do there has all the attention.
+
+| Page | What it holds |
+|---|---|
+| `/account` | Overview: profile, and the account at a glance (second factor, sign-in methods, connected apps, organizations), each with where to change it |
+| `/account/security` | How you sign in (add or remove methods), passkeys, authenticator app, recovery codes |
+| `/account/sessions` | Signed-in devices |
+| `/account/apps` | Connected apps |
+| `/account/orgs` | Organizations; each has the tabs Members, Activity, Domains & SSO and Settings (§4.14) |
+| `/account/data` | Download a copy; delete the account |
+
+`/account` used to provide all of these on one page:
 - Connected apps: grants listed per client, with revoke.
 - Export my data (`/account/export`): a JSON download of the account, sign-in methods, sessions,
   connected apps, invitation and the user's security log. Hashes of cookies and tokens are not
@@ -640,6 +660,17 @@ with the account-deletion notices (§4.8). None opts in yet.
 **When an owner deletes their account** (§6.3): where they are the only owner, the
 longest-standing admin becomes owner, else the longest-standing member, and that person gets an
 email. An organization with nobody else is deleted. The deletion page lists both beforehand.
+
+**Activity** (`/orgs/:id/activity`, owners and admins): the organization's events from the audit
+log, newest first:
+- who joined, left or was removed;
+- role changes and invitations;
+- domain, directory sync and single sign-on changes;
+- what the directory did.
+
+Each entry names the people by their names in 2earl. It shows no addresses of invitees, and no IP
+addresses. Events are kept 90 days, like the rest of the audit log. An index on the `org` that
+the events carry keeps the page fast (`0016`).
 
 **Suspension** (`/admin/orgs`): the 2earl owner can suspend, reactivate or delete an
 organization. A suspended one can't be changed and services don't see it; members can still

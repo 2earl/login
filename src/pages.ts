@@ -8,6 +8,7 @@ import { ASSET_URLS } from './assets.generated';
 import type { SignupMode } from './settings';
 import type { DeviceSession } from './sessions';
 import type { Identity } from './users';
+import { NAV, isShellPath, navFor, shellContext, type ShellContext } from './shell';
 import { organizationsSection } from './org-pages';
 import type { OrgSummary, OwnershipPlan } from './orgs';
 
@@ -61,9 +62,11 @@ export function page(
     wide?: boolean;
     /** Label next to the logo. */
     section?: string;
+    /** The sign-in page: the brand panel beside the form on wide screens. */
+    hero?: boolean;
   } = {},
 ): string {
-  return (
+  const head =
     '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
     '<meta name="color-scheme" content="light dark">' +
@@ -72,11 +75,65 @@ export function page(
     `<link rel="preload" href="${ASSET_URLS.font}" as="font" type="font/woff2" crossorigin>` +
     `<link rel="stylesheet" href="${ASSET_URLS.appCss}">` +
     (options.passkeyScript ? `<script type="module" src="${ASSET_URLS.passkeyJs}"></script>` : '') +
-    `</head><body><div class="page${options.wide ? ' page-wide' : ''}">` +
+    '</head>';
+  const shell = shellContext();
+  if (shell && isShellPath(shell.path)) return head + appShell(shell, main) + '</html>';
+  if (options.hero) {
+    return (
+      head +
+      '<body class="hero-body"><div class="hero">' +
+      '<aside class="hero-panel" aria-hidden="true">' +
+      `<div class="hero-mark">${MARK}</div>` +
+      '<p class="hero-line">One account for every 2earl service.</p>' +
+      '<p class="hero-sub">Sign in once. Decide which apps may act for you, and take it back at any time.</p>' +
+      '</aside>' +
+      '<div class="hero-main">' +
+      `<header class="site"><a class="brand" href="/">${MARK}<span class="brand-name">2earl</span><span class="brand-sub">${escapeHtml(options.section ?? 'Account')}</span></a></header>` +
+      `<main class="main">${main}</main>` +
+      LEGAL_LINKS +
+      '</div></div></body></html>'
+    );
+  }
+  return (
+    head +
+    `<body><div class="page${options.wide ? ' page-wide' : ''}">` +
     `<header class="site"><a class="brand" href="/">${MARK}<span class="brand-name">2earl</span><span class="brand-sub">${escapeHtml(options.section ?? 'Account')}</span></a></header>` +
     `<main class="main${options.wide ? ' main-wide' : ''}">${main}</main>` +
     LEGAL_LINKS +
     '</div></body></html>'
+  );
+}
+
+/** The signed-in app: top bar with the account menu, navigation, and the page. */
+function appShell(shell: ShellContext, main: string): string {
+  const { viewer, path } = shell;
+  const active = navFor(path);
+  const links = NAV.filter((item) => !item.ownerOnly || viewer.isOwner)
+    .map(
+      (item) =>
+        `<a class="nav-link${item.ownerOnly ? ' nav-admin' : ''}" href="${item.href}"${item.key === active ? ' aria-current="page"' : ''}>${escapeHtml(item.label)}</a>`,
+    )
+    .join('');
+  const who = viewer.name ?? viewer.email ?? 'Your account';
+  return (
+    '<body class="app-body"><div class="shell">' +
+    '<header class="topbar">' +
+    `<a class="brand" href="/account">${MARK}<span class="brand-name">2earl</span><span class="brand-sub">Account</span></a>` +
+    '<details class="account-menu">' +
+    `<summary><span class="avatar" aria-hidden="true">${escapeHtml(initial(viewer.name, viewer.email))}</span><span class="account-menu-name">${escapeHtml(who)}</span></summary>` +
+    '<div class="account-menu-panel">' +
+    `<p class="account-menu-who"><strong>${escapeHtml(who)}</strong>${viewer.email && viewer.name ? `<span>${escapeHtml(viewer.email)}</span>` : ''}</p>` +
+    '<a href="/account">Your account</a>' +
+    '<a href="https://promptshare.cc">Prompt share</a>' +
+    '<form method="post" action="/logout"><button type="submit">Sign out</button></form>' +
+    '</div></details>' +
+    '</header>' +
+    '<div class="app-frame">' +
+    `<nav class="side-nav" aria-label="Account">${links}</nav>` +
+    `<main class="app-main" id="main">${main}</main>` +
+    '</div>' +
+    LEGAL_LINKS +
+    '</div></body>'
   );
 }
 
@@ -159,7 +216,7 @@ export function signInPage(
         : '<p class="fine">By continuing, you agree to the ' +
           '<a href="https://2earl.com/terms">Terms of service</a> and acknowledge the ' +
           '<a href="https://2earl.com/privacy">Privacy policy</a>.</p>'),
-    { passkeyScript: passkey },
+    { passkeyScript: passkey, hero: true },
   );
 }
 
@@ -349,6 +406,37 @@ function connectedApps(apps: ConnectedApp[]): string {
   );
 }
 
+/** A page heading with its one-line explanation. */
+function pageHead(title: string, lede?: string): string {
+  return (
+    `<header class="page-head"><h1>${escapeHtml(title)}</h1>` +
+    (lede ? `<p class="lede">${escapeHtml(lede)}</p>` : '') +
+    '</header>'
+  );
+}
+
+function noticeHtml(notice?: string | null): string {
+  return notice ? `<p class="notice" role="status">${escapeHtml(notice)}</p>` : '';
+}
+
+/** One row of the overview: what it is, how it stands, where to change it. */
+function glanceRow(
+  label: string,
+  value: string,
+  href: string,
+  action: string,
+  alert = false,
+): string {
+  return (
+    '<li class="glance-row">' +
+    `<span class="glance-label">${escapeHtml(label)}</span>` +
+    `<span class="glance-value${alert ? ' glance-alert' : ''}">${value}</span>` +
+    `<a class="glance-action" href="${href}">${escapeHtml(action)}</a>` +
+    '</li>'
+  );
+}
+
+/** The account overview: who you are, how the account stands, and where things live. */
 export function accountPage(params: {
   email: string | null;
   name: string | null;
@@ -363,68 +451,124 @@ export function accountPage(params: {
 }): string {
   const heading = params.name ?? 'Your account';
   const methods = params.methods ?? [];
-  const hasGoogle = methods.some((m) => m.provider === 'google');
+  const orgs = params.orgs ?? [];
+  const passkeys = params.factors.filter((f) => f.kind === 'webauthn').length;
+  const secondFactor =
+    params.factors.length === 0
+      ? 'Off'
+      : [
+          passkeys > 0 ? `${String(passkeys)} ${passkeys === 1 ? 'passkey' : 'passkeys'}` : null,
+          params.factors.some((f) => f.kind === 'totp') ? 'authenticator app' : null,
+        ]
+          .filter(Boolean)
+          .join(' and ');
+  const methodNames = methods.map((m) => (m.provider === 'google' ? 'Google' : 'email code'));
   return page(
     'Your account',
-    (params.notice ? `<p class="notice" role="status">${escapeHtml(params.notice)}</p>` : '') +
+    noticeHtml(params.notice) +
       '<header class="identity">' +
       `<div class="badge" aria-hidden="true">${escapeHtml(initial(params.name, params.email))}</div>` +
       `<div><h1>${escapeHtml(heading)}</h1><p>${escapeHtml(params.email ?? '')}</p></div>` +
       '</header>' +
+      '<section class="section" aria-labelledby="glance-heading">' +
+      '<h2 id="glance-heading">At a glance</h2>' +
+      '<ul class="glance">' +
+      glanceRow(
+        'Second factor',
+        escapeHtml(secondFactor),
+        '/account/security',
+        params.factors.length === 0 ? 'Turn on' : 'Manage',
+        params.factors.length === 0,
+      ) +
+      glanceRow(
+        'Sign in with',
+        escapeHtml(methodNames.length ? methodNames.join(', ') : 'Not set'),
+        '/account/security',
+        'Manage',
+      ) +
+      glanceRow(
+        'Connected apps',
+        params.apps.length === 0 ? 'None' : String(params.apps.length),
+        '/account/apps',
+        'Review',
+      ) +
+      glanceRow(
+        'Organizations',
+        orgs.length === 0
+          ? 'None'
+          : orgs
+              .slice(0, 3)
+              .map((o) => escapeHtml(o.name))
+              .join(', ') + (orgs.length > 3 ? ` and ${String(orgs.length - 3)} more` : ''),
+        '/account/orgs',
+        orgs.length === 0 ? 'Create one' : 'Open',
+      ) +
+      '</ul>' +
+      '</section>' +
       '<section class="section" aria-labelledby="services-heading">' +
       '<h2 id="services-heading">Use your account with</h2>' +
       '<ul class="services">' +
       '<li><a href="https://promptshare.cc"><span class="service-name">Prompt share</span><span class="service-what">Prompts and shared sessions for your assistants</span></a></li>' +
       '<li><a href="https://promptshare.cc/connect"><span class="service-name">Claude and other assistants</span><span class="service-what">Add a 2earl connector, then allow it here</span></a></li>' +
       (params.isOwner
-        ? '<li><a href="/admin"><span class="service-name">Admin</span><span class="service-what">Users, invitations, apps and the security log</span></a></li>'
+        ? '<li><a href="/admin"><span class="service-name">Admin</span><span class="service-what">Users, invitations, organizations, apps and the security log</span></a></li>'
         : '') +
       '</ul>' +
       '</section>' +
-      '<section class="section" aria-labelledby="apps-heading">' +
-      '<h2 id="apps-heading">Connected apps</h2>' +
-      connectedApps(params.apps) +
-      '</section>' +
-      organizationsSection(params.orgs ?? []) +
-      '<section class="section" aria-labelledby="methods-heading">' +
-      '<h2 id="methods-heading">How you sign in</h2>' +
-      methodsList(methods) +
-      (params.factors.some((f) => f.kind === 'webauthn')
-        ? '<p class="section-text">Your passkeys also sign you in on their own, in one step. <a href="/account/security">Manage passkeys</a></p>'
-        : '') +
-      '<div class="data-actions">' +
-      (hasGoogle
-        ? ''
-        : '<form method="post" action="/account/methods/google"><button class="button secondary" type="submit">Add Google</button></form>') +
-      '<a class="button secondary" href="/account/methods/email">Add an email address</a>' +
-      '</div>' +
-      '</section>' +
-      '<section class="section" aria-labelledby="security-heading">' +
-      '<h2 id="security-heading">Security</h2>' +
-      `<p class="section-text">${escapeHtml(factorSummary(params.factors))}</p>` +
-      '<div class="data-actions">' +
-      '<a class="button secondary" href="/account/security">Manage second factor</a>' +
-      '<a class="button secondary" href="/account/sessions">Signed-in devices</a>' +
-      '</div>' +
-      '</section>' +
       '<section class="section" aria-labelledby="details-heading">' +
-      '<h2 id="details-heading">Account details</h2>' +
+      '<h2 id="details-heading">Profile</h2>' +
       '<dl class="details">' +
       `<dt>Name</dt><dd>${escapeHtml(params.name ?? 'Not set')} · <a href="/account/name">Change</a></dd>` +
+      `<dt>Email</dt><dd>${escapeHtml(params.email ?? 'Not set')}</dd>` +
       `<dt>Member since</dt><dd>${formatDate(params.memberSince)}</dd>` +
       '</dl>' +
+      '</section>',
+  );
+}
+
+/** The apps the account allowed to act for it. */
+export function appsPage(params: { apps: ConnectedApp[]; notice?: string | null }): string {
+  return page(
+    'Connected apps',
+    noticeHtml(params.notice) +
+      pageHead(
+        'Connected apps',
+        'Apps you allowed to act for you. Disconnecting one ends its access within about a minute.',
+      ) +
+      '<section class="section section-first">' +
+      connectedApps(params.apps) +
+      '</section>',
+  );
+}
+
+/** The organizations the account belongs to. */
+export function orgsPage(params: { orgs: OrgSummary[]; notice?: string | null }): string {
+  return page(
+    'Organizations',
+    noticeHtml(params.notice) +
+      pageHead(
+        'Organizations',
+        'Teams you belong to. Everyone keeps their own account; an organization shows who belongs to it and with which role.',
+      ) +
+      organizationsSection(params.orgs),
+  );
+}
+
+/** Download a copy, or delete the account. */
+export function dataPage(): string {
+  return page(
+    'Your data',
+    pageHead('Your data', 'Everything your account holds is yours to take with you or to delete.') +
+      '<section class="section section-first" aria-labelledby="export-heading">' +
+      '<h2 id="export-heading">Download a copy</h2>' +
+      '<p class="section-text">One JSON file with your profile, sign-in methods, devices, connected apps, organizations and security events, and what 2earl services hold about you.</p>' +
+      '<div class="data-actions"><a class="button secondary" href="/account/export" download>Download your data</a></div>' +
       '</section>' +
-      '<section class="section" aria-labelledby="data-heading">' +
-      '<h2 id="data-heading">Your data</h2>' +
-      '<p class="section-text">Download a copy of everything your account holds, as a JSON file.</p>' +
-      '<div class="data-actions">' +
-      '<a class="button secondary" href="/account/export" download>Download your data</a>' +
-      '<a class="danger-link" href="/account/delete">Delete account</a>' +
-      '</div>' +
-      '</section>' +
-      '<div class="actions">' +
-      '<form method="post" action="/logout"><button class="button secondary" type="submit">Sign out</button></form>' +
-      '</div>',
+      '<section class="section" aria-labelledby="delete-heading">' +
+      '<h2 id="delete-heading">Delete your account</h2>' +
+      '<p class="section-text">Your account and everything it holds are deleted, here and in every 2earl service. You’ll confirm it on the next page.</p>' +
+      '<div class="data-actions"><a class="button danger-outline" href="/account/delete">Delete account…</a></div>' +
+      '</section>',
   );
 }
 
@@ -702,17 +846,6 @@ export function accountDeletedPage(): string {
 
 // ---- Second factor (DESIGN §4.7) ---------------------------------------------------------------
 
-function factorSummary(factors: { kind: 'webauthn' | 'totp' }[]): string {
-  if (factors.length === 0) {
-    return 'Second factor: off. Adding a passkey protects your account even if someone gets into your Google account or your inbox.';
-  }
-  const passkeys = factors.filter((f) => f.kind === 'webauthn').length;
-  const parts = [];
-  if (passkeys > 0) parts.push(passkeys === 1 ? '1 passkey' : `${String(passkeys)} passkeys`);
-  if (factors.some((f) => f.kind === 'totp')) parts.push('an authenticator app');
-  return `Second factor: on, with ${parts.join(' and ')}.`;
-}
-
 export interface FactorView {
   id: string;
   kind: 'webauthn' | 'totp';
@@ -741,6 +874,9 @@ function factorRow(factor: FactorView): string {
 
 export function securityPage(params: {
   factors: FactorView[];
+  /** How the account signs in (not shown while a first factor must be added). */
+  methods?: Identity[];
+  hasGoogle?: boolean;
   recoveryRemaining: number;
   mfaRequired: boolean;
   /** The account can't be used until a factor is added (MFA_REQUIRED). */
@@ -768,8 +904,20 @@ export function securityPage(params: {
       : '') +
       (params.notice ? `<p class="notice" role="status">${escapeHtml(params.notice)}</p>` : '') +
       (params.error ? `<p class="warning" role="alert">${escapeHtml(params.error)}</p>` : '') +
-      (params.mustEnrol ? '' : '<p class="crumb"><a href="/account">Your account</a></p>') +
-      '<h1>Second factor</h1>' +
+      (params.methods && !params.mustEnrol
+        ? pageHead('Sign-in & security') +
+          '<section class="section section-first" aria-labelledby="methods-heading">' +
+          '<h2 id="methods-heading">How you sign in</h2>' +
+          methodsList(params.methods) +
+          '<div class="data-actions">' +
+          (params.methods.some((m) => m.provider === 'google')
+            ? ''
+            : '<form method="post" action="/account/methods/google"><button class="button secondary" type="submit">Add Google</button></form>') +
+          '<a class="button secondary" href="/account/methods/email">Add an email address</a>' +
+          '</div>' +
+          '</section>' +
+          '<h2 class="group-title">Second factor</h2>'
+        : '<h1>Second factor</h1>') +
       '<p class="lede">After signing in with Google, you confirm it’s you with something only you have. ' +
       'Someone who gets into your Google account still can’t get into 2earl.</p>' +
       '<section class="section" aria-labelledby="passkeys-heading">' +
@@ -803,7 +951,9 @@ export function securityPage(params: {
         ? '<p class="fine">2earl requires a second factor, so your only one can’t be removed. Add another first.</p>'
         : '') +
       '<p class="fine">Adding or removing a factor asks for your second factor again if you last used it more than 5 minutes ago.</p>' +
-      '<div class="actions"><a class="button secondary" href="/account">Back to your account</a></div>',
+      (params.methods
+        ? ''
+        : '<div class="actions"><a class="button secondary" href="/account">Back to your account</a></div>'),
     { passkeyScript: true },
   );
 }

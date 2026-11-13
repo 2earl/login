@@ -145,12 +145,25 @@ beforeEach(async () => {
 describe('account page', () => {
   it('offers the data download and account deletion', async () => {
     const html = await (
-      await call(app, '/account', { cookies: { '__Host-session': session } })
+      await call(app, '/account/data', { cookies: { '__Host-session': session } })
     ).text();
     expect(html).toContain('href="/account/export"');
     expect(html).toContain('href="/account/delete"');
-    // Where the account is used.
-    expect(html).toContain('href="https://promptshare.cc"');
+    // Where the account is used, and the navigation to every part of it.
+    const overview = await (
+      await call(app, '/account', { cookies: { '__Host-session': session } })
+    ).text();
+    expect(overview).toContain('href="https://promptshare.cc"');
+    for (const href of [
+      '/account/security',
+      '/account/sessions',
+      '/account/apps',
+      '/account/orgs',
+      '/account/data',
+    ]) {
+      expect(overview).toContain(`class="nav-link" href="${href}"`);
+    }
+    expect(overview).toContain('aria-current="page">Overview<');
   });
 });
 

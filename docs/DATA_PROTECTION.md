@@ -93,7 +93,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | OAuth clients (MCP apps) | Separate controllers | Receive only what the user approves. In v1 the gateway receives the internal user ID and scopes, not email or name |
 | An organization's identity provider (SAML) | The organization's own processor, not ours | Tells us, when someone signs in through it, their work address. We send it only the sign-in request |
 | An organization's directory provider (e.g. Okta, Microsoft) | The organization's own processor, not ours | Sends us the records above; we send it only SCIM responses about the records it sent |
-| Other members of an organization | Not processors; members of the same team | See each member's name, email address and role. An invitee sees the inviter's name and address in the email |
+| Other members of an organization | Not processors; members of the same team | See each member's name, email address and role. Owners and admins also see the organization's activity: who joined, left, was removed or changed role, and when. An invitee sees the inviter's name and address in the email |
 | Sites using "Sign in with 2earl" (OpenID Connect) | Separate controllers | Receive, when the user approves: that site's own ID for the user, how and when they signed in, and the name and address only if the user left those ticked. Their own privacy terms apply to what they do with it |
 
 ## 6. Data subject rights — how the system supports them

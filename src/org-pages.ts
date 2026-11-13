@@ -24,6 +24,10 @@ const ROLE_HELP: Record<OrgRole, string> = {
   member: 'Members can see who else is in the organization.',
 };
 
+function firstLetter(text: string | null): string {
+  return (Array.from((text ?? '?').trim())[0] ?? '?').toUpperCase();
+}
+
 function hidden(fields: Record<string, string>): string {
   return Object.entries(fields)
     .map(([k, v]) => `<input type="hidden" name="${k}" value="${escapeHtml(v)}">`)
@@ -34,6 +38,36 @@ function flash(params: { notice?: string | undefined; error?: string | undefined
   return (
     (params.notice ? `<p class="notice" role="status">${escapeHtml(params.notice)}</p>` : '') +
     (params.error ? `<p class="warning" role="alert">${escapeHtml(params.error)}</p>` : '')
+  );
+}
+
+export type OrgTab = 'members' | 'activity' | 'directory' | 'settings';
+
+/** The organization's name, your role, and its tabs: the same on each of its pages. */
+export function orgHeader(org: Organization, role: OrgRole, tab: OrgTab): string {
+  const base = `/orgs/${escapeHtml(org.id)}`;
+  const tabs: [OrgTab, string, string, boolean][] = [
+    ['members', 'Members', base, true],
+    ['activity', 'Activity', `${base}/activity`, role !== 'member'],
+    ['directory', 'Domains & SSO', `${base}/directory`, role === 'owner'],
+    ['settings', 'Settings', `${base}/settings`, true],
+  ];
+  return (
+    '<header class="org-head">' +
+    '<p class="crumb"><a href="/account/orgs">Organizations</a></p>' +
+    `<div class="org-title"><h1>${escapeHtml(org.name)}</h1><span class="role-badge role-${role}">${escapeHtml(ROLE_LABEL[role])}</span></div>` +
+    (org.status === 'active'
+      ? ''
+      : '<p class="warning" role="alert">This organization is suspended by 2earl. Nothing in it can be changed, and 2earl services don’t see it. Write to us through the contact form on 2earl.com if you think that’s a mistake.</p>') +
+    '<nav class="tabs" aria-label="Organization">' +
+    tabs
+      .filter(([, , , shown]) => shown)
+      .map(
+        ([key, label, href]) =>
+          `<a href="${href}"${key === tab ? ' aria-current="page"' : ''}>${escapeHtml(label)}</a>`,
+      )
+      .join('') +
+    '</nav></header>'
   );
 }
 
@@ -89,7 +123,6 @@ function memberRow(
   const who = escapeHtml(member.name ?? member.email ?? 'A 2earl account');
   const meta = [
     member.name && member.email ? escapeHtml(member.email) : null,
-    escapeHtml(ROLE_LABEL[member.role]),
     `joined ${formatDate(member.joinedAt)}`,
   ]
     .filter(Boolean)
@@ -117,9 +150,10 @@ function memberRow(
           : '') +
         '</div>';
   return (
-    '<li class="admin-row">' +
-    `<div class="app-main"><p class="app-name">${who}${me ? ' <span class="tag">You</span>' : ''}</p>` +
-    `<p class="app-meta">${meta}</p></div>` +
+    '<li class="person">' +
+    `<span class="avatar avatar-sm" aria-hidden="true">${escapeHtml(firstLetter(member.name ?? member.email))}</span>` +
+    `<div class="person-main"><p class="person-name">${who}${me ? ' <span class="tag">You</span>' : ''} <span class="role-badge role-${member.role}">${escapeHtml(ROLE_LABEL[member.role])}</span></p>` +
+    `<p class="person-meta">${meta}</p></div>` +
     actions +
     '</li>'
   );
@@ -127,9 +161,10 @@ function memberRow(
 
 function invitationRow(base: string, invitation: OpenInvitation, editable: boolean): string {
   return (
-    '<li class="admin-row">' +
-    `<div class="app-main"><p class="app-name">${escapeHtml(invitation.email)} <span class="tag tag-muted">Invited</span></p>` +
-    `<p class="app-meta">${escapeHtml(ROLE_LABEL[invitation.role])}` +
+    '<li class="person person-pending">' +
+    '<span class="avatar avatar-sm avatar-pending" aria-hidden="true">@</span>' +
+    `<div class="person-main"><p class="person-name">${escapeHtml(invitation.email)} <span class="tag tag-muted">Invited</span></p>` +
+    `<p class="person-meta">${escapeHtml(ROLE_LABEL[invitation.role])}` +
     (invitation.invitedBy ? ` · by ${escapeHtml(invitation.invitedBy)}` : '') +
     ` · until ${formatDate(invitation.expiresAt)}</p></div>` +
     (editable
@@ -156,51 +191,65 @@ export function orgPage(params: {
   const base = `/orgs/${escapeHtml(org.id)}`;
   const active = org.status === 'active';
   const inviting = active && canInvite(role);
-  const owners = params.members.filter((m) => m.role === 'owner').length;
-  const lastOwner = role === 'owner' && owners === 1;
   return page(
     org.name,
-    '<p class="crumb"><a href="/account">Your account</a></p>' +
+    orgHeader(org, role, 'members') +
       flash(params) +
-      `<h1>${escapeHtml(org.name)}</h1>` +
-      `<p class="lede">You’re ${role === 'admin' || role === 'owner' ? 'an' : 'a'} ${escapeHtml(ROLE_LABEL[role].toLowerCase())}. ${escapeHtml(ROLE_HELP[role])}</p>` +
-      (active
-        ? ''
-        : '<p class="warning" role="alert">This organization is suspended by 2earl. Nothing in it can be changed, and 2earl services don’t see it. Write to us through the contact form on 2earl.com if you think that’s a mistake.</p>') +
-      '<section class="section" aria-labelledby="members-heading">' +
-      `<h2 id="members-heading">Members <span class="tag tag-muted">${String(params.members.length)}</span></h2>` +
-      '<p class="section-text">Everyone in the organization sees each member’s name and email address.</p>' +
-      `<ul class="admin-list">${params.members.map((m) => memberRow(base, m, { userId: params.userId, role }, active)).join('')}</ul>` +
+      (inviting
+        ? '<section class="section section-first invite-panel" aria-labelledby="invite-heading">' +
+          '<h2 id="invite-heading">Invite people</h2>' +
+          `<form method="post" action="${base}/invitations" class="invite-form" novalidate>` +
+          '<label class="field invite-email"><span>Email address</span>' +
+          `<input name="email" type="email" required maxlength="254" autocomplete="off" spellcheck="false" placeholder="name@example.com" value="${escapeHtml(params.email ?? '')}"></label>` +
+          '<label class="field invite-role"><span>Role</span><select name="role">' +
+          '<option value="member">Member</option><option value="admin">Admin</option></select></label>' +
+          '<button class="button primary" type="submit">Send invitation</button></form>' +
+          '<p class="note">The link works for 7 days, for that address only. Owners are made from members once they’ve joined.</p>' +
+          '</section>'
+        : '') +
+      '<section class="section' +
+      (inviting ? '' : ' section-first') +
+      '" aria-labelledby="members-heading">' +
+      `<h2 id="members-heading">Members <span class="count">${String(params.members.length)}</span></h2>` +
+      `<p class="section-text">${escapeHtml(ROLE_HELP[role])} Everyone here sees each member’s name and email address.</p>` +
+      `<ul class="people">${params.members.map((m) => memberRow(base, m, { userId: params.userId, role }, active)).join('')}</ul>` +
       '</section>' +
-      (inviting || params.invitations.length > 0
-        ? '<section class="section" aria-labelledby="invite-heading">' +
-          '<h2 id="invite-heading">Invitations</h2>' +
-          (inviting
-            ? `<form method="post" action="${base}/invitations" class="inline-form" novalidate>` +
-              '<label class="field"><span>Email address</span>' +
-              `<input name="email" type="email" required maxlength="254" autocomplete="off" spellcheck="false" value="${escapeHtml(params.email ?? '')}"></label>` +
-              '<label class="field"><span>Role</span><select name="role">' +
-              '<option value="member">Member</option><option value="admin">Admin</option></select></label>' +
-              '<button class="button primary" type="submit">Send invitation</button></form>' +
-              '<p class="note">We email a link that works for 7 days, for that address only. Owners are made from members, once they’ve joined.</p>'
-            : '') +
-          (params.invitations.length > 0
-            ? `<ul class="admin-list">${params.invitations.map((i) => invitationRow(base, i, inviting)).join('')}</ul>`
-            : '') +
+      (params.invitations.length > 0
+        ? '<section class="section" aria-labelledby="pending-heading">' +
+          `<h2 id="pending-heading">Waiting to join <span class="count">${String(params.invitations.length)}</span></h2>` +
+          `<ul class="people">${params.invitations.map((i) => invitationRow(base, i, inviting)).join('')}</ul>` +
           '</section>'
-        : '') +
+        : ''),
+    { section: 'Organization' },
+  );
+}
+
+/** Renaming, leaving and deleting. */
+export function orgSettingsPage(params: {
+  org: Organization;
+  role: OrgRole;
+  owners: number;
+  notice?: string | undefined;
+  error?: string | undefined;
+}): string {
+  const { org, role } = params;
+  const base = `/orgs/${escapeHtml(org.id)}`;
+  const active = org.status === 'active';
+  const lastOwner = role === 'owner' && params.owners === 1;
+  return page(
+    `${org.name}: settings`,
+    orgHeader(org, role, 'settings') +
+      flash(params) +
+      '<section class="section section-first" aria-labelledby="name-heading">' +
+      '<h2 id="name-heading">Name</h2>' +
       (active && canManageOrganization(role)
-        ? '<section class="section" aria-labelledby="settings-heading">' +
-          '<h2 id="settings-heading">Settings</h2>' +
-          `<form method="post" action="${base}/name" class="inline-form">` +
-          '<label class="field"><span>Name</span>' +
+        ? `<form method="post" action="${base}/name" class="inline-form">` +
+          '<label class="field"><span>Organization name</span>' +
           `<input name="name" type="text" required maxlength="${String(ORG_NAME_MAX)}" value="${escapeHtml(org.name)}"></label>` +
-          '<button class="button secondary" type="submit">Rename</button></form>' +
-          `<p class="section-text">Created ${formatDate(org.createdAt)}.</p>` +
-          `<p class="section-text"><a href="${base}/directory">Domains and directory sync</a>: let your company directory add and remove members.</p>` +
-          `<div class="data-actions"><a class="danger-link" href="${base}/delete">Delete organization</a></div>` +
-          '</section>'
-        : '') +
+          '<button class="button secondary" type="submit">Rename</button></form>'
+        : `<p class="section-text">${escapeHtml(org.name)}. Only owners can rename it.</p>`) +
+      `<p class="note">Created ${formatDate(org.createdAt)}.</p>` +
+      '</section>' +
       '<section class="section" aria-labelledby="leave-heading">' +
       '<h2 id="leave-heading">Leave</h2>' +
       (lastOwner
@@ -209,8 +258,93 @@ export function orgPage(params: {
           '<label class="confirm"><input type="checkbox" name="confirm" value="on" required>' +
           '<span>I want to leave this organization. Rejoining needs a new invitation.</span></label>' +
           '<div class="consent-actions"><button class="button secondary" type="submit">Leave organization</button></div></form>') +
+      '</section>' +
+      (active && canManageOrganization(role)
+        ? '<section class="section" aria-labelledby="delete-heading">' +
+          '<h2 id="delete-heading">Delete</h2>' +
+          '<p class="section-text">Deletes the organization, its memberships and invitations, for everyone. Members keep their own accounts.</p>' +
+          `<div class="data-actions"><a class="button danger-outline" href="${base}/delete">Delete organization…</a></div>` +
+          '</section>'
+        : ''),
+    { section: 'Organization' },
+  );
+}
+
+export interface ActivityEntry {
+  at: number;
+  event: string;
+  actor: string | null;
+  target: string | null;
+  detail: Record<string, unknown>;
+}
+
+const str = (value: unknown, fallback: string) => (typeof value === 'string' ? value : fallback);
+
+const ACTIVITY: Record<string, (e: ActivityEntry) => string> = {
+  'org.created': () => 'created the organization',
+  'org.renamed': () => 'renamed the organization',
+  'org.invited': (e) => `invited someone as ${str(e.detail.role, 'member')}`,
+  'org.invitation_revoked': () => 'withdrew an invitation',
+  'org.invitation_declined': () => 'declined an invitation',
+  'org.joined': (e) => `joined as ${str(e.detail.role, 'member')}`,
+  'org.role_changed': (e) => `made ${e.target ?? 'a former member'} ${str(e.detail.role, '')}`,
+  'org.member_removed': (e) => `removed ${e.target ?? 'a former member'}`,
+  'org.left': () => 'left the organization',
+  'org.ownership_passed': () => 'became an owner, after the only owner deleted their account',
+  'org.domain_added': (e) => `added the domain ${str(e.detail.domain, '')}`,
+  'org.domain_verified': (e) => `verified the domain ${str(e.detail.domain, '')}`,
+  'org.domain_removed': (e) => `removed the domain ${str(e.detail.domain, '')}`,
+  'org.scim_token_created': () => 'created a directory sync token',
+  'org.scim_token_revoked': () => 'revoked a directory sync token',
+  'org.saml_saved': (e) =>
+    `${e.detail.enabled ? 'turned on' : 'saved, turned off,'} single sign-on`,
+  'scim.member_added': (e) => `added ${e.target ?? 'someone'}`,
+  'scim.member_removed': (e) => `removed ${e.target ?? 'someone'}`,
+  'scim.user_created': () => 'provisioned a person',
+  'scim.user_updated': () => 'updated a person',
+  'scim.user_deleted': () => 'deprovisioned a person',
+};
+
+/** What happened in the organization, newest first (DESIGN §4.14): owners and admins only. */
+export function orgActivityPage(params: {
+  org: Organization;
+  role: OrgRole;
+  entries: ActivityEntry[];
+  now: number;
+}): string {
+  const rows = params.entries
+    .map((e) => {
+      const what = ACTIVITY[e.event]?.(e) ?? e.event;
+      const who = e.event.startsWith('scim.') ? 'Directory sync' : (e.actor ?? 'A former member');
+      return (
+        '<li class="activity-row">' +
+        `<time datetime="${new Date(e.at * 1000).toISOString()}">${escapeHtml(formatDateTime(e.at))}</time>` +
+        `<p><strong>${escapeHtml(who)}</strong> ${escapeHtml(what)}</p>` +
+        '</li>'
+      );
+    })
+    .join('');
+  return page(
+    `${params.org.name}: activity`,
+    orgHeader(params.org, params.role, 'activity') +
+      '<section class="section section-first" aria-labelledby="activity-heading">' +
+      '<h2 id="activity-heading" class="visually-hidden">Activity</h2>' +
+      (rows
+        ? `<ol class="activity">${rows}</ol>`
+        : '<p class="empty">Nothing yet. Invitations, role changes, members joining and leaving, and directory changes appear here.</p>') +
+      '<p class="note">The last 90 days, newest first, up to 200 events.</p>' +
       '</section>',
     { section: 'Organization' },
+  );
+}
+
+function formatDateTime(unixSeconds: number): string {
+  return (
+    new Intl.DateTimeFormat('en-GB', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'UTC',
+    }).format(new Date(unixSeconds * 1000)) + ' UTC'
   );
 }
 
@@ -314,9 +448,8 @@ export function directoryPage(params: {
   const p = params.provisioned;
   return page(
     'Domains and directory sync',
-    `<p class="crumb"><a href="${base}">${escapeHtml(params.org.name)}</a></p>` +
+    orgHeader(params.org, 'owner', 'directory') +
       flash(params) +
-      '<h1>Domains and directory sync</h1>' +
       '<p class="lede">Your company directory (Okta, Microsoft Entra ID or any other SCIM 2.0 client) can add people to this organization and remove them, for addresses at domains you’ve verified. It never creates 2earl accounts: people join with their own account when they sign in with that address.</p>' +
       '<section class="section" aria-labelledby="domains-heading">' +
       '<h2 id="domains-heading">Domains</h2>' +

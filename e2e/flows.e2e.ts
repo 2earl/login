@@ -59,6 +59,12 @@ async function interceptGoogle(page: Page): Promise<void> {
   );
 }
 
+/** Signs out from the account menu in the top bar. */
+async function signOut(page: Page): Promise<void> {
+  await page.locator('.account-menu summary').click();
+  await page.getByRole('button', { name: 'Sign out' }).click();
+}
+
 /**
  * Chromium's built-in virtual authenticator: a platform passkey that says yes at once. Returns a
  * switch for that: while it is off, requests wait, as for a person who hasn't touched anything.
@@ -109,19 +115,21 @@ test('the owner’s whole journey', async ({ page }) => {
     await expect(page).toHaveURL('/welcome?return_to=%2Faccount');
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page).toHaveURL('/account');
-    await expect(page.getByText(OWNER.email).first()).toBeVisible();
-    await expect(page.getByText('Second factor: off')).toBeVisible();
+    await expect(page.locator('.identity').getByText(OWNER.email)).toBeVisible();
+    await expect(page.locator('.glance-row', { hasText: 'Second factor' })).toContainText('Off');
   });
 
   await test.step('adds a passkey and is shown recovery codes once', async () => {
-    await page.getByRole('link', { name: 'Manage second factor' }).click();
+    await page.locator('.glance-row', { hasText: 'Second factor' }).getByRole('link').click();
     await page.getByLabel('Name (optional)').fill('Virtual key');
     await page.getByRole('button', { name: 'Add a passkey' }).click();
     await expect(page).toHaveURL('/account/security/recovery-codes');
     await expect(page.locator('.codes li')).toHaveCount(10);
     await page.getByRole('link', { name: 'I’ve saved them' }).click();
     await expect(page).toHaveURL('/account');
-    await expect(page.getByText('Second factor: on, with 1 passkey')).toBeVisible();
+    await expect(page.locator('.glance-row', { hasText: 'Second factor' })).toContainText(
+      '1 passkey',
+    );
     await page.goto('/account/security/recovery-codes');
     await expect(page).toHaveURL('/account/security'); // shown once
   });
@@ -130,7 +138,7 @@ test('the owner’s whole journey', async ({ page }) => {
     // Nobody touches the passkey yet: the sign-in page's autofill request just waits.
     await touch(false);
     await page.goto('/account');
-    await page.getByRole('button', { name: 'Sign out' }).click();
+    await signOut(page);
     await expect(page.getByRole('link', { name: 'Continue with Google' })).toBeVisible();
     // The session is gone on the server: /account now sends the browser to sign in.
     const account = await page.request.get('/account', { maxRedirects: 0 });
@@ -145,14 +153,17 @@ test('the owner’s whole journey', async ({ page }) => {
     await touch(true);
     await page.goto('/', { waitUntil: 'commit' }).catch(() => null);
     await expect(page).toHaveURL('/account');
-    await page.getByRole('link', { name: 'Signed-in devices' }).click();
+    await page
+      .getByRole('navigation', { name: 'Account' })
+      .getByRole('link', { name: 'Devices' })
+      .click();
     // The sign-in page's earlier autofill request may finish too once the authenticator answers,
     // so look at this device's row only.
     const thisDevice = page.getByRole('listitem').filter({ hasText: 'This device' });
     await expect(thisDevice).toContainText('with a passkey');
     await touch(false);
     await page.goto('/account');
-    await page.getByRole('button', { name: 'Sign out' }).click();
+    await signOut(page);
     await expect(page.getByRole('link', { name: 'Continue with Google' })).toBeVisible();
   });
 
@@ -237,7 +248,7 @@ test('the owner’s whole journey', async ({ page }) => {
   });
 
   await test.step('creates an organization and invites someone to it', async () => {
-    await page.goto('/account');
+    await page.goto('/account/orgs');
     await page.getByRole('link', { name: 'Create an organization' }).click();
     await page.getByLabel('Name').fill('E2E Team');
     await page.getByRole('button', { name: 'Create organization' }).click();
@@ -251,7 +262,7 @@ test('the owner’s whole journey', async ({ page }) => {
   });
 
   await test.step('downloads a copy of the account data', async () => {
-    await page.goto('/account');
+    await page.goto('/account/data');
     const download = page.waitForEvent('download');
     await page.getByRole('link', { name: 'Download your data' }).click();
     const file = await download;
@@ -268,7 +279,7 @@ test('the owner’s whole journey', async ({ page }) => {
   });
 
   await test.step('disconnects the app, which can no longer refresh', async () => {
-    await page.goto('/account');
+    await page.goto('/account/apps');
     await page.getByRole('button', { name: /Disconnect/ }).click();
     await expect(page.getByText('E2E client')).toHaveCount(0);
     const refresh = await page.request.post('/oauth/token', {
@@ -282,8 +293,8 @@ test('the owner’s whole journey', async ({ page }) => {
   });
 
   await test.step('deletes the account after confirming with Google', async () => {
-    await page.goto('/account');
-    await page.getByRole('link', { name: 'Delete account' }).click();
+    await page.goto('/account/data');
+    await page.getByRole('link', { name: 'Delete account…' }).click();
     await expect(
       page.getByText('The organization “E2E Team”, which has no other members'),
     ).toBeVisible();
