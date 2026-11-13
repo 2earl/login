@@ -364,8 +364,8 @@ their account has.
 2. A 6-digit code (uniform, rejection sampling) and a 32-byte link token are created. Only HMACs
    are stored (`email_codes`, keyed by the HMAC of the `__Host-email_code` cookie, which binds the
    code to this browser). 10 minutes, 5 wrong tries, single use (`used_at` set in one statement).
-3. The email (`src/mail.ts`, plain text plus the same lines as minimal HTML with no images or remote
-   content, from `noreply@2earl.com`, replies to `legal@2earl.com`) has the code and a link. The
+3. The email (`src/mail.ts`, from `noreply@2earl.com`, replies to `legal@2earl.com`) has the code
+   and a link: a button, with the address under it for clients that block buttons. The
    link opens a page with a button: mail scanners open links, and only the POST signs in. The link
    works only in the browser that asked; elsewhere the page says to type the code instead.
 4. On success: the account with this email method, or a new one. A new one needs sign-up to be
@@ -398,6 +398,28 @@ missing one. The account's address follows Google only when the account has no e
 **Security notices by email** (`notify`, sent after the response): a sign-in method or second
 factor added or removed, new recovery codes, the first approval of an app, and the account's
 deletion (to the address it had). Nothing marketing; nothing else.
+- **What each says:** what changed, and when, from which device and from which network (`/24`, as
+  the audit log keeps it). These are the facts that tell a person whether it was them.
+- **The button** leads to the page where it can be undone: Sign-in & security, or Connected apps.
+- **An organization's new owner** is told only when it happened, never the previous owner's device
+  or network.
+
+**How emails look** (`src/mail.ts`). Each message is written once, as a `Mail`, and rendered
+twice:
+- **Plain text.** The code is on an indented line of its own, and each link is labelled.
+- **HTML that matches the web pages:**
+  - the 2earl wordmark, and the mark's four-colour band across the top of a white card;
+  - one vermilion button;
+  - the code set large;
+  - a small table for when, device and network;
+  - the web pages' dark colours where the client supports `prefers-color-scheme`;
+  - a hidden preview line for inboxes.
+
+  It is built from tables with inline styles, so it works in Gmail and Outlook.
+- **Kept out:** no images, no remote fonts or styles, no tracking. Only our own addresses become
+  links, and a button never leads anywhere else (tested).
+- **Footer.** It says why the email came, and that 2earl never asks for a password or code by
+  email or phone. It links Privacy and Imprint, and the account unless the account was deleted.
 
 **Sign-up switch.** `settings.signup` (`open` | `invite`) on `/admin/invitations`, audited as
 `admin.signup_changed`. Without a saved setting, `LOGIN_LOCKED` decides (`"false"` = open, the

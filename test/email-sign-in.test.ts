@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SEND_LIMITS, maskEmail, newCode } from '../src/email-codes';
-import { codeMail, mailHtml, noticeMail } from '../src/mail';
+import { mailHtml, mailText, noticeMail } from '../src/mail';
 import { setOAuthClock } from '../src/oauth';
 import {
   FakeGoogle,
@@ -431,23 +431,53 @@ describe('welcome, and deleting an account that signs in with email', () => {
 });
 
 describe('emails', () => {
-  it('carry a plain and a matching HTML part, and replies reach a person', async () => {
+  it('carry a plain and a matching, branded HTML part, and replies reach a person', async () => {
     await askCode('parts@example.com');
     const mail = sent.at(-1);
     expect(mail?.replyTo).toBe('legal@2earl.com');
-    expect(mail?.html).toContain(`>${lastCode()}</p>`);
+    // The code, set large, and the link as a button with the address under it.
+    expect(mail?.html).toContain(`letter-spacing:6px;color:#1c1b1f">${lastCode()}</td>`);
     expect(mail?.html).toContain('<a href="https://login.2earl.com/login/email/link?token=');
-    expect(mail?.html).not.toMatch(/<img|<script|https?:\/\/(?!([a-z0-9-]+\.)*2earl\.com)/);
+    expect(mail?.html).toContain('>Sign in in the same browser</a>');
+    // The web pages' band and wordmark, light and dark.
+    expect(mail?.html).toContain('background:#ed1c24');
+    expect(mail?.html).toContain('>2earl</td>');
+    expect(mail?.html).toContain('prefers-color-scheme: dark');
+    // No images, no scripts, no links but ours.
+    expect(mail?.html).not.toMatch(/<img|<script|<link|https?:\/\/(?!([a-z0-9-]+\.)*2earl\.com)/);
+    expect(mail?.text).toMatch(/^Your sign-in code\n/);
   });
 
   it('escape what an app calls itself, and link only our own addresses', () => {
     const notice = noticeMail({ kind: 'app_connected', app: '<b>Evil</b> https://evil.example' });
-    const html = mailHtml(notice.lines);
+    const html = mailHtml(notice);
     expect(html).toContain('&lt;b&gt;Evil&lt;/b&gt;');
     expect(html).not.toContain('href="https://evil.example');
-    expect(mailHtml(codeMail('sign_in', '123456', 'https://login.2earl.com/x').lines)).toContain(
-      'letter-spacing:4px;margin:8px 0 16px">123456</p>',
+    expect(html).toContain('href="https://login.2earl.com/account/apps"');
+    // A button never leads elsewhere.
+    expect(
+      mailHtml({ ...notice, action: { label: 'Go', url: 'https://evil.example/x' } }),
+    ).not.toContain('href="https://evil.example');
+    // A full stop after a link ends the sentence, not the address.
+    expect(mailHtml({ ...notice, body: ['Open https://login.2earl.com/account.'] })).toContain(
+      'href="https://login.2earl.com/account"',
     );
+  });
+
+  it('say when and from where a security change came, and leave out a deleted account', () => {
+    const context = { at: 1_762_000_000, device: 'Firefox on Windows', network: '203.0.113.0/24' };
+    const added = noticeMail({ kind: 'factor_added', factor: 'A passkey' }, context);
+    expect(mailText(added)).toContain('When: 1 Nov 2025, 12:26 UTC');
+    expect(mailText(added)).toContain('Device: Firefox on Windows');
+    expect(mailText(added)).toContain('Network: 203.0.113…');
+    expect(mailText(added)).toContain('https://login.2earl.com/account/security');
+    // A new owner isn't told the previous owner's device or network.
+    expect(mailText(noticeMail({ kind: 'org_owner', org: 'Acme' }, context))).not.toContain(
+      'Firefox',
+    );
+    const deleted = noticeMail({ kind: 'account_deleted' }, context);
+    expect(mailText(deleted)).not.toContain('Your account:');
+    expect(mailHtml(deleted)).not.toContain('href="https://login.2earl.com/account"');
   });
 });
 

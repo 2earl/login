@@ -337,7 +337,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       role,
       link: `${c.env.ISSUER}/invite/${result.token}`,
     });
-    workerCtx(c).waitUntil(sendMail(c.env, email, mail.subject, mail.lines));
+    workerCtx(c).waitUntil(sendMail(c.env, email, mail));
     await record(c, session, 'org.invited', { org: orgId, invitation: result.id, role });
     return c.redirect(back(orgId, 'invited'), 303);
   });
