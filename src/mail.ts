@@ -152,7 +152,7 @@ function factsTable(facts: [string, string][]): string {
   const rows = facts
     .map(
       ([label, value], i) =>
-        `<tr><td class="muted" style="padding:10px 16px 10px 0;${i ? `border-top:1px solid ${C.rule};` : ''}font:400 14px/1.4 ${FONT};color:${C.muted};white-space:nowrap" valign="top">${escapeHtml(label)}</td>` +
+        `<tr><td class="muted" style="padding:10px 16px 10px 0;${i ? `border-top:1px solid ${C.rule};` : ''}font:400 14px/1.4 ${FONT};color:${C.muted};white-space:nowrap;width:1%" valign="top">${escapeHtml(label)}</td>` +
         `<td class="fg" style="padding:10px 0;${i ? `border-top:1px solid ${C.rule};` : ''}font:600 14px/1.4 ${FONT};color:${C.fg}">${escapeHtml(value)}</td></tr>`,
     )
     .join('');
@@ -190,7 +190,7 @@ export function mailHtml(mail: Mail): string {
     '.bg{background:#141315!important}.card{background:#1c1b1f!important;border-color:#2c2a2f!important}' +
     '.fg{color:#f2f1f3!important}.muted{color:#a19fa6!important}.link{color:#fbb03b!important}' +
     '.alert{color:#ff7a6b!important}.code{background:#141315!important;border-color:#2c2a2f!important;color:#f2f1f3!important}' +
-    '.facts td{border-color:#2c2a2f!important}}' +
+    '.facts,.facts td{border-color:#2c2a2f!important}}' +
     '@media (max-width:600px){.card-body{padding:24px 20px 12px!important}}' +
     '</style></head>' +
     `<body class="bg" style="margin:0;padding:0;background:${C.bg};-webkit-text-size-adjust:100%">` +
