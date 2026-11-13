@@ -223,7 +223,9 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
       case 'suspend': {
         await c.env.DB.batch([
           c.env.DB.prepare(
-            "UPDATE users SET status = 'suspended', updated_at = ? WHERE id = ?",
+            // 2earl's own suspension: an organization can't lift it (DESIGN §4.18).
+            `UPDATE users SET status = 'suspended', deactivated_at = NULL, delete_after = NULL,
+               updated_at = ? WHERE id = ?`,
           ).bind(now, userId),
           c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId),
         ]);
@@ -232,7 +234,10 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
         return c.redirect('/admin/users?done=suspended', 303);
       }
       case 'reactivate':
-        await c.env.DB.prepare("UPDATE users SET status = 'active', updated_at = ? WHERE id = ?")
+        await c.env.DB.prepare(
+          `UPDATE users SET status = 'active', deactivated_at = NULL, delete_after = NULL,
+             updated_at = ? WHERE id = ?`,
+        )
           .bind(now, userId)
           .run();
         await record(c, session, 'admin.user_reactivated', { target: userId });

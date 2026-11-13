@@ -894,8 +894,77 @@ request there is nothing to check them against.
 - single logout;
 - encrypted assertions (TLS already protects the POST);
 - signed AuthnRequests;
-- "require SSO" for a domain: other ways to sign in keep working, because a 2earl account is the
-  person's own.
+- "require SSO" for personal accounts: other ways to sign in keep working for them. For accounts
+  the organization manages, it can require SSO (§4.18).
+
+### 4.18 Accounts an organization manages (phase 10a)
+
+A company expects to own its employees' accounts at its domains: to create them, decide how they
+sign in, and close them when someone leaves. Until phase 10a every 2earl account was its person's
+own, and an organization could only add or remove members. Now an owner can **manage the accounts
+at a verified domain** (§4.16).
+
+**Why this is fair.** An organization that verified a domain controls its mailboxes, so it could
+already sign in to any account at that domain with an email code. Managing makes that authority
+explicit, puts it in the person's view, and lets them keep an account personal by taking the
+address off it.
+
+**Turning it on** (`/orgs/:id/directory`, an owner, after a recent proof it's them): per verified
+domain, "Manage accounts at example.com". Turning it off releases the accounts it managed
+(below). Removing or losing the domain does the same.
+
+**Which accounts are managed** (`users.managed_by`, `src/managed.ts`):
+- **New accounts at a managed domain** are managed from the start, however they are made: by the
+  organization's directory (SCIM `POST` or `PUT` of an active user with no account yet: provisioning
+  now creates the account), at the first single sign-on, or by signing up with an email code or a
+  Google account at that domain. The organization vouches for its own addresses, so SCIM and SSO
+  don't depend on the sign-up switch (§4.9); signing up yourself still does.
+- **Existing accounts** with a verified address at the domain are not taken over. Their owners get
+  an email, and at their next request after signing in they must choose
+  (`/account/managed`):
+  - **Make it a managed account.** The account joins the organization (as a member, if it wasn't
+    one) and is managed from then on.
+  - **Keep it personal.** The sign-in methods with addresses at the organization's managed domains
+    are removed. That needs another way in first (another address, or a Google account elsewhere);
+    the page says so and links to it.
+  Until they choose, the session can only reach that page, sign-in methods, the second factor,
+  export, deletion and sign-out, and no app can be authorized.
+- An account can be managed by one organization. With addresses at domains of two organizations,
+  the second one can only be taken off.
+
+**What the organization can do** (owners and admins; admins not on owners, as in §4.14):
+- **See** which members are managed.
+- **Deactivate** an account: it can't sign in, its sessions end and every app's access is revoked
+  at once; the account and its data stay. **Reactivate** it.
+- **Delete** it (owners only, recent proof): the account and its data in every 2earl service, as
+  if the person had deleted it (§4.8). The person gets the deletion email.
+- **Require single sign-on** (owners, recent proof, with SSO on): managed accounts sign in only
+  through the organization's IdP. Sessions they started another way end at their next request.
+  **Owners are exempt**, so a broken IdP can't lock the organization out; the owner turning it on
+  must have a second factor. The rule applies only while SSO is on.
+- **The directory** does the same: `active: false` deactivates, `active: true` reactivates, and
+  `DELETE` deactivates at once and deletes the account **30 days later** unless the directory or an
+  owner reactivates it first (a stolen SCIM token can't destroy data at once; Entra ID deletes the
+  same way). For accounts that aren't managed, SCIM keeps its §4.16 behaviour.
+
+**What the person can't do with a managed account:** take an address at the organization's
+managed domains off it, leave the organization, or delete the account (they ask the
+organization). They can still export their data, change their name, and add passkeys and a
+second factor. Being removed from the organization is replaced by deactivation.
+
+**Deactivation and 2earl's own suspension** both set `users.status = 'suspended'`;
+`users.deactivated_at` marks the organization's. Reactivating by the organization lifts only its own
+deactivation; the 2earl owner's reactivation (`/admin`) lifts either.
+
+**Releasing.** When an organization stops managing a domain (or deletes itself), the accounts it
+managed through that domain become their people's own again: no longer managed, still members,
+deactivated ones still deactivated (the 2earl owner can reactivate them on request), pending
+deletions cancelled.
+
+**Privacy.** For managed accounts the organization decides what happens to them, so it is the
+controller and 2earl processes the account for it; the privacy policy says so, and organizations
+accept 2earl's data processing terms when they turn managing on. Until someone chooses, the
+organization learns nothing about accounts at its domain: no names, no count.
 
 ## 5. Protocol surface
 
@@ -960,6 +1029,8 @@ Scopes are opaque strings to `login`; their enforcement lives in the resource se
 ```
 users            id (random UUID PK), status (active|suspended), created_at, updated_at,
                  display_name, primary_email          (hard delete: no deleted_at)
+                 managed_by NULL (organization, §4.18), managed_since NULL,
+                 deactivated_at NULL (by the organization), delete_after NULL (SCIM DELETE)
 identities       id PK, user_id FK, provider ('google'|'email'), subject (Google's stable ID, or
                  the address in lower case for 'email'),
                  email, email_verified, created_at, last_login_at
@@ -1222,6 +1293,7 @@ Resolved:
 | 9b | **SCIM 2.0** provisioning into organizations, with verified domains (§4.16) |
 | 9c | **SAML 2.0**: organizations sign in through their own identity provider (§4.17) |
 | 9d | **DPoP and PAR** (§4.15) |
+| 10a | **Accounts an organization manages** (§4.18): managed domains, deactivation, required SSO |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 
@@ -1275,7 +1347,7 @@ updates (Dependabot), and it is on only for organizations that turn it on.
 | Client credentials grant | No machine-to-machine client; services talk over Service Bindings | A third-party backend needs its own access |
 | RFC 9101 JAR | Signed request objects; PAR (9d) already keeps the request off the browser | A FAPI-grade client |
 | Microsoft, GitHub, Apple and other social sign-in | The owner decided on 2026-11-12: Google, email codes and passkeys are the ways in | The owner decides otherwise |
-| SAML single logout, encrypted assertions, signed AuthnRequests, IdP-initiated sign-in, "require SSO" | TLS protects the POST; IdP-initiated responses can't be tied to a request login made; a 2earl account belongs to its person | An organization needs one of them |
+| SAML single logout, encrypted assertions, signed AuthnRequests, IdP-initiated sign-in | TLS protects the POST; IdP-initiated responses can't be tied to a request login made. "Require SSO" now exists for managed accounts (§4.18) | An organization needs one of them |
 | SCIM Groups, bulk operations, roles from the directory | Members are what organizations need now; roles stay in 2earl | A directory customer needs group-based roles |
 | DPoP server nonces (RFC 9449 §8) and `dpop_jkt` | Proofs already expire in 60 seconds and work once; PKCE binds the code | A client or resource needs them |
 | FedCM | Browser-mediated sign-in for third-party sites; only useful once sites embed "Sign in with 2earl" | A site asks for it |

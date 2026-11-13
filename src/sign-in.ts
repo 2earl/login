@@ -1,6 +1,7 @@
 import { deleteAccount } from './account';
 import type { OwnershipPlan } from './orgs';
 import { claimProvisioned } from './scim';
+import { managerOf, ssoRequiredBy } from './managed';
 import { audit } from './audit';
 import { sha256Hex } from './crypto';
 import { deliverDeletionNotices } from './deletion-notices';
@@ -57,6 +58,26 @@ export async function openSession(
   });
 }
 
+/**
+ * Why this account can't sign in this way, if it can't: its organization requires single sign-on
+ * (DESIGN §4.18). Checked before every sign-in that isn't SAML; sessions are checked again on
+ * every request.
+ */
+export async function signInRefusal(
+  c: AppContext,
+  userId: string,
+  method: SignInMethod,
+): Promise<Message | null> {
+  if (method === 'saml') return null;
+  const org = await ssoRequiredBy(c.env.DB, userId);
+  if (!org) return null;
+  return {
+    title: 'Sign in with single sign-on',
+    body: `${org.name} manages this account and asks you to sign in through its single sign-on. Choose “Sign in with your organization (SSO)” and enter your work address.`,
+    action: { href: '/login/sso', label: 'Sign in with SSO' },
+  };
+}
+
 /** A fresh session for `userId`, then on to `returnTo` (or the welcome page for a new account). */
 export async function startSession(
   c: AppContext,
@@ -82,6 +103,26 @@ export async function finishDeletion(
   userId: string,
   stop: (reason: string, message?: Message, status?: 400 | 403 | 500) => Promise<Response>,
 ): Promise<Response> {
+  // A managed account is deleted by its organization, not by the person (DESIGN §4.18).
+  const manager = await managerOf(c.env.DB, userId);
+  if (manager) return stop('managed_account', managedDeletion(manager.name), 403);
+  return deleteAndTell(c, now, userId, stop);
+}
+
+/** What a managed account sees instead of deleting itself. */
+export function managedDeletion(org: string): Message {
+  return {
+    title: 'Your organization manages this account',
+    body: `“${org}” manages this account, so only it can delete it. Ask its admins. You can still download your data.`,
+    action: { href: '/account/data', label: 'Your data' },
+  };
+}
+
+/**
+ * Deletes the account and tells everyone who needs to know: services, new owners of its
+ * organizations, and the person, at the address it had. False if the deletion failed.
+ */
+export async function removeAccount(c: AppContext, now: number, userId: string): Promise<boolean> {
   const address = await c.env.DB.prepare('SELECT primary_email FROM users WHERE id = ?')
     .bind(userId)
     .first<{ primary_email: string | null }>();
@@ -93,12 +134,25 @@ export async function finishDeletion(
     workerCtx(c).waitUntil(deliverDeletionNotices(c.env, now));
   } catch (error) {
     console.error('account deletion failed', error instanceof Error ? error.name : 'unknown');
-    return stop('deletion_error', MESSAGES.deletionFailed, 500);
+    return false;
   }
   // The account is gone, so the address is taken from before; this is the last email.
   if (address?.primary_email) {
     const mail = noticeMail({ kind: 'account_deleted' }, noticeContext(c, now));
     workerCtx(c).waitUntil(sendMail(c.env, address.primary_email, mail));
+  }
+  return true;
+}
+
+/** The person's own deletion: the account goes, and so does this browser's session. */
+async function deleteAndTell(
+  c: AppContext,
+  now: number,
+  userId: string,
+  stop: (reason: string, message?: Message, status?: 400 | 403 | 500) => Promise<Response>,
+): Promise<Response> {
+  if (!(await removeAccount(c, now, userId))) {
+    return stop('deletion_error', MESSAGES.deletionFailed, 500);
   }
   clearCookie(c, SESSION_COOKIE);
   clearCookie(c, CONSENT_APPROVALS_COOKIE);

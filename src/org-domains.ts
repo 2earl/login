@@ -15,6 +15,8 @@ export interface OrgDomain {
   challenge: string;
   verifiedAt: number | null;
   createdAt: number;
+  /** The organization manages the accounts at this domain (DESIGN §4.18). */
+  managedAt: number | null;
 }
 
 /** A registrable host name, lower case and in ASCII (punycode); null if it isn't one. */
@@ -43,16 +45,23 @@ export function challengeRecordName(domain: string): string {
 export async function listDomains(db: D1Database, orgId: string): Promise<OrgDomain[]> {
   const { results } = await db
     .prepare(
-      `SELECT domain, challenge, verified_at, created_at FROM org_domains
+      `SELECT domain, challenge, verified_at, created_at, managed_at FROM org_domains
        WHERE org_id = ? ORDER BY domain`,
     )
     .bind(orgId)
-    .all<{ domain: string; challenge: string; verified_at: number | null; created_at: number }>();
+    .all<{
+      domain: string;
+      challenge: string;
+      verified_at: number | null;
+      created_at: number;
+      managed_at: number | null;
+    }>();
   return results.map((r) => ({
     domain: r.domain,
     challenge: r.challenge,
     verifiedAt: r.verified_at,
     createdAt: r.created_at,
+    managedAt: r.managed_at,
   }));
 }
 

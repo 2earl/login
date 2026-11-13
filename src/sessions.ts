@@ -1,4 +1,5 @@
 import { hmacHex, randomToken } from './crypto';
+import { SSO_REQUIRED_SQL } from './managed';
 
 /** DESIGN §7: 12 h idle, 7 days absolute. */
 export const SESSION_IDLE_SECONDS = 12 * 60 * 60;
@@ -11,6 +12,13 @@ export interface SessionUser {
   displayName: string | null;
   primaryEmail: string | null;
   createdAt: number;
+  /** The organization that manages the account (DESIGN §4.18). */
+  managedBy: string | null;
+  /**
+   * An organization now manages a domain where the account has an address: the person must
+   * choose before going on (`/account/managed`).
+   */
+  mustChoose: boolean;
 }
 
 export interface Session {
@@ -92,7 +100,16 @@ export async function getSession(
     .prepare(
       `SELECT s.aal, s.aal2_at, s.method, s.created_at, s.last_seen_at, s.expires_at,
               u.id AS user_id, u.status, u.display_name, u.primary_email, u.created_at AS user_created_at,
-              EXISTS (SELECT 1 FROM mfa_factors f WHERE f.user_id = u.id) AS has_factor
+              u.managed_by,
+              EXISTS (SELECT 1 FROM mfa_factors f WHERE f.user_id = u.id) AS has_factor,
+              -- Required SSO (DESIGN §4.18): a session started another way ends.
+              (s.method IS NOT 'saml' AND ${SSO_REQUIRED_SQL}) AS sso_violation,
+              EXISTS (SELECT 1 FROM identities i
+                      JOIN org_domains d ON d.managed_at IS NOT NULL AND d.verified_at IS NOT NULL
+                        AND d.domain = substr(i.email, instr(i.email, '@') + 1) COLLATE NOCASE
+                      JOIN organizations o ON o.id = d.org_id AND o.status = 'active'
+                      WHERE i.user_id = u.id AND i.email_verified = 1
+                        AND d.org_id IS NOT u.managed_by) AS must_choose
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.id_hash = ?`,
     )
@@ -110,11 +127,14 @@ export async function getSession(
       display_name: string | null;
       primary_email: string | null;
       user_created_at: number;
+      managed_by: string | null;
+      sso_violation: number;
+      must_choose: number;
     }>();
   if (!row) return null;
 
   const expired = row.expires_at <= now || row.last_seen_at + SESSION_IDLE_SECONDS <= now;
-  if (expired || row.status !== 'active') {
+  if (expired || row.status !== 'active' || row.sso_violation === 1) {
     await db.prepare('DELETE FROM sessions WHERE id_hash = ?').bind(idHash).run();
     return null;
   }
@@ -139,6 +159,8 @@ export async function getSession(
       displayName: row.display_name,
       primaryEmail: row.primary_email,
       createdAt: row.user_created_at,
+      managedBy: row.managed_by,
+      mustChoose: row.must_choose === 1,
     },
   };
 }

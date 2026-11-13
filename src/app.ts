@@ -62,9 +62,17 @@ import { CONSENT_CSP, applySecurityHeaders } from './security-headers';
 import { deleteSession, getSession, type Session } from './sessions';
 import { registerEmailRoutes, sendCode } from './email-routes';
 import { registerMethodRoutes } from './method-routes';
+import { registerManagedRoutes } from './managed-routes';
 import { registerPasskeyRoutes } from './passkey-routes';
 import { signupMode } from './settings';
-import { finishDeletion, notifyLater, startSession } from './sign-in';
+import {
+  finishDeletion,
+  managedDeletion,
+  notifyLater,
+  signInRefusal,
+  startSession,
+} from './sign-in';
+import { adoptNewAccount, managerOf } from './managed';
 import {
   accountWithEmail,
   addGoogleIdentity,
@@ -122,6 +130,36 @@ function gateAllows(gate: Exclude<MfaGate, null>, path: string): boolean {
     );
   }
   return false;
+}
+
+/** Paths a session may use before choosing about a managed domain (DESIGN §4.18). */
+function choiceAllows(path: string): boolean {
+  const always = [
+    '/account/managed',
+    '/account/security',
+    '/account/methods/email',
+    '/account/methods/google',
+    '/account/export',
+    '/account/delete',
+    '/account/deleted',
+    '/logout',
+    '/oidc/logout',
+    '/login',
+    '/callback/google',
+    '/healthz',
+    '/mfa',
+  ];
+  return (
+    always.includes(path) ||
+    path.startsWith('/account/security/') ||
+    path.startsWith('/mfa/') ||
+    path.startsWith('/login/') ||
+    path.startsWith('/saml/') ||
+    path.startsWith('/.well-known/') ||
+    // App-to-server endpoints; authorizing a new app (/authorize, /device) waits for the choice.
+    path.startsWith('/oauth/') ||
+    path === '/userinfo'
+  );
 }
 
 /**
@@ -281,6 +319,21 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     const url = new URL(c.req.url);
     const target = gate === 'challenge' ? '/mfa' : '/account/security';
     return c.redirect(`${target}?return_to=${encodeURIComponent(url.pathname + url.search)}`, 303);
+  });
+
+  // Accounts at a domain an organization now manages: the person chooses first (DESIGN §4.18).
+  app.use('*', async (c, next) => {
+    const session = c.get('session');
+    if (!session?.user.mustChoose || choiceAllows(c.req.path)) {
+      await next();
+      return;
+    }
+    if (c.req.method !== 'GET') return c.json({ error: 'choice_required' }, 403);
+    const url = new URL(c.req.url);
+    return c.redirect(
+      `/account/managed?return_to=${encodeURIComponent(url.pathname + url.search)}`,
+      303,
+    );
   });
 
   // The signed-in app shell (DESIGN §4.5): who is signed in, for the navigation on every account,
@@ -488,9 +541,21 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     }
 
     const { userId, created } = await upsertGoogleUser(c.env.DB, now, identity);
-    if (created) await audit(c.env.DB, now, 'user.created', { actorUserId: userId, ipPrefix: ip });
+    if (created) {
+      await audit(c.env.DB, now, 'user.created', { actorUserId: userId, ipPrefix: ip });
+      if (identity.email) await adoptNewAccount(c.env.DB, now, userId, identity.email);
+    }
 
     if (!(await isUserActive(c.env.DB, userId))) return fail('user_suspended', 403);
+    const refusal = await signInRefusal(c, userId, 'google');
+    if (refusal) {
+      await audit(c.env.DB, now, 'login.denied', {
+        actorUserId: userId,
+        ipPrefix: ip,
+        detail: { reason: 'sso_required', method: 'google' },
+      });
+      return c.html(messagePage(refusal), 403);
+    }
 
     return startSession(c, now, userId, tx.returnTo, { welcome: created, method: 'google' });
   });
@@ -539,6 +604,9 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         isOwner: await isOwnerUser(c.env, session.user.id),
         methods: await listIdentities(c.env, session.user.id),
         orgs: await membershipsOf(c.env.DB, session.user.id),
+        managedBy: session.user.managedBy
+          ? ((await managerOf(c.env.DB, session.user.id))?.name ?? null)
+          : null,
         ...(notice ? { notice } : {}),
       }),
     );
@@ -623,6 +691,8 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.get('/account/delete', async (c) => {
     const session = c.get('session');
     if (!session) return c.redirect('/login?return_to=%2Faccount%2Fdelete', 303);
+    const manager = session.user.managedBy ? await managerOf(c.env.DB, session.user.id) : null;
+    if (manager) return c.html(messagePage(managedDeletion(manager.name), 'Not deleted'), 403);
     const oauth = authorizationServer(c.env).getOAuthApi(c.env);
     const { items } = await oauth.listUserGrants(session.user.id, { limit: 1000 });
     const invited = await c.env.DB.prepare(
@@ -654,6 +724,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     }
     const session = c.get('session');
     if (!session) return c.redirect('/login?return_to=%2Faccount%2Fdelete', 303);
+    if (session.user.managedBy) return c.redirect('/account/delete', 303);
     const form = await c.req.raw.formData();
     if (form.get('confirm') !== 'on') return c.redirect('/account/delete', 303);
     // With a second factor, deletion also needs it, used in the last 5 minutes (THREAT_MODEL R9).
@@ -707,6 +778,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
 
   registerEmailRoutes(app, deps);
   registerMethodRoutes(app, deps);
+  registerManagedRoutes(app, deps);
   registerMfaRoutes(app, deps);
   registerPasskeyRoutes(app, deps);
   registerAdminRoutes(app, deps);

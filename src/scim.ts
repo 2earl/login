@@ -1,14 +1,18 @@
+import type { OAuthHelpers } from '@cloudflare/workers-oauth-provider';
 import { audit } from './audit';
 import { randomToken, sha256Hex } from './crypto';
+import { adoptNewAccount, deactivate, isManagedBy, managingOrgFor, reactivate } from './managed';
 import { MAX_MEMBERSHIPS } from './orgs';
+import { createEmailUser, setDisplayName } from './users';
 
 /**
  * SCIM 2.0 provisioning (RFC 7643, 7644; DESIGN §4.16): what an organization's directory
  * (Okta, Microsoft Entra ID and others) may do to its members. Routes are in scim-routes.ts.
  *
- * A provisioned user is an address at one of the organization's verified domains. It never
- * creates a 2earl account: the person who signs in with that address (now or later) becomes a
- * member while the directory says they're active, and stops being one when it says otherwise.
+ * A provisioned user is an address at one of the organization's verified domains. The person who
+ * signs in with that address (now or later) becomes a member while the directory says they're
+ * active, and stops being one when it says otherwise. At a domain the organization manages
+ * (DESIGN §4.18), provisioning creates the account, and deactivates it instead of removing it.
  */
 
 export const MAX_SCIM_TOKENS = 2;
@@ -116,18 +120,56 @@ export async function accountFor(db: D1Database, email: string): Promise<string 
 }
 
 /**
- * Makes membership follow the directory for one provisioned user: links the account that signs in
- * with the address, then adds it as a member while active, or removes it while inactive. The last
- * owner is never removed; returns false then, so the caller can say so.
+ * A new managed account for a provisioned address, when the organization manages its domain
+ * (DESIGN §4.18). Null when it doesn't: elsewhere provisioning never creates accounts.
+ */
+async function createManagedAccount(
+  db: D1Database,
+  now: number,
+  row: ScimUserRow,
+): Promise<string | null> {
+  const managing = await managingOrgFor(db, row.user_name);
+  if (managing?.orgId !== row.org_id) return null;
+  const userId = await createEmailUser(db, now, row.user_name);
+  const name =
+    row.display_name ?? ([row.given_name, row.family_name].filter(Boolean).join(' ') || null);
+  if (name) await setDisplayName(db, now, userId, name);
+  await audit(db, now, 'user.created', { actorUserId: userId, detail: { via: 'scim' } });
+  await adoptNewAccount(db, now, userId, row.user_name);
+  await audit(db, now, 'scim.account_created', { detail: { org: row.org_id, target: userId } });
+  return userId;
+}
+
+/** Whether the account is the organization's only owner. */
+async function isLastOwner(db: D1Database, orgId: string, userId: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT (SELECT role FROM org_members WHERE org_id = ?1 AND user_id = ?2) AS role,
+              (SELECT COUNT(*) FROM org_members WHERE org_id = ?1 AND role = 'owner') AS owners`,
+    )
+    .bind(orgId, userId)
+    .first<{ role: string | null; owners: number }>();
+  return row?.role === 'owner' && row.owners <= 1;
+}
+
+/**
+ * Makes the account follow the directory for one provisioned user: links the account that signs
+ * in with the address (or, at a managed domain, creates it), then
+ * - for an account the organization manages (DESIGN §4.18): reactivates it while active,
+ *   deactivates it while inactive, and with `deleteAfter` schedules its deletion;
+ * - for anyone else's account: adds it as a member while active, removes it while inactive.
+ * The last owner is never removed or deactivated; returns false then, so the caller can say so.
+ * Deactivating needs `oauth` (to revoke apps' access); without it, nothing is deactivated.
  */
 export async function syncMembership(
   db: D1Database,
   now: number,
   row: ScimUserRow,
+  options: { oauth?: OAuthHelpers; deleteAfter?: number } = {},
 ): Promise<boolean> {
   let userId = row.user_id;
   if (!userId && row.active) {
-    userId = await accountFor(db, row.user_name);
+    userId = (await accountFor(db, row.user_name)) ?? (await createManagedAccount(db, now, row));
     if (userId) {
       await db
         .prepare('UPDATE scim_users SET user_id = ? WHERE id = ? AND user_id IS NULL')
@@ -136,7 +178,13 @@ export async function syncMembership(
     }
   }
   if (!userId) return true;
+  const managed = await isManagedBy(db, userId, row.org_id);
   if (row.active) {
+    if (managed && (await reactivate(db, now, userId, row.org_id))) {
+      await audit(db, now, 'scim.account_reactivated', {
+        detail: { org: row.org_id, target: userId },
+      });
+    }
     const added = await db
       .prepare(
         `INSERT INTO org_members (org_id, user_id, role, joined_at)
@@ -148,6 +196,20 @@ export async function syncMembership(
       .run();
     if (added.meta.changes > 0) {
       await audit(db, now, 'scim.member_added', { detail: { org: row.org_id, target: userId } });
+    }
+    return true;
+  }
+  if (managed) {
+    if (await isLastOwner(db, row.org_id, userId)) return false;
+    if (!options.oauth) return true;
+    const deleteAfter = options.deleteAfter ?? null;
+    if (await deactivate(db, options.oauth, now, userId, row.org_id, deleteAfter)) {
+      await audit(
+        db,
+        now,
+        deleteAfter ? 'scim.account_deletion_scheduled' : 'scim.account_deactivated',
+        { detail: { org: row.org_id, target: userId } },
+      );
     }
     return true;
   }
