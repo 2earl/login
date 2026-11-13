@@ -405,7 +405,7 @@ describe('consent page', () => {
 describe('connected apps', () => {
   it('lists an approved app on the account page', async () => {
     await authorizeAndExchange();
-    const response = await call(app, '/account', { cookies: { '__Host-session': session } });
+    const response = await call(app, '/account/apps', { cookies: { '__Host-session': session } });
     const html = await response.text();
     expect(html).toContain('Test MCP Client');
     expect(html).toContain('Disconnect');

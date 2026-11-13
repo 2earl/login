@@ -35,6 +35,9 @@ function explain(error) {
   if (error?.name === 'NotAllowedError') return 'The passkey request was cancelled or timed out.';
   if (error?.name === 'InvalidStateError') return 'This passkey is already on your account.';
   if (error?.name === 'SecurityError') return 'This browser refused the passkey request.';
+  if (error?.name === 'NotSupportedError') return 'This browser can’t use a passkey here.';
+  // The browser's own wording is for developers; our server's messages are written for people.
+  if (error instanceof window.DOMException) return 'The passkey request didn’t work. Try again.';
   return error?.message || 'Something went wrong. Try again.';
 }
 
@@ -192,7 +195,9 @@ async function offerAutofill(button) {
     const next = await signIn(button, 'conditional', autofill.signal);
     if (next) window.location.assign(next);
   } catch (error) {
-    if (error?.name === 'AbortError') return;
+    // The background request is silent until someone chooses a passkey: browser refusals
+    // (unsupported, aborted, no passkeys) aren't news to a person who didn't ask yet.
+    if (error instanceof window.DOMException) return;
     const status = document.getElementById(button.dataset.status);
     if (status) status.textContent = explain(error);
   }

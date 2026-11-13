@@ -47,6 +47,7 @@ import {
 } from './pages';
 import { safeReturnTo } from './return-to';
 import { MFA_CSP } from './security-headers';
+import { listIdentities } from './users';
 import type { Session } from './sessions';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp';
 
@@ -158,6 +159,7 @@ export function registerMfaRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const returnTo = c.req.query('return_to');
     return securityPage({
       factors: await listFactors(c.env.DB, session.user.id),
+      methods: await listIdentities(c.env, session.user.id),
       recoveryRemaining: await remainingRecoveryCodes(c.env.DB, session.user.id),
       mfaRequired: mfaRequired(c.env),
       mustEnrol: mfaGate(c.env, session) === 'enrol',

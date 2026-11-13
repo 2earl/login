@@ -137,9 +137,10 @@ describe('organizations', () => {
     const page = await (await get(ada, `/orgs/${orgId}?done=created`)).text();
     expect(page).toContain('Acme Research');
     expect(page).toContain('Organization created.');
-    const account = await (await get(ada, '/account')).text();
+    const account = await (await get(ada, '/account/orgs')).text();
     expect(account).toContain(`href="/orgs/${orgId}"`);
     expect(account).toContain('Owner · 1 member');
+    expect(await (await get(ada, '/account')).text()).toContain('Acme Research');
   });
 
   it('don’t exist for anyone outside them, and refuse cross-site changes', async () => {
@@ -322,7 +323,7 @@ describe('roles', () => {
     ).toBe(303);
     expect(
       (await post(ada, `/orgs/${orgId}/leave`, { confirm: 'on' })).headers.get('Location'),
-    ).toBe('/account?saved=left');
+    ).toBe('/account/orgs?saved=left');
     expect(await roleOf(orgId, ada.id)).toBeNull();
     // Now bob is the only owner: demoting or removing him is refused by the database itself.
     expect((await post(cy, `/orgs/${orgId}/members/remove`, { user: bob.id })).status).toBe(403);
@@ -352,7 +353,7 @@ describe('deleting', () => {
     expect(wrong.status).toBe(400);
     expect(await wrong.text()).toContain('doesn’t match');
     const done = await post(ada, `/orgs/${orgId}/delete`, { name: 'Acme Research' });
-    expect(done.headers.get('Location')).toBe('/account?saved=org_deleted');
+    expect(done.headers.get('Location')).toBe('/account/orgs?saved=org_deleted');
     expect(await count('organizations')).toBe(0);
     expect(await count('org_members')).toBe(0);
     expect(await count('org_invitations')).toBe(0);
@@ -486,5 +487,51 @@ describe('organization deletion notices', () => {
     expect(result.delivered).toBe(1);
     expect(deleted).toEqual(['org_gone']);
     expect(await count('org_deletion_notices')).toBe(0);
+  });
+});
+
+describe('pages of an organization', () => {
+  it('shows owners and admins what happened, newest first; members can’t see it', async () => {
+    const ada = people.ada as Person;
+    const bob = people.bob as Person;
+    const orgId = await createOrg(ada);
+    await join(bob, orgId);
+    now += 60;
+    await post(ada, `/orgs/${orgId}/members/role`, { user: bob.id, role: 'admin' });
+    const html = await (await get(ada, `/orgs/${orgId}/activity`)).text();
+    expect(html).toContain('Ada Lovelace</strong> made Bob Example admin');
+    expect(html).toContain('Bob Example</strong> joined as member');
+    expect(html.indexOf('made Bob Example admin')).toBeLessThan(
+      html.indexOf('created the organization'),
+    );
+
+    const cy = people.cy as Person;
+    await join(cy, orgId);
+    expect((await get(cy, `/orgs/${orgId}/activity`)).status).toBe(404);
+    expect((await get(bob, `/orgs/${orgId}/activity`)).status).toBe(200);
+  });
+
+  it('has tabs by role, and renames on its settings page', async () => {
+    const ada = people.ada as Person;
+    const bob = people.bob as Person;
+    const orgId = await createOrg(ada);
+    await join(bob, orgId);
+    const owner = await (await get(ada, `/orgs/${orgId}`)).text();
+    for (const tab of ['Members', 'Activity', 'Domains &amp; SSO', 'Settings'])
+      expect(owner).toContain(`>${tab}</a>`);
+    const member = await (await get(bob, `/orgs/${orgId}`)).text();
+    expect(member).not.toContain('>Activity</a>');
+    expect(member).not.toContain('>Domains &amp; SSO</a>');
+    // The account navigation marks Organizations as the current place.
+    expect(member).toContain('aria-current="page">Organizations<');
+
+    const renamed = await post(ada, `/orgs/${orgId}/name`, { name: 'Acme Labs' });
+    expect(renamed.headers.get('Location')).toBe(`/orgs/${orgId}/settings?done=renamed`);
+    expect(await (await get(ada, `/orgs/${orgId}/settings?done=renamed`)).text()).toContain(
+      'Organization renamed.',
+    );
+    expect(await (await get(bob, `/orgs/${orgId}/settings`)).text()).toContain(
+      'Only owners can rename it.',
+    );
   });
 });

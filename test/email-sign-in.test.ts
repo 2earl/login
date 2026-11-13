@@ -286,7 +286,7 @@ describe('sign-in methods on the account page', () => {
     expect(sent.at(-1)?.to).toBe(OWNER_EMAIL);
     expect(sent.at(-1)?.subject).toBe('A sign-in method was added to your 2earl account');
 
-    const page = await (await call(app, '/account', { cookies, vars: vars() })).text();
+    const page = await (await call(app, '/account/security', { cookies, vars: vars() })).text();
     expect(page).toContain('Email code');
     expect(page).toContain('second@example.com');
   });

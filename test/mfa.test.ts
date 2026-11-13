@@ -132,7 +132,7 @@ describe('TOTP (RFC 6238)', () => {
 describe('security page', () => {
   it('shows the factors and loads the passkey script, with a CSP that allows only it', async () => {
     const account = await (await call(app, '/account', { cookies: cookie() })).text();
-    expect(account).toContain('Second factor: off');
+    expect(account).toContain('glance-alert">Off<');
 
     const response = await call(app, '/account/security', { cookies: cookie() });
     expect(response.status).toBe(200);

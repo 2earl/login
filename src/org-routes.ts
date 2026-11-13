@@ -12,7 +12,15 @@ import {
 } from './http';
 import { invitationMail, sendMail } from './mail';
 import { changeCheck } from './mfa-routes';
-import { deleteOrgPage, directoryPage, invitationPage, newOrgPage, orgPage } from './org-pages';
+import {
+  deleteOrgPage,
+  directoryPage,
+  invitationPage,
+  newOrgPage,
+  orgActivityPage,
+  orgPage,
+  orgSettingsPage,
+} from './org-pages';
 import { addDomain, listDomains, normaliseDomain, removeDomain, verifyDomain } from './org-domains';
 import { createScimToken, listScimTokens, revokeScimToken } from './scim';
 import { samlConfig, signingKeyPem, ssoUrl } from './saml';
@@ -171,6 +179,77 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     return showOrg(c, session, c.req.param('org'), done ? { notice: done } : {});
   });
 
+  app.get('/orgs/:org/settings', async (c) => {
+    const session = c.get('session');
+    if (!session) return signIn(c);
+    return showSettings(
+      c,
+      session,
+      c.req.param('org'),
+      c.req.query('done') === 'renamed' ? { notice: 'Organization renamed.' } : {},
+    );
+  });
+
+  async function showSettings(
+    c: AppContext,
+    session: Session,
+    orgId: string,
+    flash: { notice?: string; error?: string } = {},
+    status: 200 | 400 | 403 | 409 = 200,
+  ) {
+    const found = await membership(c.env.DB, orgId, session.user.id);
+    if (!found) return c.html(notFoundPage(), 404);
+    const owners = (await listMembers(c.env.DB, orgId)).filter((m) => m.role === 'owner').length;
+    return c.html(orgSettingsPage({ org: found.org, role: found.role, owners, ...flash }), status);
+  }
+
+  // What happened in the organization: owners and admins (DESIGN §4.14).
+  app.get('/orgs/:org/activity', async (c) => {
+    const session = c.get('session');
+    if (!session) return signIn(c);
+    const found = await membership(c.env.DB, c.req.param('org'), session.user.id);
+    if (!found || found.role === 'member') return c.html(notFoundPage(), 404);
+    const { results } = await c.env.DB.prepare(
+      `SELECT e.at, e.event, e.detail,
+              COALESCE(a.display_name, a.primary_email) AS actor,
+              COALESCE(t.display_name, t.primary_email) AS target
+       FROM audit_events e
+       LEFT JOIN users a ON a.id = e.actor_user_id
+       LEFT JOIN users t ON t.id = json_extract(e.detail, '$.target')
+       WHERE json_extract(e.detail, '$.org') = ?
+         AND (e.event LIKE 'org.%' OR e.event LIKE 'scim.%')
+       ORDER BY e.at DESC LIMIT 200`,
+    )
+      .bind(found.org.id)
+      .all<{
+        at: number;
+        event: string;
+        detail: string | null;
+        actor: string | null;
+        target: string | null;
+      }>();
+    return c.html(
+      orgActivityPage({
+        org: found.org,
+        role: found.role,
+        now: deps.now(),
+        entries: results.map((r) => ({
+          at: r.at,
+          event: r.event,
+          actor: r.actor,
+          target: r.target,
+          detail: (() => {
+            try {
+              return JSON.parse(r.detail ?? '{}') as Record<string, unknown>;
+            } catch {
+              return {};
+            }
+          })(),
+        })),
+      }),
+    );
+  });
+
   app.post('/orgs/:org/name', async (c) => {
     const ctx = await forChange(c);
     if (ctx instanceof Response) return ctx;
@@ -183,10 +262,10 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         403,
       );
     const name = orgName(ctx.form.get('name'));
-    if (!name) return showOrg(c, ctx.session, ctx.orgId, { error: NAME_ERROR }, 400);
+    if (!name) return showSettings(c, ctx.session, ctx.orgId, { error: NAME_ERROR }, 400);
     await renameOrganization(c.env.DB, deps.now(), ctx.orgId, name);
     await record(c, ctx.session, 'org.renamed', { org: ctx.orgId });
-    return c.redirect(back(ctx.orgId, 'renamed'), 303);
+    return c.redirect(`/orgs/${encodeURIComponent(ctx.orgId)}/settings?done=renamed`, 303);
   });
 
   // ---- Invitations ----------------------------------------------------------------------------
@@ -376,9 +455,10 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const found = await membership(c.env.DB, orgId, session.user.id);
     if (!found) return c.html(notFoundPage(), 404);
     const form = await c.req.raw.formData();
-    if (form.get('confirm') !== 'on') return c.redirect(`/orgs/${encodeURIComponent(orgId)}`, 303);
+    if (form.get('confirm') !== 'on')
+      return c.redirect(`/orgs/${encodeURIComponent(orgId)}/settings`, 303);
     if (!(await removeMember(c.env.DB, orgId, session.user.id))) {
-      return showOrg(
+      return showSettings(
         c,
         session,
         orgId,
@@ -390,7 +470,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       );
     }
     await record(c, session, 'org.left', { org: orgId });
-    return c.redirect('/account?saved=left', 303);
+    return c.redirect('/account/orgs?saved=left', 303);
   });
 
   // ---- Deleting -------------------------------------------------------------------------------
@@ -436,7 +516,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const now = deps.now();
     await deleteOrganization(c.env.DB, now, ctx.orgId);
     await record(c, ctx.session, 'org.deleted', { org: ctx.orgId });
-    return c.redirect('/account?saved=org_deleted', 303);
+    return c.redirect('/account/orgs?saved=org_deleted', 303);
   });
 
   // ---- Domains and directory sync (DESIGN §4.16) ---------------------------------------------------
@@ -687,7 +767,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         org: invitation.orgId,
         invitation: invitation.id,
       });
-      return c.redirect('/account?saved=declined', 303);
+      return c.redirect('/account/orgs?saved=declined', 303);
     }
 
     const result = await acceptInvitation(c.env.DB, now, invitation, session.user.id);
