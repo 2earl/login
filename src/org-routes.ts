@@ -26,6 +26,7 @@ import {
   POLICY_METHODS,
   SESSION_HOURS,
   parseRanges,
+  isDefaultPolicy,
   readPolicy,
   savePolicy,
   type PolicyMethod,
@@ -34,6 +35,7 @@ import { noticeContext, removeAccount } from './sign-in';
 import { changeCheck } from './mfa-routes';
 import {
   deleteManagedAccountPage,
+  type SetupState,
   deleteOrgPage,
   directoryPage,
   invitationPage,
@@ -120,9 +122,10 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
   ) {
     const found = await membership(c.env.DB, orgId, session.user.id);
     if (!found) return c.html(notFoundPage(), 404);
-    const [members, invitations] = await Promise.all([
+    const [members, invitations, setup] = await Promise.all([
       listMembers(c.env.DB, orgId),
       canInvite(found.role) ? listInvitations(c.env.DB, orgId, deps.now()) : Promise.resolve([]),
+      found.role === 'owner' ? setupState(c.env.DB, orgId) : Promise.resolve(undefined),
     ]);
     return c.html(
       orgPage({
@@ -131,10 +134,32 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         userId: session.user.id,
         members,
         invitations,
+        ...(setup ? { setup } : {}),
         ...flash,
       }),
       status,
     );
+  }
+
+  /** How far the company setup is (the owner's guide on the organization's pages). */
+  async function setupState(db: D1Database, orgId: string): Promise<SetupState> {
+    const row = await db
+      .prepare(
+        `SELECT
+           EXISTS (SELECT 1 FROM org_domains WHERE org_id = ?1 AND verified_at IS NOT NULL) AS verified,
+           EXISTS (SELECT 1 FROM org_domains WHERE org_id = ?1 AND managed_at IS NOT NULL) AS managed,
+           EXISTS (SELECT 1 FROM org_saml WHERE org_id = ?1 AND enabled = 1) AS sso,
+           EXISTS (SELECT 1 FROM scim_tokens WHERE org_id = ?1) AS directory`,
+      )
+      .bind(orgId)
+      .first<{ verified: number; managed: number; sso: number; directory: number }>();
+    return {
+      verified: row?.verified === 1,
+      managed: row?.managed === 1,
+      sso: row?.sso === 1,
+      directory: row?.directory === 1,
+      rules: !isDefaultPolicy(await readPolicy(db, orgId)),
+    };
   }
 
   /**

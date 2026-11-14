@@ -76,6 +76,9 @@ export interface AdminUser {
   /** 'email', 'google': how the account signs in. */
   methods: string[];
   isOwner: boolean;
+  /** The organization that manages the account (DESIGN §4.18), and whether it deactivated it. */
+  managedBy: string | null;
+  deactivatedByOrg: boolean;
 }
 
 function userRow(user: AdminUser): string {
@@ -88,12 +91,18 @@ function userRow(user: AdminUser): string {
       : null,
     user.lastSignInAt ? `last sign-in ${dateTime(user.lastSignInAt)} UTC` : 'never signed in',
     user.factors > 0 ? `second factor: ${String(user.factors)}` : 'no second factor',
+    user.managedBy ? `managed by ${escapeHtml(user.managedBy)}` : null,
   ]
     .filter(Boolean)
     .join(' · ');
   const badges =
     (user.isOwner ? '<span class="tag">Owner</span>' : '') +
-    (user.status === 'suspended' ? '<span class="tag tag-alert">Suspended</span>' : '');
+    (user.status === 'suspended'
+      ? user.deactivatedByOrg
+        ? '<span class="tag tag-alert">Deactivated by its organization</span>'
+        : '<span class="tag tag-alert">Suspended</span>'
+      : '') +
+    (user.managedBy ? '<span class="tag tag-muted">Managed</span>' : '');
 
   const actions = user.isOwner
     ? '<p class="row-note">Manage your own account on the account page.</p>'
@@ -237,6 +246,14 @@ export interface AdminOrg {
   invitations: number;
   owners: string[];
   createdAt: number;
+  /** The company setup (DESIGN §4.16–§4.19). */
+  domains: number;
+  verifiedDomains: number;
+  managedDomains: number;
+  managedAccounts: number;
+  sso: 'off' | 'on' | 'required';
+  directoryTokens: number;
+  rules: boolean;
 }
 
 function orgRow(org: AdminOrg): string {
@@ -249,11 +266,22 @@ function orgRow(org: AdminOrg): string {
   ]
     .filter(Boolean)
     .join(' · ');
+  const company = [
+    org.domains > 0
+      ? `domains: ${String(org.verifiedDomains)} verified of ${String(org.domains)}, ${String(org.managedDomains)} managed`
+      : 'no domains',
+    org.managedAccounts > 0 ? `${String(org.managedAccounts)} managed accounts` : null,
+    org.sso === 'off' ? 'SSO off' : org.sso === 'required' ? 'SSO required' : 'SSO on',
+    org.directoryTokens > 0 ? `directory sync: ${String(org.directoryTokens)} tokens` : null,
+    org.rules ? 'security rules set' : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   return (
     '<li class="admin-row">' +
     `<div class="app-main"><p class="app-name">${escapeHtml(org.name)}` +
     (org.status === 'suspended' ? '<span class="tag tag-alert">Suspended</span>' : '') +
-    `</p><p class="app-meta">${meta}</p></div>` +
+    `</p><p class="app-meta">${meta}</p><p class="app-meta">${company}</p></div>` +
     '<div class="row-actions">' +
     (org.status === 'suspended'
       ? actionForm('/admin/orgs', { action: 'reactivate', org: org.id }, 'Reactivate')

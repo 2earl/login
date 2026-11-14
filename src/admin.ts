@@ -156,7 +156,9 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
               (SELECT subject FROM identities WHERE user_id = u.id AND provider = 'google') AS subject,
               (SELECT MAX(last_login_at) FROM identities WHERE user_id = u.id) AS last_login_at,
               (SELECT GROUP_CONCAT(provider) FROM identities WHERE user_id = u.id) AS methods,
-              (SELECT COUNT(*) FROM mfa_factors f WHERE f.user_id = u.id) AS factors
+              (SELECT COUNT(*) FROM mfa_factors f WHERE f.user_id = u.id) AS factors,
+              (SELECT name FROM organizations WHERE id = u.managed_by) AS managed_by,
+              u.deactivated_at
        FROM users u
        ORDER BY u.created_at LIMIT 1000`,
     ).all<{
@@ -169,6 +171,8 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
       last_login_at: number | null;
       methods: string | null;
       factors: number;
+      managed_by: string | null;
+      deactivated_at: number | null;
     }>();
     return results.map((row) => ({
       id: row.id,
@@ -180,6 +184,8 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
       factors: row.factors,
       methods: (row.methods ?? '').split(',').filter(Boolean).sort(),
       isOwner: row.subject === c.env.OWNER_GOOGLE_SUB,
+      managedBy: row.managed_by,
+      deactivatedByOrg: row.deactivated_at !== null,
     }));
   }
 
@@ -411,7 +417,16 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
               (SELECT COUNT(*) FROM org_members m WHERE m.org_id = o.id) AS members,
               (SELECT COUNT(*) FROM org_invitations i WHERE i.org_id = o.id AND i.expires_at > ?) AS invitations,
               (SELECT GROUP_CONCAT(COALESCE(u.primary_email, u.id), ', ') FROM org_members m
-                 JOIN users u ON u.id = m.user_id WHERE m.org_id = o.id AND m.role = 'owner') AS owners
+                 JOIN users u ON u.id = m.user_id WHERE m.org_id = o.id AND m.role = 'owner') AS owners,
+              (SELECT COUNT(*) FROM org_domains d WHERE d.org_id = o.id) AS domains,
+              (SELECT COUNT(*) FROM org_domains d WHERE d.org_id = o.id AND d.verified_at IS NOT NULL) AS verified_domains,
+              (SELECT COUNT(*) FROM org_domains d WHERE d.org_id = o.id AND d.managed_at IS NOT NULL) AS managed_domains,
+              (SELECT COUNT(*) FROM users u WHERE u.managed_by = o.id) AS managed_accounts,
+              COALESCE((SELECT enabled FROM org_saml s WHERE s.org_id = o.id), 0) AS sso,
+              o.require_sso,
+              (SELECT COUNT(*) FROM scim_tokens t WHERE t.org_id = o.id) AS directory_tokens,
+              (SELECT require_factor || passkeys_only || COALESCE(session_hours, '') || methods || ip_ranges
+                 FROM org_policies p WHERE p.org_id = o.id) AS rules
        FROM organizations o ORDER BY o.created_at LIMIT 1000`,
     )
       .bind(deps.now())
@@ -423,6 +438,14 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
         members: number;
         invitations: number;
         owners: string | null;
+        domains: number;
+        verified_domains: number;
+        managed_domains: number;
+        managed_accounts: number;
+        sso: number;
+        require_sso: number;
+        directory_tokens: number;
+        rules: string | null;
       }>();
     return results.map((r) => ({
       id: r.id,
@@ -432,6 +455,14 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
       invitations: r.invitations,
       owners: r.owners ? r.owners.split(', ') : [],
       createdAt: r.created_at,
+      domains: r.domains,
+      verifiedDomains: r.verified_domains,
+      managedDomains: r.managed_domains,
+      managedAccounts: r.managed_accounts,
+      sso: r.sso === 1 ? (r.require_sso === 1 ? 'required' : 'on') : 'off',
+      directoryTokens: r.directory_tokens,
+      // Rules saved and different from the defaults (DESIGN §4.19).
+      rules: r.rules !== null && r.rules !== '00google,email,passkey',
     }));
   }
 

@@ -17,6 +17,7 @@ import {
   MAX_RANGES,
   POLICY_METHODS,
   SESSION_HOURS,
+  isDefaultPolicy,
   type OrgPolicy,
   type PolicyMethod,
 } from './org-policy';
@@ -206,15 +207,25 @@ export function orgPage(params: {
   notice?: string | undefined;
   error?: string | undefined;
   email?: string;
+  /** For owners: how far the company setup is (steps done of 5), to point them to it. */
+  setup?: SetupState;
 }): string {
   const { org, role } = params;
   const base = `/orgs/${escapeHtml(org.id)}`;
   const active = org.status === 'active';
   const inviting = active && canInvite(role);
+  const setupDone = params.setup ? setupSteps(params.setup).filter((s) => s.done).length : 5;
   return page(
     org.name,
     orgHeader(org, role, 'members') +
       flash(params) +
+      (active && role === 'owner' && params.setup && setupDone < 5
+        ? '<aside class="setup-callout" aria-labelledby="setup-callout-heading">' +
+          `<h2 id="setup-callout-heading">Set up ${escapeHtml(org.name)} for your company</h2>` +
+          `<p>Verify your domain, manage your people’s accounts, connect your single sign-on and directory, and set security rules. ${String(setupDone)} of 5 done.</p>` +
+          `<a class="button primary" href="${base}/directory">${setupDone === 0 ? 'Start' : 'Continue'}</a>` +
+          '</aside>'
+        : '') +
       (inviting
         ? '<section class="section section-first invite-panel" aria-labelledby="invite-heading">' +
           '<h2 id="invite-heading">Invite people</h2>' +
@@ -516,6 +527,13 @@ export function directoryPage(params: {
     orgHeader(params.org, 'owner', 'directory') +
       flash(params) +
       '<p class="lede">Verify your company’s domains, manage the 2earl accounts at them, connect your directory (Okta, Microsoft Entra ID or any SCIM 2.0 client) and your single sign-on.</p>' +
+      setupList({
+        verified,
+        managed: params.domains.some((d) => d.managedAt !== null),
+        sso: params.saml?.enabled === true,
+        directory: params.tokens.length > 0,
+        rules: !isDefaultPolicy(params.policy),
+      }) +
       '<section class="section" aria-labelledby="domains-heading">' +
       '<h2 id="domains-heading">Domains</h2>' +
       (domainRows ? `<ul class="admin-list">${domainRows}</ul>` : '') +
@@ -523,6 +541,9 @@ export function directoryPage(params: {
       '<label class="field"><span>Domain</span><input name="domain" type="text" required maxlength="253" placeholder="example.com" autocomplete="off" spellcheck="false"></label>' +
       '<button class="button secondary" type="submit">Add domain</button></form>' +
       '</section>' +
+      // In the order of the setup steps.
+      managedSection(base, params.domains, params.managed, params.saml?.enabled === true) +
+      samlSection(base, params.issuer, params.org.id, verified, params.saml) +
       '<section class="section" aria-labelledby="scim-heading">' +
       '<h2 id="scim-heading">Directory sync (SCIM 2.0)</h2>' +
       '<dl class="details">' +
@@ -540,13 +561,11 @@ export function directoryPage(params: {
           '<p class="note">Up to two tokens, so you can rotate: create the new one, put it in your directory, then revoke the old one.</p>'
         : '<p class="note">Verify a domain first.</p>') +
       '</section>' +
-      managedSection(base, params.domains, params.managed, params.saml?.enabled === true) +
       policySection(
         base,
         params.policy,
         params.domains.some((d) => d.managedAt !== null),
-      ) +
-      samlSection(base, params.issuer, params.org.id, verified, params.saml),
+      ),
     { section: 'Organization' },
   );
 }
@@ -597,6 +616,68 @@ function managedSection(
   );
 }
 
+export interface SetupState {
+  verified: boolean;
+  managed: boolean;
+  sso: boolean;
+  directory: boolean;
+  rules: boolean;
+}
+
+/** The company setup, in order: each step needs the ones before it (DESIGN §4.16–§4.19). */
+function setupSteps(state: SetupState) {
+  return [
+    {
+      done: state.verified,
+      anchor: 'domains-heading',
+      title: 'Verify a domain',
+      text: 'Prove your company controls it, with a DNS record.',
+    },
+    {
+      done: state.managed,
+      anchor: 'managed-heading',
+      title: 'Manage the accounts at it',
+      text: 'Accounts at the domain become your organization’s to deactivate and delete.',
+    },
+    {
+      done: state.sso,
+      anchor: 'saml-heading',
+      title: 'Connect single sign-on',
+      text: 'People sign in through your identity provider (SAML 2.0).',
+    },
+    {
+      done: state.directory,
+      anchor: 'scim-heading',
+      title: 'Connect your directory',
+      text: 'Joiners get an account, leavers lose access at once (SCIM 2.0).',
+    },
+    {
+      done: state.rules,
+      anchor: 'rules-heading',
+      title: 'Set security rules',
+      text: 'Second factor, passkeys, session length, ways in, networks.',
+    },
+  ];
+}
+
+function setupList(state: SetupState): string {
+  const steps = setupSteps(state);
+  const next = steps.findIndex((step) => !step.done);
+  return (
+    '<nav class="setup" aria-labelledby="setup-heading">' +
+    `<h2 id="setup-heading" class="visually-hidden">Setup</h2><ol class="setup-steps">` +
+    steps
+      .map(
+        (step, i) =>
+          `<li class="${step.done ? 'is-done' : i === next ? 'is-next' : ''}">` +
+          `<a href="#${step.anchor}"><span class="setup-title">${step.title}</span>` +
+          `<span class="setup-text">${step.done ? 'Done' : step.text}</span></a></li>`,
+      )
+      .join('') +
+    '</ol></nav>'
+  );
+}
+
 /** Security rules for managed accounts (DESIGN §4.19). */
 function policySection(base: string, policy: OrgPolicy, managing: boolean): string {
   const check = (name: string, on: boolean, label: string, hint: string) =>
@@ -612,43 +693,46 @@ function policySection(base: string, policy: OrgPolicy, managing: boolean): stri
     '<section class="section" aria-labelledby="rules-heading">' +
     '<h2 id="rules-heading">Security rules</h2>' +
     '<p class="section-text">For the accounts you manage. Owners keep every way in and every network, so a broken identity provider or a new office network can’t lock you out; the second-factor rules and the session length apply to them too.</p>' +
-    (managing
-      ? `<form method="post" action="${base}/policy" class="stack-form">` +
-        '<fieldset class="choices"><legend>Second factor</legend>' +
-        check(
-          'require_factor',
-          policy.requireFactor,
-          'Require a second factor',
-          'People without one add a passkey or an authenticator app before going on.',
-        ) +
-        check(
-          'passkeys_only',
-          policy.passkeysOnly,
-          'Require a passkey',
-          'Phishing-resistant. Authenticator-app codes stop counting once someone has a passkey; recovery codes still work.',
-        ) +
-        '</fieldset>' +
-        '<fieldset class="choices"><legend>Ways to sign in</legend>' +
-        '<p class="hint">Single sign-on is always allowed while it’s on.</p>' +
-        POLICY_METHODS.map(
-          (m) =>
-            `<label class="confirm"><input type="checkbox" name="methods" value="${m}"${policy.methods.includes(m) ? ' checked' : ''}><span>${methodLabel[m]}</span></label>`,
-        ).join('') +
-        '</fieldset>' +
-        '<label class="field"><span>Sessions last</span>' +
-        '<select name="session_hours">' +
-        `<option value=""${policy.sessionHours === null ? ' selected' : ''}>7 days (2earl’s default)</option>` +
-        SESSION_HOURS.map(
-          (h) =>
-            `<option value="${String(h)}"${policy.sessionHours === h ? ' selected' : ''}>${hours(h)}</option>`,
-        ).join('') +
-        '</select><span class="hint">Counted from sign-in. Sessions end after 12 hours unused in any case.</span></label>' +
-        '<label class="field"><span>Allowed networks</span>' +
-        `<textarea name="ip_ranges" rows="3" spellcheck="false" placeholder="203.0.113.0/24&#10;2001:db8::/32">${escapeHtml(policy.ipRanges.join('\n'))}</textarea>` +
-        `<span class="hint">One range per line (IPv4 or IPv6, CIDR), up to ${String(MAX_RANGES)}. Empty: anywhere. Apps that people connected keep working elsewhere.</span></label>` +
-        '<div class="consent-actions"><button class="button secondary" type="submit">Save rules</button></div>' +
-        '</form>'
-      : '<p class="note">Manage the accounts at a domain first.</p>') +
+    (!managing
+      ? '<p class="note">Available once you manage the accounts at a domain (step 2 above). This is what you’ll set:</p>'
+      : '') +
+    (`<form method="post" action="${base}/policy" class="stack-form">` +
+      (managing ? '' : '<fieldset class="locked" disabled>') +
+      '<fieldset class="choices"><legend>Second factor</legend>' +
+      check(
+        'require_factor',
+        policy.requireFactor,
+        'Require a second factor',
+        'People without one add a passkey or an authenticator app before going on.',
+      ) +
+      check(
+        'passkeys_only',
+        policy.passkeysOnly,
+        'Require a passkey',
+        'Phishing-resistant. Authenticator-app codes stop counting once someone has a passkey; recovery codes still work.',
+      ) +
+      '</fieldset>' +
+      '<fieldset class="choices"><legend>Ways to sign in</legend>' +
+      '<p class="hint">Single sign-on is always allowed while it’s on.</p>' +
+      POLICY_METHODS.map(
+        (m) =>
+          `<label class="confirm"><input type="checkbox" name="methods" value="${m}"${policy.methods.includes(m) ? ' checked' : ''}><span>${methodLabel[m]}</span></label>`,
+      ).join('') +
+      '</fieldset>' +
+      '<label class="field"><span>Sessions last</span>' +
+      '<select name="session_hours">' +
+      `<option value=""${policy.sessionHours === null ? ' selected' : ''}>7 days (2earl’s default)</option>` +
+      SESSION_HOURS.map(
+        (h) =>
+          `<option value="${String(h)}"${policy.sessionHours === h ? ' selected' : ''}>${hours(h)}</option>`,
+      ).join('') +
+      '</select><span class="hint">Counted from sign-in. Sessions end after 12 hours unused in any case.</span></label>' +
+      '<label class="field"><span>Allowed networks</span>' +
+      `<textarea name="ip_ranges" rows="3" spellcheck="false" placeholder="203.0.113.0/24&#10;2001:db8::/32">${escapeHtml(policy.ipRanges.join('\n'))}</textarea>` +
+      `<span class="hint">One range per line (IPv4 or IPv6, CIDR), up to ${String(MAX_RANGES)}. Empty: anywhere. Apps that people connected keep working elsewhere.</span></label>` +
+      '<div class="consent-actions"><button class="button secondary" type="submit">Save rules</button></div>' +
+      (managing ? '' : '</fieldset>') +
+      '</form>') +
     '</section>'
   );
 }
