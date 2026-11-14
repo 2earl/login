@@ -63,6 +63,7 @@ import { deleteSession, getSession, type Session } from './sessions';
 import { registerEmailRoutes, sendCode } from './email-routes';
 import { registerMethodRoutes } from './method-routes';
 import { registerManagedRoutes } from './managed-routes';
+import { registerOrgApiRoutes } from './org-api';
 import { registerPasskeyRoutes } from './passkey-routes';
 import { signupMode } from './settings';
 import {
@@ -785,6 +786,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   registerEmailRoutes(app, deps);
   registerMethodRoutes(app, deps);
   registerManagedRoutes(app, deps);
+  registerOrgApiRoutes(app, deps);
   registerMfaRoutes(app, deps);
   registerPasskeyRoutes(app, deps);
   registerAdminRoutes(app, deps);

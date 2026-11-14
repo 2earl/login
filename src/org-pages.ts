@@ -25,6 +25,7 @@ import { escapeHtml, formatDate, formatDateTime, page } from './pages';
 import type { ScimTokenInfo } from './scim';
 import type { GroupSummary } from './scim-groups';
 import type { AuditStream } from './org-audit';
+import { MAX_KEYS, type ApiKeyInfo } from './org-api';
 
 /** Server-rendered pages for organizations (DESIGN §4.14). Every value is escaped. */
 
@@ -269,6 +270,10 @@ export function orgSettingsPage(params: {
   owners: number;
   /** The organization manages the viewer's account: they can't leave (DESIGN §4.18). */
   managed?: boolean;
+  /** Owners: the organization's API keys (DESIGN §4.24), and a just-created one. */
+  apiKeys?: ApiKeyInfo[];
+  newKey?: string;
+  issuer?: string;
   notice?: string | undefined;
   error?: string | undefined;
 }): string {
@@ -290,6 +295,9 @@ export function orgSettingsPage(params: {
         : `<p class="section-text">${escapeHtml(org.name)}. Only owners can rename it.</p>`) +
       `<p class="note">Created ${formatDate(org.createdAt)}.</p>` +
       '</section>' +
+      (active && role === 'owner' && params.apiKeys
+        ? apiKeysSection(base, params.apiKeys, params.newKey, params.issuer ?? '')
+        : '') +
       '<section class="section" aria-labelledby="leave-heading">' +
       '<h2 id="leave-heading">Leave</h2>' +
       (params.managed
@@ -309,6 +317,45 @@ export function orgSettingsPage(params: {
           '</section>'
         : ''),
     { section: 'Organization' },
+  );
+}
+
+/** The organization's API keys (DESIGN §4.24). */
+function apiKeysSection(
+  base: string,
+  keys: ApiKeyInfo[],
+  newKey: string | undefined,
+  issuer: string,
+): string {
+  const rows = keys
+    .map(
+      (k) =>
+        '<li class="admin-row"><div class="app-main">' +
+        `<p class="app-name">${escapeHtml(k.name)} <span class="tag tag-muted">${k.access === 'write' ? 'Read and write' : 'Read'}</span></p>` +
+        `<p class="app-meta">Created ${formatDate(k.createdAt)} · ${k.lastUsedAt ? `last used ${formatDate(k.lastUsedAt)}` : 'never used'} · <code>${escapeHtml(k.id)}</code></p>` +
+        '</div><div class="row-actions">' +
+        `<form method="post" action="${base}/api-keys">` +
+        hidden({ action: 'revoke', key: k.id }) +
+        '<button class="button secondary small" type="submit">Revoke</button></form>' +
+        '</div></li>',
+    )
+    .join('');
+  return (
+    '<section class="section" aria-labelledby="api-heading">' +
+    '<h2 id="api-heading">API keys</h2>' +
+    `<p class="section-text">For your own scripts: read members, domains and the audit log, and with a read-and-write key change roles, deactivate and reactivate managed accounts, and remove members. The API never acts on owners. Base URL <code>${escapeHtml(issuer)}/api/v1</code>; see <a href="https://github.com/2earl/login/blob/main/docs/API.md">the API reference</a>.</p>` +
+    (newKey
+      ? '<div class="secret-once" role="status"><p><strong>Your new key.</strong> Copy it now: it isn’t shown again.</p>' +
+        `<p><code class="secret">${escapeHtml(newKey)}</code></p></div>`
+      : '') +
+    (rows ? `<ul class="admin-list">${rows}</ul>` : '') +
+    `<form method="post" action="${base}/api-keys" class="inline-form">` +
+    hidden({ action: 'create' }) +
+    '<label class="field"><span>Name</span><input name="name" type="text" required maxlength="60" placeholder="HR sync" autocomplete="off"></label>' +
+    '<label class="field"><span>Access</span><select name="access"><option value="read">Read</option><option value="write">Read and write</option></select></label>' +
+    '<button class="button secondary" type="submit">Create key</button></form>' +
+    `<p class="note">Up to ${String(MAX_KEYS)} keys. Every change made with a key is in the activity, with the key’s ID.</p>` +
+    '</section>'
   );
 }
 
@@ -358,6 +405,9 @@ const ACTIVITY: Record<string, (e: ActivityEntry) => string> = {
   'account.exported': () => 'downloaded their data',
   'org.audit_exported': (e) =>
     `downloaded ${typeof e.detail.days === 'number' ? `${String(e.detail.days)} days of ` : ''}the audit log`,
+  'org.api_key_created': (e) =>
+    `created the API key “${str(e.detail.name, 'unnamed')}” (${e.detail.access === 'write' ? 'read and write' : 'read'})`,
+  'org.api_key_revoked': () => 'revoked an API key',
   'org.audit_stream_changed': (e) =>
     e.detail.removed ? 'removed the audit stream' : 'changed the audit stream',
   'org.created': () => 'created the organization',

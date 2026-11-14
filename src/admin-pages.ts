@@ -553,6 +553,8 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'org.app_disallowed': 'Organization removed an allowed app',
   'org.audit_exported': 'Organization downloaded its audit log',
   'org.audit_stream_changed': 'Organization changed its audit stream',
+  'org.api_key_created': 'Organization created an API key',
+  'org.api_key_revoked': 'Organization revoked an API key',
   'scim.account_deactivated': 'Directory deactivated an account',
   'scim.account_reactivated': 'Directory reactivated an account',
   'scim.account_deletion_scheduled': 'Directory scheduled an account deletion',

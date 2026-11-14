@@ -290,6 +290,17 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | T5 | A spreadsheet runs a formula from the CSV | Cells starting with `=`, `+`, `-`, `@` are prefixed (tested) |
 | T6 | An admin sends the log elsewhere | Only owners set up the stream, with a recent proof; downloads and stream changes are logged (tested) |
 
+### K — The organization API (DESIGN §4.24, phase 10g)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| K1 | A leaked key takes the organization over | Keys never act on owners and can't make owners (tested); revocable at once (tested) |
+| K2 | A leaked key read from the database | Only SHA-256 is stored; the key is shown once (tested) |
+| K3 | A read key changes members | Write endpoints need a read-and-write key (tested) |
+| K4 | Changes made with a key go unnoticed | Every write is in the organization's activity with the key's ID (tested); the stream pushes it |
+| K5 | Key guessing | 256-bit keys; rate limit per address |
+| K6 | An admin mints keys | Only owners, with a recent proof (tested) |
+
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
 
 | # | Threat | Mitigation |
