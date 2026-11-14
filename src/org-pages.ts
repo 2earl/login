@@ -349,7 +349,7 @@ function apiKeysSection(
   return (
     '<section class="section" aria-labelledby="api-heading">' +
     '<h2 id="api-heading">API keys</h2>' +
-    `<p class="section-text">For your own scripts: read members, domains and the audit log, and with a read-and-write key change roles, deactivate and reactivate managed accounts, and remove members. The API never acts on owners. Base URL <code>${escapeHtml(issuer)}/api/v1</code>; see <a href="https://github.com/2earl/login/blob/main/docs/API.md">the API reference</a>.</p>` +
+    `<p class="section-text">For your own scripts: read members, domains and the audit log, and with a read-and-write key change roles, deactivate and reactivate managed accounts, and remove members. The API never acts on owners. Base URL <code>${escapeHtml(issuer)}/api/v1</code>; see <a href="/docs/api">the API reference</a>.</p>` +
     (newKey
       ? '<div class="secret-once" role="status"><p><strong>Your new key.</strong> Copy it now: it isn’t shown again.</p>' +
         `<p><code class="secret">${escapeHtml(newKey)}</code></p></div>`

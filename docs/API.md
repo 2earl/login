@@ -1,5 +1,7 @@
 # The organization API
 
+This page is published at <https://login.2earl.com/docs/api>, generated from `docs/API.md`.
+
 For an organization's own scripts: HR syncs, offboarding tools, log collectors. Owners create keys
 on the organization's **Settings** page. A key is shown once; 2earl keeps only its SHA-256.
 
@@ -42,7 +44,8 @@ on the organization's **Settings** page. A key is shown once; 2earl keeps only i
 
 ### `GET /audit`
 
-The organization's audit log (DESIGN §4.23), **oldest first**, from the last 90 days.
+The organization's audit log, **oldest first**, from the last 90 days: everything that names the
+organization, and everything the accounts it manages did.
 
 | Query | Meaning |
 |---|---|
@@ -75,10 +78,28 @@ comes back. Events of the last few seconds appear on the next call.
 
 | Request | Body | Does |
 |---|---|---|
-| `POST /members/{id}/role` | `{ "role": "admin" }` or `"member"` | Changes the role. `409 directory` when the directory decides it (DESIGN §4.21) |
+| `POST /members/{id}/role` | `{ "role": "admin" }` or `"member"` | Changes the role. `409 directory` when the directory decides it (a group marked admin) |
 | `POST /members/{id}/deactivate` | none | A managed account can't sign in; sessions and app access end. `409 not_managed` otherwise |
 | `POST /members/{id}/reactivate` | none | Lifts the organization's deactivation |
 | `POST /members/{id}/sign-out` | none | Signs a managed account out everywhere: sessions and app access end, the account stays active. `409 not_managed` otherwise |
 | `POST /members/{id}/remove` | none | Removes a member the organization doesn't manage. `409 managed` for managed accounts: deactivate them |
 
 Every change is in the organization's activity, with `"via": "api"` and the key's ID.
+
+## Directory sync (SCIM 2.0)
+
+Microsoft Entra ID, Okta and other directories provision people and groups into the organization.
+Owners create a token on **Domains & SSO**, after verifying a domain.
+
+- **Base URL:** `https://login.2earl.com/scim/v2`
+- **Authentication:** `Authorization: Bearer scim_…`
+- **Resources:** `Users` and `Groups`: create, read, list, replace, patch, delete. `PATCH` takes
+  the shapes Entra ID and Okta send, operation names in any case.
+- **Filters:** `userName eq`, `externalId eq` (users); `displayName eq`, `externalId eq`
+  (groups). `excludedAttributes=members` on groups.
+- **Discovery:** `ServiceProviderConfig`, `ResourceTypes`, `Schemas`.
+- **Not supported:** bulk, sorting, ETags, soft delete.
+
+At a domain the organization manages, provisioning creates the 2earl account; `active: false`
+deactivates it; `DELETE` deactivates it at once and deletes it 30 days later unless it is
+reactivated first. Groups can be marked admin on **Domains & SSO**: their members become admins.

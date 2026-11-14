@@ -36,8 +36,8 @@ Production deploys run only from `main`, through the `deploy` workflow, after ow
 
 ## Security
 
-Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
+Report vulnerabilities to legal@2earl.com. See [SECURITY.md](SECURITY.md).
 
 ## License
 
-[AGPL-3.0](LICENSE)
+Proprietary. All rights reserved; see [LICENSE](LICENSE).

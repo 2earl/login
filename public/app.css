@@ -2111,3 +2111,29 @@ details.protocol > form {
 details.protocol > form {
   margin-bottom: 1rem;
 }
+
+/* ---- Published documentation (/docs/api) ---------------------------------------------------- */
+
+.docs h2 {
+  margin-top: 2.5rem;
+  font-size: 1.375rem;
+  font-weight: 600;
+}
+
+.docs h3 {
+  margin-top: 1.75rem;
+}
+
+.docs pre {
+  overflow-x: auto;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.625rem;
+  background: var(--surface);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.docs .table-wrap {
+  margin: 1rem 0;
+}

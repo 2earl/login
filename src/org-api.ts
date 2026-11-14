@@ -3,6 +3,8 @@ import type { Deps } from './app';
 import { audit } from './audit';
 import { randomToken, sha256Hex } from './crypto';
 import { clientIp, type AppContext, type AppEnv } from './http';
+import { API_DOCS_HTML } from './api-docs.generated';
+import { page } from './pages';
 import { deactivate, isManagedBy, reactivate, signOutEverywhere } from './managed';
 import { authorizationServer } from './oauth';
 import { listDomains } from './org-domains';
@@ -293,6 +295,15 @@ export function registerOrgApiRoutes(app: Hono<AppEnv>, deps: Deps): void {
     }
     return json({ id: member.userId, removed: true });
   });
+
+  // The reference, for customers: the repository is private (scripts/api-docs.mjs).
+  app.get('/docs/api', (c) =>
+    c.html(
+      page('API reference', `<article class="docs">${API_DOCS_HTML}</article>`, {
+        section: 'Developers',
+      }),
+    ),
+  );
 
   app.all('/api/v1/*', () => problem(404, 'not_found', 'No such endpoint.'));
 }

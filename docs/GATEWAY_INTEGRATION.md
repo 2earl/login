@@ -255,7 +255,7 @@ Access tokens for the gateway are bearer tokens until the gateway opts in. To ac
   ../login/e2e/wrangler.jsonc`, and bind `{ "binding": "AUTH_SERVER", "service": "login-e2e" }` in
   the gateway's development config. The resource must then be the e2e value of `MCP_RESOURCE`.
 - **Repository conventions:** see login's README and DESIGN §9–§10:
-  - a public repo in `2earl`, AGPL-3.0;
+  - a private repo in `2earl`, proprietary;
   - a ruleset with a required check;
   - a `production` environment with owner approval;
   - SHA-pinned actions;
