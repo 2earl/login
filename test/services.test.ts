@@ -273,13 +273,20 @@ describe('account-deletion notices', () => {
     expect(await count('audit_events', "event = 'user.deletion_delivered'")).toBe(SERVICES.length);
   });
 
-  it('runs on the 15-minute cron trigger', async () => {
+  it('runs on the minute cron trigger, every 15 minutes', async () => {
     await env.DB.prepare(
       "INSERT INTO deletion_notices (service, user_id, created_at) VALUES ('mcp', 'gone-user', 0)",
     ).run();
+    // Not at minute 7.
     await exports.default.scheduled({
-      cron: '*/15 * * * *',
-      scheduledTime: Date.now(),
+      cron: '* * * * *',
+      scheduledTime: Date.UTC(2026, 10, 14, 9, 7),
+      noRetry: () => undefined,
+    });
+    expect(await count('deletion_notices')).toBe(1);
+    await exports.default.scheduled({
+      cron: '* * * * *',
+      scheduledTime: Date.UTC(2026, 10, 14, 9, 15),
       noRetry: () => undefined,
     });
     // Delivered over the Worker's own binding (to the stand-in gateway in vitest.config.ts).

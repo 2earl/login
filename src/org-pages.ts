@@ -24,6 +24,7 @@ import {
 import { escapeHtml, formatDate, formatDateTime, page } from './pages';
 import type { ScimTokenInfo } from './scim';
 import type { GroupSummary } from './scim-groups';
+import type { AuditStream } from './org-audit';
 
 /** Server-rendered pages for organizations (DESIGN §4.14). Every value is escaped. */
 
@@ -321,7 +322,44 @@ export interface ActivityEntry {
 
 const str = (value: unknown, fallback: string) => (typeof value === 'string' ? value : fallback);
 
+const METHOD_WORD: Record<string, string> = {
+  google: 'Google',
+  email: 'an email code',
+  passkey: 'a passkey',
+  saml: 'single sign-on',
+  oidc: 'single sign-on',
+};
+
 const ACTIVITY: Record<string, (e: ActivityEntry) => string> = {
+  'login.succeeded': (e) => {
+    const how = typeof e.detail.method === 'string' ? METHOD_WORD[e.detail.method] : undefined;
+    return how ? `signed in with ${how}` : 'signed in';
+  },
+  'login.failed': () => 'failed to sign in',
+  'login.denied': (e) =>
+    `was refused sign-in${typeof e.detail.reason === 'string' ? ` (${e.detail.reason.replace(/_/g, ' ')})` : ''}`,
+  logout: () => 'signed out',
+  'session.ended': () => 'ended a session',
+  'mfa.verified': () => 'confirmed a second factor',
+  'mfa.failed': () => 'entered a wrong second-factor code',
+  'mfa.locked': () => 'was locked out after wrong second-factor codes',
+  'mfa.enrolled': () => 'added a second factor',
+  'mfa.removed': () => 'removed a second factor',
+  'mfa.recovery_code_used': () => 'used a recovery code',
+  'identity.added': () => 'added a way to sign in',
+  'identity.removed': () => 'removed a way to sign in',
+  'consent.approved': () => 'connected an app',
+  'consent.denied': () => 'was refused or declined an app',
+  'grant.revoked': () => 'disconnected an app',
+  'grant.refused': (e) =>
+    e.detail.reason === 'app_not_allowed'
+      ? 'lost access to an app that isn’t allowed'
+      : 'lost access to an app',
+  'account.exported': () => 'downloaded their data',
+  'org.audit_exported': (e) =>
+    `downloaded ${typeof e.detail.days === 'number' ? `${String(e.detail.days)} days of ` : ''}the audit log`,
+  'org.audit_stream_changed': (e) =>
+    e.detail.removed ? 'removed the audit stream' : 'changed the audit stream',
   'org.created': () => 'created the organization',
   'org.renamed': () => 'renamed the organization',
   'org.invited': (e) => `invited someone as ${str(e.detail.role, 'member')}`,
@@ -385,11 +423,18 @@ export function orgActivityPage(params: {
   role: OrgRole;
   entries: ActivityEntry[];
   now: number;
+  /** Owners: the audit stream (DESIGN §4.23). */
+  stream?: AuditStream | null;
+  /** A just-created signing secret: shown once. */
+  secret?: string;
+  notice?: string | undefined;
+  error?: string | undefined;
 }): string {
+  const base = `/orgs/${escapeHtml(params.org.id)}`;
   const rows = params.entries
     .map((e) => {
       const what = ACTIVITY[e.event]?.(e) ?? e.event;
-      const who = e.event.startsWith('scim.') ? 'Directory sync' : (e.actor ?? 'A former member');
+      const who = e.event.startsWith('scim.') ? 'Directory sync' : (e.actor ?? 'Someone');
       return (
         '<li class="activity-row">' +
         `<time datetime="${new Date(e.at * 1000).toISOString()}">${escapeHtml(formatDateTime(e.at))}</time>` +
@@ -398,17 +443,68 @@ export function orgActivityPage(params: {
       );
     })
     .join('');
+  const download = (days: number) =>
+    `<a href="${base}/activity/export?days=${String(days)}&amp;format=csv">CSV</a> · ` +
+    `<a href="${base}/activity/export?days=${String(days)}&amp;format=json">JSON</a>`;
   return page(
     `${params.org.name}: activity`,
     orgHeader(params.org, params.role, 'activity') +
+      flash(params) +
+      (params.secret
+        ? '<div class="secret-once" role="status"><p><strong>Your signing secret.</strong> Put it in your receiving endpoint now: it isn’t shown again.</p>' +
+          `<p><code class="secret">${escapeHtml(params.secret)}</code></p></div>`
+        : '') +
       '<section class="section section-first" aria-labelledby="activity-heading">' +
       '<h2 id="activity-heading" class="visually-hidden">Activity</h2>' +
       (rows
         ? `<ol class="activity">${rows}</ol>`
-        : '<p class="empty">Nothing yet. Invitations, role changes, members joining and leaving, and directory changes appear here.</p>') +
-      '<p class="note">The last 90 days, newest first, up to 200 events.</p>' +
-      '</section>',
+        : '<p class="empty">Nothing yet. Invitations, role changes, members joining and leaving, directory changes, and the sign-ins of accounts you manage appear here.</p>') +
+      '<p class="note">The latest 200 events of the last 90 days, newest first. The sign-ins and security changes of accounts your organization manages are included.</p>' +
+      '</section>' +
+      '<section class="section" aria-labelledby="download-heading">' +
+      '<h2 id="download-heading">Download the log</h2>' +
+      '<p class="section-text">Every event, not only the latest 200, with times, people, apps and network prefixes. The log keeps 90 days; download it or stream it to keep it longer.</p>' +
+      '<dl class="details">' +
+      `<dt>Last 7 days</dt><dd>${download(7)}</dd>` +
+      `<dt>Last 30 days</dt><dd>${download(30)}</dd>` +
+      `<dt>Last 90 days</dt><dd>${download(90)}</dd>` +
+      '</dl></section>' +
+      (params.role === 'owner' ? streamSection(base, params.stream ?? null) : ''),
     { section: 'Organization' },
+  );
+}
+
+/** Streaming the log to the organization's security monitoring (DESIGN §4.23). */
+function streamSection(base: string, stream: AuditStream | null): string {
+  const status = !stream
+    ? 'Not set up'
+    : !stream.enabled
+      ? 'Paused'
+      : stream.failures > 0
+        ? `Failing: the last ${String(stream.failures)} ${stream.failures === 1 ? 'try' : 'tries'} got ${stream.lastStatus ?? 'no answer'}. Retrying, nothing is skipped.`
+        : stream.lastDeliveredAt
+          ? `Working: last delivered ${formatDateTime(stream.lastDeliveredAt)}`
+          : 'Waiting for the first events';
+  return (
+    '<section class="section" aria-labelledby="stream-heading">' +
+    '<h2 id="stream-heading">Stream to your security monitoring</h2>' +
+    '<p class="section-text">New events are sent within a minute to an https endpoint of yours that accepts JSON (for example a small relay in front of Splunk, Datadog or Microsoft Sentinel), in batches of up to 500, each signed. Failed deliveries are retried until they’re accepted.</p>' +
+    '<dl class="details">' +
+    `<dt>Status</dt><dd>${escapeHtml(status)}</dd>` +
+    '<dt>Signature</dt><dd><code>X-2earl-Signature: t=&lt;unix time&gt;,v1=&lt;hex HMAC-SHA256 of “t.body”&gt;</code></dd>' +
+    '</dl>' +
+    `<form method="post" action="${base}/activity/stream" class="stack-form">` +
+    '<label class="field"><span>Endpoint URL</span>' +
+    `<input name="url" type="url" required maxlength="1000" autocomplete="off" spellcheck="false" placeholder="https://siem.example.com/2earl" value="${escapeHtml(stream?.url ?? '')}"></label>` +
+    `<label class="confirm"><input type="checkbox" name="enabled" value="on"${!stream || stream.enabled ? ' checked' : ''}><span>Send events</span></label>` +
+    '<div class="consent-actions">' +
+    `<button class="button secondary" type="submit" name="action" value="save">${stream ? 'Save' : 'Create the stream'}</button>` +
+    (stream
+      ? '<button class="button secondary" type="submit" name="action" value="test" formnovalidate>Send a test event</button>' +
+        '<button class="button secondary" type="submit" name="action" value="rotate">New secret</button>' +
+        '<button class="button danger-outline" type="submit" name="action" value="delete" formnovalidate>Remove</button>'
+      : '') +
+    '</div></form></section>'
   );
 }
 

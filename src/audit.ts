@@ -88,6 +88,8 @@ export type AuditEvent =
   | 'org.apps_restricted'
   | 'org.app_allowed'
   | 'org.app_disallowed'
+  | 'org.audit_exported'
+  | 'org.audit_stream_changed'
   | 'scim.account_deactivated'
   | 'scim.account_reactivated'
   | 'scim.account_deletion_scheduled'

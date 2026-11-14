@@ -1066,6 +1066,34 @@ nobody is locked out of changing it. `org_app_access`, `organizations.restrict_a
   within 15 minutes.
 - Accounts the organization doesn't manage are never restricted by it.
 
+### 4.23 The organization's audit log (phase 10f)
+
+**What's in it** (`src/org-audit.ts`): every event that names the organization (members,
+invitations, roles, domains, SSO, directory, rules, apps, managed accounts), and **everything the
+accounts it manages did**: sign-ins and refusals, second factors, sign-in methods, apps connected,
+refused or disconnected, data downloads. For managed accounts the organization is the controller
+(§4.18), so their security events are its to see; accounts it doesn't manage aren't in it. People
+are named by ID, and by address when they're members. The security log keeps 90 days (§4.6), and
+so does this view of it.
+
+**Activity page** (owners and admins): the latest 200, newest first, in words.
+
+**Download** (owners and admins): the last 7, 30 or 90 days as CSV or JSON, every event, up to
+20,000. CSV cells that start with `=`, `+`, `-` or `@` get an apostrophe, so a spreadsheet
+doesn't run them. Each download is itself an event.
+
+**Streaming** (owners, recent proof): an https endpoint of the organization's. New events go out
+within a minute (the minute cron) as JSON batches of up to 500, in time order, each with
+`X-2earl-Signature: t=<unix time>,v1=<hex HMAC-SHA256 of "t.body">` and `X-2earl-Delivery`. The
+secret (`whsec_…`) is shown once, kept encrypted (`MFA_ENCRYPTION_KEY`, bound to the
+organization), and can be replaced. A batch that isn't accepted with a 2xx is retried with backoff
+(1 minute doubling to 6 hours); the cursor only moves on acceptance, so nothing is skipped while
+the event is still in the log. Redirects aren't followed; the Worker reaches public addresses
+only. A test event can be sent from the page. A new stream starts from its creation.
+
+**Not done:** an API to read the log (with the admin API, next), custom headers for collectors that
+want their own token, retention longer than 90 days.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -1183,6 +1211,9 @@ scim_groups      id PK ('scg_…'), org_id FK, display_name (UNIQUE per org, NOC
                  role NULL|'admin', created_at, updated_at           (§4.21)
 scim_group_members (group_id FK, scim_user_id FK) PK
 org_app_access   (org_id FK, client_id, group_id ('' = everyone)) PK, created_at  (§4.22)
+org_audit_streams org_id PK FK, url, secret_enc (AES-GCM), enabled, cursor_at, cursor_id,
+                 failures, next_attempt_at, last_status, last_delivered_at, created_at,
+                 updated_at                                          (§4.23)
 org_saml         org_id PK FK, idp_entity_id, sso_url, certificate (public), enabled,
                  created_at, updated_at                              (§4.17)
 org_oidc         org_id PK FK, issuer, client_id, client_secret_enc (AES-GCM), enabled,
@@ -1408,6 +1439,7 @@ Resolved:
 | 10c | **Single sign-on with OpenID Connect** (§4.20): Entra ID, Google Workspace, Okta |
 | 10d | **Groups from the directory, and roles** (§4.21) |
 | 10e | **Which apps managed accounts may use** (§4.22) |
+| 10f | **The organization's audit log**: download and stream (§4.23) |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 

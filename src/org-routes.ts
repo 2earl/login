@@ -25,6 +25,20 @@ import {
 import { discover, issuerUrl, oidcConfig, saveOidc } from './sso-oidc';
 import { findGroup, listGroups, setGroupRole } from './scim-groups';
 import {
+  MAX_EXPORT,
+  deleteStream,
+  orgAuditEvents,
+  publicRecord,
+  readStream,
+  saveStream,
+  sendTest,
+  streamUrl,
+  toCsv,
+} from './org-audit';
+
+/** How far back the log goes (the security log's retention, DESIGN §4.6). */
+const AUDIT_DAYS = 90;
+import {
   allowApp,
   appsInUse,
   disallowApp,
@@ -105,6 +119,7 @@ const DONE: Record<string, string> = {
   deactivated: 'Account deactivated. It can’t sign in, and its apps lost access.',
   reactivated: 'Account reactivated. It can sign in again.',
   account_deleted: 'Account deleted, in every 2earl service.',
+  stream_removed: 'Stream removed. Nothing more is sent.',
 };
 
 export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
@@ -274,50 +289,151 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     );
   }
 
-  // What happened in the organization: owners and admins (DESIGN §4.14).
+  // What happened in the organization: owners and admins (DESIGN §4.14, §4.23).
   app.get('/orgs/:org/activity', async (c) => {
     const session = c.get('session');
     if (!session) return signIn(c);
-    const found = await membership(c.env.DB, c.req.param('org'), session.user.id);
+    return showActivity(c, session, c.req.param('org'), DONE[c.req.query('done') ?? '']);
+  });
+
+  async function showActivity(
+    c: AppContext,
+    session: Session,
+    orgId: string,
+    notice?: string,
+    flash: { error?: string; secret?: string } = {},
+    status: 200 | 400 | 409 = 200,
+  ) {
+    const found = await membership(c.env.DB, orgId, session.user.id);
     if (!found || found.role === 'member') return c.html(notFoundPage(), 404);
-    const { results } = await c.env.DB.prepare(
-      `SELECT e.at, e.event, e.detail,
-              COALESCE(a.display_name, a.primary_email) AS actor,
-              COALESCE(t.display_name, t.primary_email) AS target
-       FROM audit_events e
-       LEFT JOIN users a ON a.id = e.actor_user_id
-       LEFT JOIN users t ON t.id = json_extract(e.detail, '$.target')
-       WHERE json_extract(e.detail, '$.org') = ?
-         AND (e.event LIKE 'org.%' OR e.event LIKE 'scim.%')
-       ORDER BY e.at DESC LIMIT 200`,
+    const now = deps.now();
+    // Newest first: the latest 200 of the last 90 days.
+    const records = await orgAuditEvents(c.env.DB, found.org.id, {
+      afterAt: now - AUDIT_DAYS * 86_400,
+      until: now,
+      limit: MAX_EXPORT,
+    });
+    const names = await c.env.DB.prepare(
+      `SELECT u.id, COALESCE(u.display_name, u.primary_email) AS name FROM users u
+       JOIN org_members m ON m.user_id = u.id AND m.org_id = ?`,
     )
       .bind(found.org.id)
-      .all<{
-        at: number;
-        event: string;
-        detail: string | null;
-        actor: string | null;
-        target: string | null;
-      }>();
+      .all<{ id: string; name: string | null }>();
+    const nameOf = new Map(names.results.map((r) => [r.id, r.name]));
     return c.html(
       orgActivityPage({
         org: found.org,
         role: found.role,
-        now: deps.now(),
-        entries: results.map((r) => ({
-          at: r.at,
-          event: r.event,
-          actor: r.actor,
-          target: r.target,
-          detail: (() => {
-            try {
-              return JSON.parse(r.detail ?? '{}') as Record<string, unknown>;
-            } catch {
-              return {};
-            }
-          })(),
-        })),
+        now,
+        entries: records
+          .slice(-200)
+          .reverse()
+          .map((r) => ({
+            at: r.at,
+            event: r.event,
+            actor: r.actor ? (nameOf.get(r.actor.id) ?? r.actor.email) : null,
+            target: r.target ? (nameOf.get(r.target.id) ?? r.target.email) : null,
+            detail: r.detail,
+          })),
+        stream: found.role === 'owner' ? await readStream(c.env.DB, found.org.id) : null,
+        ...(notice ? { notice } : {}),
+        ...flash,
       }),
+      status,
+    );
+  }
+
+  // The log as a file (DESIGN §4.23): owners and admins, the last 7, 30 or 90 days.
+  app.get('/orgs/:org/activity/export', async (c) => {
+    const session = c.get('session');
+    if (!session) return signIn(c);
+    const found = await membership(c.env.DB, c.req.param('org'), session.user.id);
+    if (!found || found.role === 'member') return c.html(notFoundPage(), 404);
+    const days = [7, 30, 90].includes(Number(c.req.query('days')))
+      ? Number(c.req.query('days'))
+      : 30;
+    const format = c.req.query('format') === 'json' ? 'json' : 'csv';
+    const now = deps.now();
+    const records = await orgAuditEvents(c.env.DB, found.org.id, {
+      afterAt: now - days * 86_400,
+      until: now,
+      limit: MAX_EXPORT,
+    });
+    await record(c, session, 'org.audit_exported', {
+      org: found.org.id,
+      days,
+      format,
+      count: records.length,
+    });
+    const stamp = new Date(now * 1000).toISOString().slice(0, 10);
+    const filename = `2earl-audit-${found.org.id}-${stamp}.${format}`;
+    const headers = {
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control': 'no-store',
+    };
+    return format === 'json'
+      ? c.body(
+          JSON.stringify(
+            { organization: found.org.id, days, events: records.map(publicRecord) },
+            null,
+            1,
+          ),
+          200,
+          { ...headers, 'Content-Type': 'application/json; charset=utf-8' },
+        )
+      : c.body(toCsv(records), 200, { ...headers, 'Content-Type': 'text/csv; charset=utf-8' });
+  });
+
+  // Streaming to the organization's own security monitoring: owners (DESIGN §4.23).
+  app.post('/orgs/:org/activity/stream', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    const now = deps.now();
+    const redirect = changeCheck(ctx.session, now, `/orgs/${ctx.orgId}/activity`);
+    if (redirect) return c.redirect(redirect, 303);
+    const action = ctx.form.get('action');
+    if (action === 'delete') {
+      await deleteStream(c.env.DB, ctx.orgId);
+      await record(c, ctx.session, 'org.audit_stream_changed', { org: ctx.orgId, removed: true });
+      return c.redirect(`/orgs/${encodeURIComponent(ctx.orgId)}/activity?done=stream_removed`, 303);
+    }
+    if (action === 'test') {
+      const status = await sendTest(c.env, deps.fetch, now, ctx.orgId);
+      return showActivity(
+        c,
+        ctx.session,
+        ctx.orgId,
+        /^2\d\d$/.test(status) ? `Test event delivered (HTTP ${status}).` : undefined,
+        /^2\d\d$/.test(status) ? {} : { error: `The test wasn’t accepted: ${status}.` },
+      );
+    }
+    const url = streamUrl(ctx.form.get('url'));
+    if (!url) {
+      return showActivity(
+        c,
+        ctx.session,
+        ctx.orgId,
+        undefined,
+        { error: 'Enter an https URL.' },
+        400,
+      );
+    }
+    const secret = await saveStream(c.env, now, ctx.orgId, {
+      url,
+      enabled: ctx.form.get('enabled') === 'on',
+      rotate: action === 'rotate',
+    });
+    await record(c, ctx.session, 'org.audit_stream_changed', {
+      org: ctx.orgId,
+      enabled: ctx.form.get('enabled') === 'on',
+      rotated: secret !== null,
+    });
+    return showActivity(
+      c,
+      ctx.session,
+      ctx.orgId,
+      'Stream saved. New events go out within a minute.',
+      secret ? { secret } : {},
     );
   });
 
@@ -434,6 +550,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
   // ---- Members --------------------------------------------------------------------------------
 
   /** The other member a change is about, and their role; or the page to show instead. */
+
   async function target(c: AppContext, ctx: { session: Session; orgId: string; form: FormData }) {
     const userId = ctx.form.get('user');
     if (typeof userId !== 'string' || userId === ctx.session.user.id) {

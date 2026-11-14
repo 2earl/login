@@ -551,6 +551,8 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'org.apps_restricted': 'Organization changed which apps its accounts may use',
   'org.app_allowed': 'Organization allowed an app',
   'org.app_disallowed': 'Organization removed an allowed app',
+  'org.audit_exported': 'Organization downloaded its audit log',
+  'org.audit_stream_changed': 'Organization changed its audit stream',
   'scim.account_deactivated': 'Directory deactivated an account',
   'scim.account_reactivated': 'Directory reactivated an account',
   'scim.account_deletion_scheduled': 'Directory scheduled an account deletion',
