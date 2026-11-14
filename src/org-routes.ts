@@ -24,6 +24,7 @@ import {
 } from './managed';
 import { discover, issuerUrl, oidcConfig, saveOidc } from './sso-oidc';
 import { findGroup, listGroups, setGroupRole } from './scim-groups';
+import { createApiKey, listApiKeys, revokeApiKey } from './org-api';
 import {
   MAX_EXPORT,
   deleteStream,
@@ -271,7 +272,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     c: AppContext,
     session: Session,
     orgId: string,
-    flash: { notice?: string; error?: string } = {},
+    flash: { notice?: string; error?: string; newKey?: string } = {},
     status: 200 | 400 | 403 | 409 = 200,
   ) {
     const found = await membership(c.env.DB, orgId, session.user.id);
@@ -283,6 +284,8 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         role: found.role,
         owners,
         managed: session.user.managedBy === orgId,
+        issuer: c.env.ISSUER,
+        ...(found.role === 'owner' ? { apiKeys: await listApiKeys(c.env.DB, orgId) } : {}),
         ...flash,
       }),
       status,
@@ -382,6 +385,50 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
           { ...headers, 'Content-Type': 'application/json; charset=utf-8' },
         )
       : c.body(toCsv(records), 200, { ...headers, 'Content-Type': 'text/csv; charset=utf-8' });
+  });
+
+  // The organization's API keys: owners, with a recent proof (DESIGN §4.24).
+  app.post('/orgs/:org/api-keys', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    const now = deps.now();
+    const redirect = changeCheck(ctx.session, now, `/orgs/${ctx.orgId}/settings`);
+    if (redirect) return c.redirect(redirect, 303);
+    if (ctx.form.get('action') === 'revoke') {
+      const key = ctx.form.get('key');
+      if (typeof key === 'string' && (await revokeApiKey(c.env.DB, ctx.orgId, key))) {
+        await record(c, ctx.session, 'org.api_key_revoked', { org: ctx.orgId, key });
+      }
+      return showSettings(c, ctx.session, ctx.orgId, {
+        notice: 'Key revoked. It stops working at once.',
+      });
+    }
+    const nameRaw = ctx.form.get('name');
+    const name = typeof nameRaw === 'string' ? nameRaw.trim().slice(0, 60) : '';
+    const access = ctx.form.get('access') === 'write' ? 'write' : 'read';
+    if (!name)
+      return showSettings(c, ctx.session, ctx.orgId, { error: 'Give the key a name.' }, 400);
+    const created = await createApiKey(c.env.DB, now, ctx.orgId, {
+      name,
+      access,
+      createdBy: ctx.session.user.id,
+    });
+    if (!created) {
+      return showSettings(
+        c,
+        ctx.session,
+        ctx.orgId,
+        { error: 'An organization can have up to 5 keys. Revoke one first.' },
+        409,
+      );
+    }
+    await record(c, ctx.session, 'org.api_key_created', {
+      org: ctx.orgId,
+      key: created.id,
+      name,
+      access,
+    });
+    return showSettings(c, ctx.session, ctx.orgId, { newKey: created.key });
   });
 
   // Streaming to the organization's own security monitoring: owners (DESIGN §4.23).

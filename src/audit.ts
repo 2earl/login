@@ -90,6 +90,8 @@ export type AuditEvent =
   | 'org.app_disallowed'
   | 'org.audit_exported'
   | 'org.audit_stream_changed'
+  | 'org.api_key_created'
+  | 'org.api_key_revoked'
   | 'scim.account_deactivated'
   | 'scim.account_reactivated'
   | 'scim.account_deletion_scheduled'

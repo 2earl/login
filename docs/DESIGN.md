@@ -1094,6 +1094,27 @@ only. A test event can be sent from the page. A new stream starts from its creat
 **Not done:** an API to read the log (with the admin API, next), custom headers for collectors that
 want their own token, retention longer than 90 days.
 
+### 4.24 The organization API (phase 10g)
+
+Organizations' own scripts (HR syncs, offboarding tools, log collectors) use **API keys** an
+owner creates on Settings (recent proof): `2earl_…`, shown once, kept as SHA-256, up to 5,
+**read** or **read and write**, revocable at once. `org_api_keys`, `src/org-api.ts`, reference in
+[API.md](API.md).
+
+- **Read:** members (role, managed, deactivated, role from the directory), domains, and the audit
+  log (§4.23) oldest first with `since` or a cursor, 100 per page.
+- **Write:** a member's role (admin or member, not where the directory decides it), deactivate and
+  reactivate managed accounts, remove members the organization doesn't manage. Writes are `POST`,
+  so the zone's method rule needs no change.
+- **Never owners:** the API reads them but doesn't act on them, so a leaked key can't take over the
+  organization or lock its owners out.
+- Every write is in the organization's activity with `via: api` and the key's ID; requests are
+  rate-limited per address. **Pushing changes** is the audit stream's job (§4.23); there are no
+  separate webhooks.
+
+API keys rather than OAuth client credentials: one organization's scripts, not third-party apps;
+keys are what directory and HR tools expect, and SCIM (§4.16) already uses bearer tokens.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -1211,6 +1232,8 @@ scim_groups      id PK ('scg_…'), org_id FK, display_name (UNIQUE per org, NOC
                  role NULL|'admin', created_at, updated_at           (§4.21)
 scim_group_members (group_id FK, scim_user_id FK) PK
 org_app_access   (org_id FK, client_id, group_id ('' = everyone)) PK, created_at  (§4.22)
+org_api_keys     id PK ('oak_…'), org_id FK, name, key_hash UNIQUE (SHA-256), access
+                 (read|write), created_by, created_at, last_used_at  (§4.24)
 org_audit_streams org_id PK FK, url, secret_enc (AES-GCM), enabled, cursor_at, cursor_id,
                  failures, next_attempt_at, last_status, last_delivered_at, created_at,
                  updated_at                                          (§4.23)
@@ -1440,6 +1463,7 @@ Resolved:
 | 10d | **Groups from the directory, and roles** (§4.21) |
 | 10e | **Which apps managed accounts may use** (§4.22) |
 | 10f | **The organization's audit log**: download and stream (§4.23) |
+| 10g | **The organization API**: keys, members, domains, audit log (§4.24) |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 
@@ -1490,7 +1514,7 @@ updates (Dependabot), and it is on only for organizations that turn it on.
 | Implicit and password grants | Removed in OAuth 2.1 | Never |
 | RFC 9396 Rich Authorization Requests | Scopes per service already cover the permissions in use | A service needs per-object consent (e.g. "this one session") |
 | RFC 7591 Dynamic client registration | Replaced by client metadata documents, which can't be abused to fill the database | Never, unless MCP requires it again |
-| Client credentials grant | No machine-to-machine client; services talk over Service Bindings | A third-party backend needs its own access |
+| Client credentials grant | Services talk over Service Bindings; organizations' scripts use API keys (§4.24) | A third-party backend needs OAuth access of its own |
 | RFC 9101 JAR | Signed request objects; PAR (9d) already keeps the request off the browser | A FAPI-grade client |
 | Microsoft, GitHub, Apple and other social sign-in | The owner decided on 2026-11-12: Google, email codes and passkeys are the ways in | The owner decides otherwise |
 | SAML single logout, encrypted assertions, signed AuthnRequests, IdP-initiated sign-in | TLS protects the POST; IdP-initiated responses can't be tied to a request login made. "Require SSO" now exists for managed accounts (§4.18) | An organization needs one of them |
