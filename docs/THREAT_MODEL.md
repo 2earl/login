@@ -279,6 +279,17 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | A4 | An admin opens apps up | Only owners change app access, with a recent proof; it's in the organization's activity (tested) |
 | A5 | The rules reach people the organization doesn't manage | Read only through `users.managed_by` (tested) |
 
+### T — The organization's audit log (DESIGN §4.23, phase 10f)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| T1 | An organization sees what people it doesn't manage did | Only events naming it, and events by accounts it manages (tested) |
+| T2 | A forged delivery reaches the organization's monitoring | Every batch is signed with the stream's secret (HMAC-SHA256 over time and body) (tested) |
+| T3 | Events lost while the endpoint is down | The cursor moves only on a 2xx; retries with backoff (tested); 90 days of slack |
+| T4 | The stream used to probe internal networks | https only; redirects not followed; `global_fetch_strictly_public` |
+| T5 | A spreadsheet runs a formula from the CSV | Cells starting with `=`, `+`, `-`, `@` are prefixed (tested) |
+| T6 | An admin sends the log elsewhere | Only owners set up the stream, with a recent proof; downloads and stream changes are logged (tested) |
+
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
 
 | # | Threat | Mitigation |

@@ -110,6 +110,6 @@
   // Daily at 03:17 UTC: expired OAuth records, sessions, sign-in transactions, old audit events
   // (DAILY_CRON in src/index.ts).
   "triggers": {
-    "crons": ["*/15 * * * *", "17 3 * * *"],
+    "crons": ["* * * * *", "17 3 * * *"],
   },
 }

@@ -7,6 +7,7 @@ import { deliverDeletionNotices } from './deletion-notices';
 import { deleteAccount } from './account';
 import { audit } from './audit';
 import { dueDeletions } from './managed';
+import { deliverStreams } from './org-audit';
 import { serviceForResource } from './services';
 import { boundKey, challenge, checkAccessToken } from './token-check';
 
@@ -96,12 +97,22 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
    */
   override async scheduled(controller: ScheduledController): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
-    const notices = await deliverDeletionNotices(this.env, now).catch((error: unknown) => {
-      console.error('deletion notices failed', error instanceof Error ? error.name : 'unknown');
+    // Every minute: organizations' audit streams (DESIGN §4.23).
+    const streams = await deliverStreams(this.env, fetch, now).catch((error: unknown) => {
+      console.error('audit streams failed', error instanceof Error ? error.name : 'unknown');
       return null;
     });
-    if (notices && (notices.failed > 0 || notices.waiting > 0)) {
-      console.warn('deletion notices pending', notices.failed, notices.waiting);
+    if (streams && streams.failed > 0) console.warn('audit streams failing', streams.failed);
+    // Every 15 minutes: deletion notices to services.
+    const minute = new Date(controller.scheduledTime).getUTCMinutes();
+    if (controller.cron === DAILY_CRON || minute % 15 === 0) {
+      const notices = await deliverDeletionNotices(this.env, now).catch((error: unknown) => {
+        console.error('deletion notices failed', error instanceof Error ? error.name : 'unknown');
+        return null;
+      });
+      if (notices && (notices.failed > 0 || notices.waiting > 0)) {
+        console.warn('deletion notices pending', notices.failed, notices.waiting);
+      }
     }
     if (controller.cron !== DAILY_CRON) return;
 
