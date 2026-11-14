@@ -37,7 +37,8 @@ import {
 } from './pages';
 import { safeReturnTo } from './return-to';
 import { signupMode } from './settings';
-import { finishDeletion, notifyLater, startSession } from './sign-in';
+import { finishDeletion, notifyLater, signInRefusal, startSession } from './sign-in';
+import { adoptNewAccount } from './managed';
 import {
   accountWithEmail,
   addEmailIdentity,
@@ -247,6 +248,7 @@ export function registerEmailRoutes(app: Hono<AppEnv>, deps: Deps): void {
       userId = await createEmailUser(c.env.DB, now, row.email);
       created = true;
       await audit(c.env.DB, now, 'user.created', { actorUserId: userId, ipPrefix: ip });
+      await adoptNewAccount(c.env.DB, now, userId, row.email);
     } else {
       await touchEmailIdentity(c.env.DB, now, row.email);
     }
@@ -256,6 +258,15 @@ export function registerEmailRoutes(app: Hono<AppEnv>, deps: Deps): void {
         detail: { reason: 'user_suspended' },
       });
       return c.html(messagePage(MESSAGES.notInvited), 403);
+    }
+    const refusal = await signInRefusal(c, userId, 'email');
+    if (refusal) {
+      await audit(c.env.DB, now, 'login.denied', {
+        actorUserId: userId,
+        ipPrefix: ip,
+        detail: { reason: 'sso_required', method: 'email' },
+      });
+      return c.html(messagePage(refusal), 403);
     }
     return startSession(c, now, userId, row.returnTo, { welcome: created, method: 'email' });
   }

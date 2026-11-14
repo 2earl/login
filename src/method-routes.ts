@@ -101,7 +101,9 @@ export function registerMethodRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const id = form.get('identity');
     const methods = await listIdentities(c.env, session.user.id);
     const target = methods.find((m) => m.id === id);
-    if (!target || target.isOwner || methods.length < 2) return c.redirect('/account', 303);
+    // An address the managing organization controls stays on the account (DESIGN §4.18).
+    if (!target || target.isOwner || target.locked || methods.length < 2)
+      return c.redirect('/account', 303);
     const now = deps.now();
     const removed = await removeIdentity(c.env.DB, now, session.user.id, target.id);
     if (removed) {

@@ -26,6 +26,7 @@ import {
 import { accountFor } from './scim';
 import { signupMode } from './settings';
 import { startSession } from './sign-in';
+import { adoptNewAccount, managingOrgFor } from './managed';
 import { createEmailUser, emailInvited, isUserActive } from './users';
 
 /**
@@ -198,12 +199,20 @@ export function registerSamlRoutes(app: Hono<AppEnv>, deps: Deps): void {
     let userId = await accountFor(c.env.DB, email);
     let created = false;
     if (!userId) {
-      if ((await signupMode(c.env)) === 'invite' && !(await emailInvited(c.env.DB, email))) {
+      // At a domain the organization manages, it vouches for its own people: the sign-up switch
+      // doesn't apply (DESIGN §4.18).
+      const managing = await managingOrgFor(c.env.DB, email);
+      if (
+        managing?.orgId !== orgId &&
+        (await signupMode(c.env)) === 'invite' &&
+        !(await emailInvited(c.env.DB, email))
+      ) {
         return fail(c, 'not_allowlisted', orgId, MESSAGES.notInvited, 403);
       }
       userId = await createEmailUser(c.env.DB, now, email);
       created = true;
       await audit(c.env.DB, now, 'user.created', { actorUserId: userId, ipPrefix: clientIp(c) });
+      await adoptNewAccount(c.env.DB, now, userId, email);
     }
     if (!(await isUserActive(c.env.DB, userId)))
       return fail(c, 'user_suspended', orgId, MESSAGES.accountSuspended, 403);

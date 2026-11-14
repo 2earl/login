@@ -61,6 +61,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 |---|---|
 | Account, sign-in, sessions, grants, consent | Art. 6(1)(b) GDPR: necessary to provide the service the user signs up for |
 | Security logging, rate limiting, audit | Art. 6(1)(f) GDPR: legitimate interest in securing the service. Minimised; short retention |
+| Accounts an organization manages (DESIGN §4.18) | The organization is the controller and decides about them (deactivation, deletion, required SSO); 2earl processes them on its behalf under its data processing terms (Art. 28, `https://2earl.com/dpa`), which an owner accepts when turning managing on. The person's own choice to let it manage the account is recorded (`org.account_managed`) |
 | Strictly necessary cookies | § 25(2) No. 2 TDDDG: no consent banner needed for `__Host-session`, `__Host-login_tx` and the consent-remember cookie |
 
 ## 4. Retention
@@ -104,6 +105,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | Rectification (Art. 16) | Name: `/account/name`. Email: add the right address as a sign-in method, then remove the old one. A Google method's address follows Google |
 | Erasure (Art. 17) | `/account/delete`, confirmed through Google or a code to the account's address: revokes grants, deletes the account, sign-in link, sessions and invitation; the security log is re-keyed to a random ID and expires after 90 days (DESIGN §6.3) |
 | Restriction / objection | Owner can suspend an account on request |
+| Managed accounts | Access and portability work as above. Erasure goes through the organization, which is the controller; 2earl forwards requests it receives to the organization's owners (data processing terms) |
 | Portability (Art. 20) | Same JSON export |
 | Withdraw approvals for apps | `/account` → Connected apps → Disconnect |
 
@@ -120,7 +122,8 @@ The measures are in [THREAT_MODEL.md](THREAT_MODEL.md):
 - rate limiting.
 
 **Breach procedure (to write in phase 5).** Assess within 24 h. Notify the supervisory authority
-within 72 h where required (Art. 33). Notify users where there is high risk (Art. 34).
+within 72 h where required (Art. 33). Notify users where there is high risk (Art. 34). For managed
+accounts, also tell the organization without undue delay (Art. 33(2)).
 
 ## 8. Owner to-dos before opening sign-up
 

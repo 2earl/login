@@ -214,12 +214,25 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | # | Threat | Mitigation |
 |---|---|---|
 | S1 | An organization provisions people it has no authority over (adds a stranger's account, learns whether an address has an account) | Only addresses at domains it proved with DNS (tested); accounts are never created; a domain is verified by one organization at a time (tested) |
-| S2 | Account squatting: a directory claims an address before its owner signs up | Provisioning creates no account; the person links on their own sign-in |
+| S2 | Account squatting: a directory claims an address before its owner signs up | Provisioning creates an account only at a domain the organization manages (§4.18), where the addresses are its own; elsewhere the person links on their own sign-in |
 | S3 | A stolen SCIM token | 256 bits, stored as SHA-256, scoped to one organization (tested), revocable at once; creating one needs an owner's recent proof; it can only add or remove members (role `member`), never owners or roles |
 | S4 | A directory removes the last owner | Refused with `409` (tested); the owner count is checked in the same SQL statement |
 | S5 | DNS spoofing during verification | DNS over HTTPS to Cloudflare's resolver over TLS; the record must hold a random value login issued |
 | S6 | New HTTP methods widen the edge surface | PUT, PATCH and DELETE are allowed by the zone firewall on `/scim/v2/` only; everything else keeps GET, HEAD, POST, OPTIONS |
 | S7 | Oversized or abusive requests | 64 KB bodies, 100 results a page, 50 operations per PATCH, the per-address limit |
+
+### M — Accounts an organization manages (DESIGN §4.18, phase 10a)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| M1 | An organization takes over a personal account at its domain | Existing accounts are never taken over: their person chooses, and can keep the account by taking the address off (tested). The organization already controls the mailbox, so it gains nothing it couldn't do with an email code |
+| M2 | An admin deactivates or deletes accounts out of malice | Deleting is for owners only, with a recent proof (tested); admins can't act on owners; every action is in the organization's activity and the audit log; the person gets an email |
+| M3 | A stolen SCIM token deletes accounts | `DELETE` deactivates at once and deletes after 30 days; an owner or the directory can reactivate until then (tested). Tokens are revocable at once (S3) |
+| M4 | Required SSO locks the organization out when its IdP breaks | Owners are exempt; turning it on needs a second factor; the rule lapses while SSO is off (tested) |
+| M5 | A session started another way survives required SSO | Every request checks the rule with the session (tested) |
+| M6 | A managed person keeps access after leaving by adding another way in | Deactivation stops every way in, ends sessions and revokes app access (tested); the managed addresses can't be taken off |
+| M7 | The organization learns who has a personal account at its domain | Nothing is shown until the person chooses: no names, no count. SCIM linking (S1) is unchanged |
+| M8 | Org deactivation undone by someone else, or the 2earl owner's suspension undone by an organization | `deactivated_at` marks the organization's; its reactivation lifts only that (tested) |
 
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
 

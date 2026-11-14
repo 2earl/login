@@ -346,11 +346,13 @@ function methodsList(methods: Identity[]): string {
           '<li>' +
           `<span class="method-name">${m.provider === 'google' ? 'Google' : 'Email code'}</span>` +
           `<span class="method-what">${escapeHtml(m.email ?? '')}</span>` +
-          (removable && !m.isOwner
-            ? '<form method="post" action="/account/methods/remove">' +
-              `<input type="hidden" name="identity" value="${escapeHtml(m.id)}">` +
-              '<button class="link-button danger" type="submit">Remove</button></form>'
-            : '') +
+          (m.locked
+            ? '<span class="method-lock">Managed by your organization</span>'
+            : removable && !m.isOwner
+              ? '<form method="post" action="/account/methods/remove">' +
+                `<input type="hidden" name="identity" value="${escapeHtml(m.id)}">` +
+                '<button class="link-button danger" type="submit">Remove</button></form>'
+              : '') +
           '</li>',
       )
       .join('') +
@@ -449,6 +451,8 @@ export function accountPage(params: {
   isOwner?: boolean;
   methods?: Identity[];
   orgs?: OrgSummary[];
+  /** The organization that manages the account (DESIGN §4.18). */
+  managedBy?: string | null;
 }): string {
   const heading = params.name ?? 'Your account';
   const methods = params.methods ?? [];
@@ -470,7 +474,11 @@ export function accountPage(params: {
       '<header class="identity">' +
       `<div class="badge" aria-hidden="true">${escapeHtml(initial(params.name, params.email))}</div>` +
       `<div><h1>${escapeHtml(heading)}</h1><p>${escapeHtml(params.email ?? '')}</p>` +
-      `<p class="identity-meta">Member since ${formatDate(params.memberSince)} · <a href="/account/name">${params.name ? 'Change name' : 'Add your name'}</a></p></div>` +
+      `<p class="identity-meta">Member since ${formatDate(params.memberSince)} · <a href="/account/name">${params.name ? 'Change name' : 'Add your name'}</a></p>` +
+      (params.managedBy
+        ? `<p class="identity-meta">Managed by “${escapeHtml(params.managedBy)}”: it can require its single sign-on, and deactivate or delete this account.</p>`
+        : '') +
+      '</div>' +
       '</header>' +
       '<section class="section" aria-labelledby="glance-heading">' +
       '<h2 id="glance-heading">At a glance</h2>' +

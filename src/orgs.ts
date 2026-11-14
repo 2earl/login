@@ -1,3 +1,4 @@
+import { releaseStatements } from './managed';
 import { hmacHex, randomToken } from './crypto';
 import { SERVICES } from './services';
 
@@ -139,13 +140,19 @@ export interface Member {
   email: string | null;
   role: OrgRole;
   joinedAt: number;
+  /** The organization manages the account (DESIGN §4.18). */
+  managed: boolean;
+  /** Deactivated by the organization. */
+  deactivated: boolean;
 }
 
 /** Owners first, then admins, then members; each by when they joined. */
 export async function listMembers(db: D1Database, orgId: string): Promise<Member[]> {
   const { results } = await db
     .prepare(
-      `SELECT m.user_id, u.display_name, u.primary_email, m.role, m.joined_at
+      `SELECT m.user_id, u.display_name, u.primary_email, m.role, m.joined_at,
+              u.managed_by IS m.org_id AS managed,
+              (u.managed_by IS m.org_id AND u.deactivated_at IS NOT NULL) AS deactivated
        FROM org_members m JOIN users u ON u.id = m.user_id
        WHERE m.org_id = ?
        ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, m.joined_at, m.user_id
@@ -158,6 +165,8 @@ export async function listMembers(db: D1Database, orgId: string): Promise<Member
       primary_email: string | null;
       role: OrgRole;
       joined_at: number;
+      managed: number;
+      deactivated: number;
     }>();
   return results.map((r) => ({
     userId: r.user_id,
@@ -165,6 +174,8 @@ export async function listMembers(db: D1Database, orgId: string): Promise<Member
     email: r.primary_email,
     role: r.role,
     joinedAt: r.joined_at,
+    managed: r.managed === 1,
+    deactivated: r.deactivated === 1,
   }));
 }
 
@@ -480,6 +491,8 @@ export function deleteOrganizationStatements(
         )
         .bind(service.id, orgId, now),
     ),
+    // Its managed accounts become their people's own again (DESIGN §4.18).
+    ...releaseStatements(db, now, orgId, true),
     // Members and invitations go with it (ON DELETE CASCADE).
     db.prepare('DELETE FROM organizations WHERE id = ?').bind(orgId),
   ];

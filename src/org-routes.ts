@@ -10,9 +10,21 @@ import {
   type AppContext,
   type AppEnv,
 } from './http';
-import { invitationMail, sendMail } from './mail';
+import { invitationMail, notify, sendMail } from './mail';
+import {
+  deactivate,
+  isManagedBy,
+  managedCounts,
+  reactivate,
+  releaseAccounts,
+  setDomainManaged,
+  setRequireSso,
+} from './managed';
+import { authorizationServer } from './oauth';
+import { noticeContext, removeAccount } from './sign-in';
 import { changeCheck } from './mfa-routes';
 import {
+  deleteManagedAccountPage,
   deleteOrgPage,
   directoryPage,
   invitationPage,
@@ -66,6 +78,9 @@ const DONE: Record<string, string> = {
   removed: 'Member removed.',
   renamed: 'Organization renamed.',
   joined: 'You joined the organization.',
+  deactivated: 'Account deactivated. It can’t sign in, and its apps lost access.',
+  reactivated: 'Account reactivated. It can sign in again.',
+  account_deleted: 'Account deleted, in every 2earl service.',
 };
 
 export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
@@ -200,7 +215,16 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const found = await membership(c.env.DB, orgId, session.user.id);
     if (!found) return c.html(notFoundPage(), 404);
     const owners = (await listMembers(c.env.DB, orgId)).filter((m) => m.role === 'owner').length;
-    return c.html(orgSettingsPage({ org: found.org, role: found.role, owners, ...flash }), status);
+    return c.html(
+      orgSettingsPage({
+        org: found.org,
+        role: found.role,
+        owners,
+        managed: session.user.managedBy === orgId,
+        ...flash,
+      }),
+      status,
+    );
   }
 
   // What happened in the organization: owners and admins (DESIGN §4.14).
@@ -433,6 +457,15 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     if (!canRemove(ctx.role, who.role)) {
       return showOrg(c, ctx.session, ctx.orgId, { error: 'Only owners can remove owners.' }, 403);
     }
+    if (await isManagedBy(c.env.DB, who.userId, ctx.orgId)) {
+      return showOrg(
+        c,
+        ctx.session,
+        ctx.orgId,
+        { error: 'The organization manages this account: deactivate it instead of removing it.' },
+        409,
+      );
+    }
     if (!(await removeMember(c.env.DB, ctx.orgId, who.userId))) {
       return showOrg(
         c,
@@ -457,6 +490,15 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const form = await c.req.raw.formData();
     if (form.get('confirm') !== 'on')
       return c.redirect(`/orgs/${encodeURIComponent(orgId)}/settings`, 303);
+    if (session.user.managedBy === orgId) {
+      return showSettings(
+        c,
+        session,
+        orgId,
+        { error: 'This organization manages your account, so you can’t leave it. Ask its admins.' },
+        409,
+      );
+    }
     if (!(await removeMember(c.env.DB, orgId, session.user.id))) {
       return showSettings(
         c,
@@ -560,6 +602,13 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
           waiting: counts?.waiting ?? 0,
           inactive: counts?.inactive ?? 0,
         },
+        managed: {
+          ...(await managedCounts(c.env.DB, orgId)),
+          requireSso: await c.env.DB.prepare('SELECT require_sso FROM organizations WHERE id = ?')
+            .bind(orgId)
+            .first<{ require_sso: number }>()
+            .then((row) => row?.require_sso === 1),
+        },
         ...flash,
       }),
       status,
@@ -580,6 +629,12 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     removed: 'Domain removed.',
     revoked: 'Token revoked. Your directory can no longer use it.',
     saml: 'Single sign-on saved.',
+    managed:
+      'Accounts at the domain are managed now. People who already had one choose at their next sign-in.',
+    unmanaged:
+      'You stopped managing the accounts at the domain. They belong to their people again.',
+    sso_required: 'Managed accounts now sign in only with single sign-on.',
+    sso_optional: 'Managed accounts can sign in any way again.',
   };
 
   app.get('/orgs/:org/directory', async (c) => {
@@ -641,6 +696,8 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const domain = normaliseDomain(ctx.form.get('domain'));
     if (domain && (await removeDomain(c.env.DB, ctx.orgId, domain))) {
       await record(c, ctx.session, 'org.domain_removed', { org: ctx.orgId, domain });
+      // Accounts managed through it become their people's own again (DESIGN §4.18).
+      await releaseAccounts(c.env.DB, deps.now(), ctx.orgId);
     }
     return c.redirect(directory(ctx.orgId, 'removed'), 303);
   });
@@ -703,6 +760,209 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       enabled: ctx.form.get('enabled') === 'on',
     });
     return c.redirect(directory(ctx.orgId, 'saml'), 303);
+  });
+
+  // ---- Managed accounts (DESIGN §4.18) ----------------------------------------------------------
+
+  app.post('/orgs/:org/domains/manage', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    // Managing decides over other people's accounts: a recent proof it's you.
+    const redirect = changeCheck(ctx.session, deps.now(), `/orgs/${ctx.orgId}/directory`);
+    if (redirect) return c.redirect(redirect, 303);
+    const domain = normaliseDomain(ctx.form.get('domain'));
+    if (!domain) return c.redirect(`/orgs/${encodeURIComponent(ctx.orgId)}/directory`, 303);
+    const on = ctx.form.get('on') === '1';
+    if (on && ctx.form.get('accept') !== 'on') {
+      return showDirectory(
+        c,
+        ctx.orgId,
+        { error: 'To manage accounts, accept the data processing terms: you decide over them.' },
+        400,
+      );
+    }
+    const now = deps.now();
+    const result = await setDomainManaged(c.env.DB, now, ctx.orgId, domain, on);
+    if (!result.changed) return c.redirect(`/orgs/${encodeURIComponent(ctx.orgId)}/directory`, 303);
+    await record(c, ctx.session, on ? 'org.domain_managed' : 'org.domain_unmanaged', {
+      org: ctx.orgId,
+      domain,
+    });
+    if (on && result.notify.length > 0) {
+      const found = await membership(c.env.DB, ctx.orgId, ctx.session.user.id);
+      const org = found?.org.name ?? 'Your organization';
+      const context = noticeContext(c, now);
+      workerCtx(c).waitUntil(
+        Promise.all(
+          result.notify.map((userId) =>
+            notify(c.env, userId, { kind: 'domain_managed', org, domain }, context),
+          ),
+        ).then(() => undefined),
+      );
+    }
+    return c.redirect(directory(ctx.orgId, on ? 'managed' : 'unmanaged'), 303);
+  });
+
+  app.post('/orgs/:org/require-sso', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    const redirect = changeCheck(ctx.session, deps.now(), `/orgs/${ctx.orgId}/directory`);
+    if (redirect) return c.redirect(redirect, 303);
+    const on = ctx.form.get('on') === '1';
+    if (on) {
+      if (!(await samlConfig(c.env.DB, ctx.orgId))?.enabled) {
+        return showDirectory(c, ctx.orgId, { error: 'Turn on single sign-on first.' }, 409);
+      }
+      // Owners stay able to sign in other ways; the one turning it on must protect that way.
+      if (!ctx.session.hasFactor) {
+        return showDirectory(
+          c,
+          ctx.orgId,
+          {
+            error:
+              'Add a second factor to your own account first. Owners can still sign in without single sign-on, so their accounts need one.',
+          },
+          409,
+        );
+      }
+    }
+    const ended = await setRequireSso(c.env.DB, deps.now(), ctx.orgId, on);
+    await record(c, ctx.session, 'org.require_sso_changed', { org: ctx.orgId, on, ended });
+    return c.redirect(directory(ctx.orgId, on ? 'sso_required' : 'sso_optional'), 303);
+  });
+
+  /** A managed member a change is about: the actor's role must allow acting on theirs. */
+  async function managedTarget(
+    c: AppContext,
+    ctx: { session: Session; orgId: string; role: OrgRole; form: FormData },
+  ) {
+    const who = await target(c, ctx);
+    if (who instanceof Response) return who;
+    if (!canRemove(ctx.role, who.role)) {
+      return showOrg(c, ctx.session, ctx.orgId, { error: 'Only owners can act on owners.' }, 403);
+    }
+    if (!(await isManagedBy(c.env.DB, who.userId, ctx.orgId))) {
+      return showOrg(
+        c,
+        ctx.session,
+        ctx.orgId,
+        { error: 'This organization doesn’t manage that account.' },
+        409,
+      );
+    }
+    return who;
+  }
+
+  app.post('/orgs/:org/members/deactivate', async (c) => {
+    const ctx = await forChange(c);
+    if (ctx instanceof Response) return ctx;
+    const who = await managedTarget(c, ctx);
+    if (who instanceof Response) return who;
+    const now = deps.now();
+    const oauth = authorizationServer(c.env).getOAuthApi(c.env);
+    if (await deactivate(c.env.DB, oauth, now, who.userId, ctx.orgId)) {
+      await record(c, ctx.session, 'org.account_deactivated', {
+        org: ctx.orgId,
+        target: who.userId,
+      });
+      const found = await membership(c.env.DB, ctx.orgId, ctx.session.user.id);
+      workerCtx(c).waitUntil(
+        notify(
+          c.env,
+          who.userId,
+          { kind: 'account_deactivated', org: found?.org.name ?? 'Your organization' },
+          noticeContext(c, now),
+        ),
+      );
+    }
+    return c.redirect(back(ctx.orgId, 'deactivated'), 303);
+  });
+
+  app.post('/orgs/:org/members/reactivate', async (c) => {
+    const ctx = await forChange(c);
+    if (ctx instanceof Response) return ctx;
+    const who = await managedTarget(c, ctx);
+    if (who instanceof Response) return who;
+    const now = deps.now();
+    if (await reactivate(c.env.DB, now, who.userId, ctx.orgId)) {
+      await record(c, ctx.session, 'org.account_reactivated', {
+        org: ctx.orgId,
+        target: who.userId,
+      });
+      const found = await membership(c.env.DB, ctx.orgId, ctx.session.user.id);
+      workerCtx(c).waitUntil(
+        notify(
+          c.env,
+          who.userId,
+          { kind: 'account_reactivated', org: found?.org.name ?? 'Your organization' },
+          noticeContext(c, now),
+        ),
+      );
+    }
+    return c.redirect(back(ctx.orgId, 'reactivated'), 303);
+  });
+
+  /** Deleting a managed account: owners only, with a recent proof and a confirmation. */
+  async function deletable(c: AppContext, orgId: string, userId: unknown) {
+    const session = c.get('session');
+    if (!session) return signIn(c);
+    const found = await membership(c.env.DB, orgId, session.user.id);
+    if (!found || !canManageOrganization(found.role)) return c.html(notFoundPage(), 404);
+    if (typeof userId !== 'string' || userId === session.user.id)
+      return c.html(notFoundPage(), 404);
+    const member = (await listMembers(c.env.DB, orgId)).find((m) => m.userId === userId);
+    if (!member?.managed) return c.html(notFoundPage(), 404);
+    return { session, org: found.org, member };
+  }
+
+  app.get('/orgs/:org/accounts/delete', async (c) => {
+    const orgId = c.req.param('org');
+    const userId = c.req.query('user');
+    const ctx = await deletable(c, orgId, userId);
+    if (ctx instanceof Response) return ctx;
+    const redirect = changeCheck(
+      ctx.session,
+      deps.now(),
+      `/orgs/${orgId}/accounts/delete?user=${encodeURIComponent(ctx.member.userId)}`,
+    );
+    if (redirect) return c.redirect(redirect, 303);
+    return c.html(deleteManagedAccountPage({ org: ctx.org, member: ctx.member }));
+  });
+
+  app.post('/orgs/:org/accounts/delete', async (c) => {
+    const ctx = await forChange(c);
+    if (ctx instanceof Response) return ctx;
+    const found = await deletable(c, ctx.orgId, ctx.form.get('user'));
+    if (found instanceof Response) return found;
+    const now = deps.now();
+    const redirect = changeCheck(
+      ctx.session,
+      now,
+      `/orgs/${ctx.orgId}/accounts/delete?user=${encodeURIComponent(found.member.userId)}`,
+    );
+    if (redirect) return c.redirect(redirect, 303);
+    if (ctx.form.get('confirm') !== 'on') {
+      return c.html(
+        deleteManagedAccountPage({
+          org: found.org,
+          member: found.member,
+          error: 'Tick the box to confirm.',
+        }),
+        400,
+      );
+    }
+    if (!(await removeAccount(c, now, found.member.userId))) {
+      return c.html(
+        deleteManagedAccountPage({
+          org: found.org,
+          member: found.member,
+          error: 'The account couldn’t be deleted. Nothing changed; try again.',
+        }),
+        500,
+      );
+    }
+    await record(c, ctx.session, 'org.account_deleted', { org: ctx.orgId });
+    return c.redirect(back(ctx.orgId, 'account_deleted'), 303);
   });
 
   app.post('/orgs/:org/scim-tokens/revoke', async (c) => {

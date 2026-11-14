@@ -116,13 +116,19 @@ export interface Identity {
   lastLoginAt: number;
   /** The owner's Google account: removing it would lock the owner out of /admin. */
   isOwner: boolean;
+  /** An address at a domain of the organization that manages the account: it stays (§4.18). */
+  locked: boolean;
 }
 
 export async function listIdentities(env: Env, userId: string): Promise<Identity[]> {
   const ownerSub: string = env.OWNER_GOOGLE_SUB;
   const { results } = await env.DB.prepare(
-    `SELECT id, provider, subject, email, created_at, last_login_at FROM identities
-     WHERE user_id = ? ORDER BY created_at, provider`,
+    `SELECT i.id, i.provider, i.subject, i.email, i.created_at, i.last_login_at,
+            EXISTS (SELECT 1 FROM users u JOIN org_domains d ON d.org_id = u.managed_by
+                    WHERE u.id = i.user_id AND d.managed_at IS NOT NULL
+                      AND d.domain = substr(i.email, instr(i.email, '@') + 1) COLLATE NOCASE) AS locked
+     FROM identities i
+     WHERE i.user_id = ? ORDER BY i.created_at, i.provider`,
   )
     .bind(userId)
     .all<{
@@ -132,6 +138,7 @@ export async function listIdentities(env: Env, userId: string): Promise<Identity
       email: string | null;
       created_at: number;
       last_login_at: number;
+      locked: number;
     }>();
   return results.map((row) => ({
     id: row.id,
@@ -140,6 +147,7 @@ export async function listIdentities(env: Env, userId: string): Promise<Identity
     createdAt: row.created_at,
     lastLoginAt: row.last_login_at,
     isOwner: row.provider === 'google' && ownerSub.length > 0 && row.subject === ownerSub,
+    locked: row.locked === 1,
   }));
 }
 
