@@ -68,6 +68,7 @@ export type AuditEvent =
   | 'org.scim_token_created'
   | 'org.scim_token_revoked'
   | 'org.saml_saved'
+  | 'org.oidc_saved'
   | 'org.domain_managed'
   | 'org.domain_unmanaged'
   | 'org.require_sso_changed'

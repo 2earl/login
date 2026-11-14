@@ -534,6 +534,7 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'org.domain_unmanaged': 'Organization stopped managing a domain',
   'org.require_sso_changed': 'Organization changed required SSO',
   'org.policy_changed': 'Organization changed its security rules',
+  'org.oidc_saved': 'Organization saved OpenID Connect sign-on',
   'org.account_managed': 'Account became managed',
   'org.account_kept_personal': 'Account kept personal',
   'org.accounts_released': 'Managed accounts released',

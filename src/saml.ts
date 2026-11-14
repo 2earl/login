@@ -1,3 +1,4 @@
+import { ssoOnSql } from './managed';
 import { SAML, ValidateInResponseTo, type CacheProvider, type Profile } from '@node-saml/node-saml';
 import { normaliseEmail } from './directory';
 
@@ -52,15 +53,17 @@ export async function samlConfig(db: D1Database, orgId: string): Promise<OrgSaml
     : null;
 }
 
-/** The organization that signs in addresses at this email's domain with SAML, if any. */
-export async function samlOrgForEmail(db: D1Database, email: string): Promise<string | null> {
+/**
+ * The organization that signs in addresses at this email's domain with single sign-on (SAML or
+ * OpenID Connect), if any.
+ */
+export async function ssoOrgForEmail(db: D1Database, email: string): Promise<string | null> {
   const domain = email.slice(email.lastIndexOf('@') + 1);
   const row = await db
     .prepare(
       `SELECT d.org_id FROM org_domains d
-       JOIN org_saml s ON s.org_id = d.org_id AND s.enabled = 1
        JOIN organizations o ON o.id = d.org_id AND o.status = 'active'
-       WHERE d.domain = ? AND d.verified_at IS NOT NULL`,
+       WHERE d.domain = ? AND d.verified_at IS NOT NULL AND ${ssoOnSql('d.org_id')}`,
     )
     .bind(domain)
     .first<{ org_id: string }>();

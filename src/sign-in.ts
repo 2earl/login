@@ -84,7 +84,7 @@ export async function signInRefusal(
       action: { href: '/login', label: 'Back to sign-in' },
     };
   }
-  if (method === 'saml') return null;
+  if (method === 'saml' || method === 'oidc') return null;
   const org = await ssoRequiredBy(c.env.DB, userId);
   if (!org) {
     if (policy && !methodAllowed(policy, method)) {

@@ -2083,3 +2083,31 @@ fieldset.locked {
   border: 0;
   opacity: 0.55;
 }
+
+/* Single sign-on: one block per protocol, the active one open (DESIGN §4.20). */
+details.protocol {
+  margin: 0 0 0.75rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+
+details.protocol > summary {
+  padding: 0.875rem 1rem;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  cursor: pointer;
+}
+
+details.protocol[open] > summary {
+  border-bottom: 1px solid var(--rule);
+}
+
+details.protocol > .details,
+details.protocol > form {
+  margin-inline: 1rem;
+}
+
+details.protocol > form {
+  margin-bottom: 1rem;
+}
