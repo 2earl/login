@@ -16,6 +16,7 @@ import {
   isManagedBy,
   managedCounts,
   reactivate,
+  signOutEverywhere,
   releaseAccounts,
   setDomainManaged,
   setRequireSso,
@@ -74,7 +75,8 @@ import {
 } from './org-pages';
 import { addDomain, listDomains, normaliseDomain, removeDomain, verifyDomain } from './org-domains';
 import { createScimToken, listScimTokens, revokeScimToken } from './scim';
-import { samlConfig, signingKeyPem, ssoUrl } from './saml';
+import { certificateExpiry, samlConfig, signingKeyPem, ssoUrl } from './saml';
+import { dateField } from './sso-upkeep';
 import {
   MAX_INVITATIONS_PER_DAY,
   acceptInvitation,
@@ -118,6 +120,8 @@ const DONE: Record<string, string> = {
   renamed: 'Organization renamed.',
   joined: 'You joined the organization.',
   deactivated: 'Account deactivated. It can’t sign in, and its apps lost access.',
+  signed_out:
+    'Signed out everywhere. Its sessions ended and its apps lost access; it can sign in again.',
   reactivated: 'Account reactivated. It can sign in again.',
   account_deleted: 'Account deleted, in every 2earl service.',
   stream_removed: 'Stream removed. Nothing more is sent.',
@@ -815,7 +819,12 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         tokens: await listScimTokens(c.env.DB, orgId),
         oidc: await oidcConfig(c.env.DB, orgId).then((config) =>
           config
-            ? { issuer: config.issuer, clientId: config.clientId, enabled: config.enabled }
+            ? {
+                issuer: config.issuer,
+                clientId: config.clientId,
+                secretExpiresAt: config.secretExpiresAt,
+                enabled: config.enabled,
+              }
             : null,
         ),
         saml: await samlConfig(c.env.DB, orgId).then((config) =>
@@ -824,10 +833,14 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
                 idpEntityId: config.idpEntityId,
                 ssoUrl: config.ssoUrl,
                 certificate: config.certificate,
+                certificateNext: config.certificateNext,
+                certificateExpiresAt: config.certificateExpiresAt,
+                certificateNextExpiresAt: config.certificateNextExpiresAt,
                 enabled: config.enabled,
               }
             : null,
         ),
+        now: deps.now(),
         provisioned: {
           active: counts?.active ?? 0,
           waiting: counts?.waiting ?? 0,
@@ -1016,8 +1029,25 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         400,
       );
     }
+    const expiryRaw = ctx.form.get('secret_expires');
+    const secretExpiresAt =
+      typeof expiryRaw === 'string' && expiryRaw ? dateField(expiryRaw) : null;
+    if (typeof expiryRaw === 'string' && expiryRaw && secretExpiresAt === null) {
+      return showDirectory(
+        c,
+        ctx.orgId,
+        { error: 'Enter the date the client secret expires, or leave it empty.' },
+        400,
+      );
+    }
     const enabled = ctx.form.get('enabled') === 'on';
-    await saveOidc(c.env, now, ctx.orgId, { issuer, clientId, clientSecret, enabled });
+    await saveOidc(c.env, now, ctx.orgId, {
+      issuer,
+      clientId,
+      clientSecret,
+      secretExpiresAt,
+      enabled,
+    });
     await record(c, ctx.session, 'org.oidc_saved', { org: ctx.orgId, enabled });
     return c.redirect(directory(ctx.orgId, 'saml'), 303);
   });
@@ -1034,6 +1064,20 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const idpEntityId = typeof idp === 'string' ? idp.trim().slice(0, 500) : '';
     const url = ssoUrl(ctx.form.get('sso_url'));
     const certificate = signingKeyPem(ctx.form.get('certificate'));
+    const nextRaw = ctx.form.get('certificate_next');
+    const hasNext = typeof nextRaw === 'string' && nextRaw.trim() !== '';
+    const certificateNext = hasNext ? signingKeyPem(nextRaw) : null;
+    if (hasNext && !certificateNext) {
+      return showDirectory(
+        c,
+        ctx.orgId,
+        {
+          error:
+            'The next signing certificate isn’t one: paste it as PEM or base64, or leave it empty.',
+        },
+        400,
+      );
+    }
     if (!idpEntityId || !url || !certificate) {
       return showDirectory(
         c,
@@ -1047,12 +1091,24 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     }
     const now = deps.now();
     await c.env.DB.prepare(
-      `INSERT INTO org_saml (org_id, idp_entity_id, sso_url, certificate, enabled, created_at, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+      `INSERT INTO org_saml (org_id, idp_entity_id, sso_url, certificate, enabled, created_at, updated_at,
+                             certificate_next, certificate_expires_at, certificate_next_expires_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?8, ?9)
        ON CONFLICT (org_id) DO UPDATE SET idp_entity_id = ?2, sso_url = ?3, certificate = ?4,
-         enabled = ?5, updated_at = ?6`,
+         enabled = ?5, updated_at = ?6, certificate_next = ?7, certificate_expires_at = ?8,
+         certificate_next_expires_at = ?9, expiry_notice = NULL`,
     )
-      .bind(ctx.orgId, idpEntityId, url, certificate, ctx.form.get('enabled') === 'on' ? 1 : 0, now)
+      .bind(
+        ctx.orgId,
+        idpEntityId,
+        url,
+        certificate,
+        ctx.form.get('enabled') === 'on' ? 1 : 0,
+        now,
+        certificateNext,
+        certificateExpiry(certificate),
+        certificateNext ? certificateExpiry(certificateNext) : null,
+      )
       .run();
     // One way of single sign-on at a time (DESIGN §4.20).
     if (ctx.form.get('enabled') === 'on') {
@@ -1337,6 +1393,31 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       );
     }
     return c.redirect(back(ctx.orgId, 'deactivated'), 303);
+  });
+
+  app.post('/orgs/:org/members/sign-out', async (c) => {
+    const ctx = await forChange(c);
+    if (ctx instanceof Response) return ctx;
+    const who = await managedTarget(c, ctx);
+    if (who instanceof Response) return who;
+    const now = deps.now();
+    const oauth = authorizationServer(c.env).getOAuthApi(c.env);
+    if (await signOutEverywhere(c.env.DB, oauth, who.userId, ctx.orgId)) {
+      await record(c, ctx.session, 'org.account_signed_out', {
+        org: ctx.orgId,
+        target: who.userId,
+      });
+      const found = await membership(c.env.DB, ctx.orgId, ctx.session.user.id);
+      workerCtx(c).waitUntil(
+        notify(
+          c.env,
+          who.userId,
+          { kind: 'account_signed_out', org: found?.org.name ?? 'Your organization' },
+          noticeContext(c, now),
+        ),
+      );
+    }
+    return c.redirect(back(ctx.orgId, 'signed_out'), 303);
   });
 
   app.post('/orgs/:org/members/reactivate', async (c) => {

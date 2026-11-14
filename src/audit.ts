@@ -78,6 +78,8 @@ export type AuditEvent =
   | 'org.accounts_released'
   | 'org.account_deactivated'
   | 'org.account_reactivated'
+  | 'org.account_signed_out'
+  | 'org.sso_expiry_warned'
   | 'org.account_deleted'
   | 'scim.account_created'
   | 'scim.group_created'

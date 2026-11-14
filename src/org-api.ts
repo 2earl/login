@@ -3,7 +3,7 @@ import type { Deps } from './app';
 import { audit } from './audit';
 import { randomToken, sha256Hex } from './crypto';
 import { clientIp, type AppContext, type AppEnv } from './http';
-import { deactivate, isManagedBy, reactivate } from './managed';
+import { deactivate, isManagedBy, reactivate, signOutEverywhere } from './managed';
 import { authorizationServer } from './oauth';
 import { listDomains } from './org-domains';
 import { orgAuditEvents, publicRecord } from './org-audit';
@@ -261,6 +261,24 @@ export function registerOrgApiRoutes(app: Hono<AppEnv>, deps: Deps): void {
       return json({ id: member.userId, deactivated: action === 'deactivate' });
     });
   }
+
+  app.post('/api/v1/members/:id/sign-out', async (c) => {
+    const auth = await authenticate(c, 'write');
+    if (auth instanceof Response) return auth;
+    const member = await memberFor(c, auth.orgId, c.req.param('id'));
+    if (member instanceof Response) return member;
+    const signedOut = await signOutEverywhere(
+      c.env.DB,
+      authorizationServer(c.env).getOAuthApi(c.env),
+      member.userId,
+      auth.orgId,
+    );
+    if (!signedOut) {
+      return problem(409, 'not_managed', 'The organization doesn’t manage this account.');
+    }
+    await record(auth.orgId, auth.keyId, 'org.account_signed_out', { target: member.userId })(c);
+    return json({ id: member.userId, signed_out: true });
+  });
 
   app.post('/api/v1/members/:id/remove', async (c) => {
     const auth = await authenticate(c, 'write');

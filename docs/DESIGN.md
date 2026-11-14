@@ -891,6 +891,7 @@ request there is nothing to check them against.
 `zlib`. The bundle is about 510 KB gzipped.
 
 **Not implemented:**
+- IdP-initiated sign-in. A dashboard tile works through login's own start link instead (§4.25);
 - single logout;
 - encrypted assertions (TLS already protects the POST);
 - signed AuthnRequests;
@@ -1115,6 +1116,50 @@ owner creates on Settings (recent proof): `2earl_…`, shown once, kept as SHA-2
 API keys rather than OAuth client credentials: one organization's scripts, not third-party apps;
 keys are what directory and HR tools expect, and SCIM (§4.16) already uses bearer tokens.
 
+### 4.25 Single sign-on that keeps working (phase 10h)
+
+Most single sign-on failures at companies aren't attacks. The provider changes its signing
+certificate, a client secret expires, people start from the company's app dashboard and land on a
+page that doesn't know them, or someone types their work address into the email form and waits
+for a code that won't let them in. `src/sso-upkeep.ts`.
+
+**Signing in from the provider's app dashboard.** `GET /sso/:org/start` starts the organization's
+single sign-on, whichever protocol is on. Owners give it to their provider as Entra ID's "Sign on
+URL" or Okta's "Initiate login URI" (or a bookmark app), so the 2earl tile in My Apps or the Okta
+dashboard works. It is OpenID Connect's third-party initiated login (OpenID Connect Core §4):
+- `iss`, if present, must be the organization's OpenID Connect issuer; otherwise refused.
+- `login_hint` is passed on to the provider (OpenID Connect only).
+- `target_link_uri` (or `return_to`) is where to go afterwards, only if it is a page of login.
+login always sends its own request, so this is not IdP-initiated sign-in: SAML responses still
+must answer a request of this browser's sign-in (§4.17, THREAT_MODEL L3). A third party linking to
+it only makes a browser start a sign-in at the company's provider, as the person.
+
+**The next SAML certificate.** Domains & SSO takes a second signing certificate. Both are
+accepted, so when the provider switches to the new one, sign-in keeps working; the owner moves it
+to the first field later. Expiry dates are read from the certificates (not from bare public keys)
+when they're saved and shown next to them. login doesn't refuse an expired certificate (the
+signature is what counts); the date is when providers change certificates.
+
+**Expiry warnings.** Owners can enter when the OpenID Connect client secret expires (Entra ID's
+do, at most two years). The daily cron emails every owner 30, 7 and 1 days before the SAML
+certificates (the later of the two) or the secret expire, and once after; each threshold once,
+recorded before sending, started over when the settings are saved. Each warning is in the
+organization's activity.
+
+**SSO first.** When someone types an address into the email form at a domain the organization
+manages and requires single sign-on for (§4.18), no code is sent: the page offers "Continue with
+single sign-on". The answer is the same for every address at that domain, account or not, so it
+reveals nothing about who has one. Owners, exempt from required SSO, can still ask for a code from
+the same page; anyone else who does is refused at sign-in, as before.
+
+**Sign out everywhere.** Owners and admins (admins not on owners, §4.14), and the API with a read
+and write key (never owners), can sign a managed account out: every session ends and every app's
+access is revoked, but the account stays active, for a lost laptop or a shared device. The person
+gets an email; the activity names who did it.
+
+**Not done:** reading the provider's metadata URL to pick up new certificates automatically,
+single logout, warnings by anything but email.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -1237,10 +1282,12 @@ org_api_keys     id PK ('oak_…'), org_id FK, name, key_hash UNIQUE (SHA-256), 
 org_audit_streams org_id PK FK, url, secret_enc (AES-GCM), enabled, cursor_at, cursor_id,
                  failures, next_attempt_at, last_status, last_delivered_at, created_at,
                  updated_at                                          (§4.23)
-org_saml         org_id PK FK, idp_entity_id, sso_url, certificate (public), enabled,
-                 created_at, updated_at                              (§4.17)
-org_oidc         org_id PK FK, issuer, client_id, client_secret_enc (AES-GCM), enabled,
-                 created_at, updated_at                              (§4.20)
+org_saml         org_id PK FK, idp_entity_id, sso_url, certificate (public),
+                 certificate_next, certificate_expires_at, certificate_next_expires_at,
+                 expiry_notice, enabled, created_at, updated_at      (§4.17, §4.25)
+org_oidc         org_id PK FK, issuer, client_id, client_secret_enc (AES-GCM),
+                 secret_expires_at, expiry_notice, enabled, created_at,
+                 updated_at                                          (§4.20, §4.25)
 oidc_states      state_hash PK (HMAC of state), org_id FK, browser_hash, nonce, verifier
                  (PKCE), return_to, expires_at                       (≤ 10 minutes)
 saml_states      state_hash PK (HMAC of RelayState), org_id FK, browser_hash (HMAC of cookie),
@@ -1464,6 +1511,7 @@ Resolved:
 | 10e | **Which apps managed accounts may use** (§4.22) |
 | 10f | **The organization's audit log**: download and stream (§4.23) |
 | 10g | **The organization API**: keys, members, domains, audit log (§4.24) |
+| 10h | **Single sign-on that keeps working** (§4.25): dashboard sign-in link, certificate rollover, expiry warnings, SSO first, sign out everywhere |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 
