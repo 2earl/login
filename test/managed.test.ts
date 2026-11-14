@@ -238,6 +238,22 @@ describe('turning on managing for a domain', () => {
   });
 });
 
+describe('the company setup guide', () => {
+  it('points owners to it until the five steps are done, and marks what is done', async () => {
+    const { orgId } = await organization(ada);
+    // Verified domain and a directory token so far.
+    const first = await (await get(ada, `/orgs/${orgId}`)).text();
+    expect(first).toContain('2 of 5 done');
+    await manage(ada, orgId);
+    const guide = await (await get(ada, `/orgs/${orgId}/directory`)).text();
+    expect(guide.match(/class="is-done"/g)).toHaveLength(3);
+    expect(guide).toContain('class="is-next"><a href="#saml-heading"');
+    // Members who aren't owners don't see it.
+    await post(bob, '/account/managed', { org: orgId, choice: 'join' });
+    expect(await (await get(bob, `/orgs/${orgId}`)).text()).not.toContain('of 5 done');
+  });
+});
+
 describe('new accounts at a managed domain', () => {
   it('are created by the directory, managed and named', async () => {
     const { orgId, token } = await organization(ada);

@@ -34,6 +34,17 @@ export const DEFAULT_POLICY: OrgPolicy = {
   ipRanges: [],
 };
 
+/** Whether no rule is set. */
+export function isDefaultPolicy(policy: OrgPolicy): boolean {
+  return (
+    !policy.requireFactor &&
+    !policy.passkeysOnly &&
+    policy.sessionHours === null &&
+    policy.ipRanges.length === 0 &&
+    POLICY_METHODS.every((m) => policy.methods.includes(m))
+  );
+}
+
 /** The rules as they apply to one account: `exempt` for the organization's owners. */
 export interface SessionPolicy extends OrgPolicy {
   orgId: string;
