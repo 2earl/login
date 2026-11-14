@@ -993,6 +993,38 @@ person's next request; nothing is sent.
 networks don't apply to them; their lifetimes (§4.4) and deactivation (§4.18) do. Accounts the
 organization doesn't manage never get its rules.
 
+### 4.20 Single sign-on with OpenID Connect (phase 10c)
+
+Many companies prefer OpenID Connect to SAML: Microsoft Entra ID, Google Workspace and Okta all
+offer it. An organization's owner connects its provider on Domains & SSO, next to SAML (§4.17);
+**one way of single sign-on is on at a time**, and turning one on turns the other off.
+`org_oidc`, `src/sso-oidc.ts`.
+
+**Setup** (an owner, recent proof, a verified domain): the issuer URL, a client ID and a client
+secret. login reads the provider's discovery document before saving: it must name exactly that
+issuer, over https, with authorization, token and key endpoints; otherwise saving is refused.
+Microsoft's multi-tenant issuers (`common`, `organizations`, `consumers`) are refused: only the
+organization's own tenant will do. The secret is encrypted with `MFA_ENCRYPTION_KEY`, bound to
+the organization, and never shown again; a blank field keeps it.
+
+**Signing in.** `/login/sso` finds the organization by the address's verified domain, as for
+SAML, and sends the person to the provider with the authorization code flow: `state`, a `nonce`,
+PKCE (S256), `login_hint`, scopes `openid email profile`. The way back
+(`GET /sso/:org/oidc`) must carry the state, from the same browser (a `__Host-` cookie, Lax, ten
+minutes), once. login exchanges the code with the client secret (HTTP Basic) and the PKCE
+verifier, and verifies the ID token with the provider's published keys: signature (RS/PS/ES
+algorithms only), issuer, audience, the nonce, issued in the last ten minutes. The asserted
+address is `email` (refused if `email_verified` is false), or Entra ID's `preferred_username`
+when there's no `email` claim; for Google, the hosted domain `hd` must be the address's domain, so
+personal Google accounts made with a work address don't count. From there it is the same as SAML:
+the address must be at one of the organization's verified domains (THREAT_MODEL L1), then the
+account that signs in with it, or a new one (managed if the domain is, §4.18), the organization's
+rules (§4.19) and the second factor. Sessions record `oidc`; required SSO counts both ways.
+
+**Not done:** several connections per organization, provider-initiated sign-in, back-channel or
+front-channel logout, client authentication with a private key. Revisit when an organization
+needs one.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -1108,6 +1140,10 @@ scim_users       id PK ('scu_…'), org_id FK, user_name, external_id, display_n
                  UNIQUE(org_id, user_name)
 org_saml         org_id PK FK, idp_entity_id, sso_url, certificate (public), enabled,
                  created_at, updated_at                              (§4.17)
+org_oidc         org_id PK FK, issuer, client_id, client_secret_enc (AES-GCM), enabled,
+                 created_at, updated_at                              (§4.20)
+oidc_states      state_hash PK (HMAC of state), org_id FK, browser_hash, nonce, verifier
+                 (PKCE), return_to, expires_at                       (≤ 10 minutes)
 saml_states      state_hash PK (HMAC of RelayState), org_id FK, browser_hash (HMAC of cookie),
                  return_to, response NULL, expires_at                (≤ 10 minutes)
 saml_cache       key PK (org, sign-in, request or assertion ID), value, expires_at
@@ -1324,6 +1360,7 @@ Resolved:
 | 9d | **DPoP and PAR** (§4.15) |
 | 10a | **Accounts an organization manages** (§4.18): managed domains, deactivation, required SSO |
 | 10b | **Security rules for managed accounts** (§4.19): second factor, passkeys, session length, ways in, networks |
+| 10c | **Single sign-on with OpenID Connect** (§4.20): Entra ID, Google Workspace, Okta |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 

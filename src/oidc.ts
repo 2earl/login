@@ -135,7 +135,9 @@ export function amrFor(props: GrantProps): string[] {
         ? ['otp']
         : method === 'passkey'
           ? ['pop', 'user']
-          : [];
+          : method === 'saml' || method === 'oidc'
+            ? ['fed']
+            : [];
   return aal2 && !base.includes('mfa') ? [...base, 'mfa'] : base;
 }
 

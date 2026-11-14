@@ -33,6 +33,7 @@ import { notFoundPage } from './pages';
 import type { Session } from './sessions';
 import { tellNewOwners } from './sign-in';
 import { deleteOrganization } from './orgs';
+import { ssoOnSql } from './managed';
 
 /**
  * /admin (DESIGN §4.6): only the user whose Google account is OWNER_GOOGLE_SUB, and only with a
@@ -422,7 +423,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
               (SELECT COUNT(*) FROM org_domains d WHERE d.org_id = o.id AND d.verified_at IS NOT NULL) AS verified_domains,
               (SELECT COUNT(*) FROM org_domains d WHERE d.org_id = o.id AND d.managed_at IS NOT NULL) AS managed_domains,
               (SELECT COUNT(*) FROM users u WHERE u.managed_by = o.id) AS managed_accounts,
-              COALESCE((SELECT enabled FROM org_saml s WHERE s.org_id = o.id), 0) AS sso,
+              ${ssoOnSql('o.id')} AS sso,
               o.require_sso,
               (SELECT COUNT(*) FROM scim_tokens t WHERE t.org_id = o.id) AS directory_tokens,
               (SELECT require_factor || passkeys_only || COALESCE(session_hours, '') || methods || ip_ranges

@@ -19,7 +19,10 @@ import {
   releaseAccounts,
   setDomainManaged,
   setRequireSso,
+  ssoOn,
+  ssoOnSql,
 } from './managed';
+import { discover, issuerUrl, oidcConfig, saveOidc } from './sso-oidc';
 import { authorizationServer } from './oauth';
 import {
   MAX_RANGES,
@@ -148,7 +151,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         `SELECT
            EXISTS (SELECT 1 FROM org_domains WHERE org_id = ?1 AND verified_at IS NOT NULL) AS verified,
            EXISTS (SELECT 1 FROM org_domains WHERE org_id = ?1 AND managed_at IS NOT NULL) AS managed,
-           EXISTS (SELECT 1 FROM org_saml WHERE org_id = ?1 AND enabled = 1) AS sso,
+           ${ssoOnSql('?1')} AS sso,
            EXISTS (SELECT 1 FROM scim_tokens WHERE org_id = ?1) AS directory`,
       )
       .bind(orgId)
@@ -621,6 +624,11 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         issuer: c.env.ISSUER,
         domains: await listDomains(c.env.DB, orgId),
         tokens: await listScimTokens(c.env.DB, orgId),
+        oidc: await oidcConfig(c.env.DB, orgId).then((config) =>
+          config
+            ? { issuer: config.issuer, clientId: config.clientId, enabled: config.enabled }
+            : null,
+        ),
         saml: await samlConfig(c.env.DB, orgId).then((config) =>
           config
             ? {
@@ -759,6 +767,65 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     return showDirectory(c, ctx.orgId, { newToken: created.token });
   });
 
+  app.post('/orgs/:org/oidc', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    const now = deps.now();
+    // Single sign-on decides who signs in at the organization's domains: a recent proof first.
+    const redirect = changeCheck(ctx.session, now, `/orgs/${ctx.orgId}/directory`);
+    if (redirect) return c.redirect(redirect, 303);
+    const verified = (await listDomains(c.env.DB, ctx.orgId)).some((d) => d.verifiedAt !== null);
+    if (!verified) return showDirectory(c, ctx.orgId, { error: 'Verify a domain first.' }, 409);
+    const issuer = issuerUrl(ctx.form.get('issuer'));
+    const clientIdRaw = ctx.form.get('client_id');
+    const clientId = typeof clientIdRaw === 'string' ? clientIdRaw.trim().slice(0, 300) : '';
+    const secretRaw = ctx.form.get('client_secret');
+    const clientSecret =
+      typeof secretRaw === 'string' && secretRaw.trim() ? secretRaw.trim().slice(0, 500) : null;
+    const existing = await oidcConfig(c.env.DB, ctx.orgId);
+    if (!issuer || !clientId || (!clientSecret && !existing)) {
+      return showDirectory(
+        c,
+        ctx.orgId,
+        { error: 'Enter the provider’s https issuer URL, the client ID and the client secret.' },
+        400,
+      );
+    }
+    // Multi-tenant endpoints accept anyone's tenant: only the organization's own will do.
+    if (
+      /^https:\/\/login\.microsoftonline\.com\/(?:common|organizations|consumers)(?:$|[/?#])/i.test(
+        issuer,
+      )
+    ) {
+      return showDirectory(
+        c,
+        ctx.orgId,
+        {
+          error:
+            'Use your own tenant’s issuer: https://login.microsoftonline.com/<tenant ID>/v2.0.',
+        },
+        400,
+      );
+    }
+    // Check the provider answers as that issuer before anyone depends on it.
+    try {
+      await discover(deps.fetch, issuer);
+    } catch {
+      return showDirectory(
+        c,
+        ctx.orgId,
+        {
+          error: `Couldn’t read the provider’s configuration at ${issuer}/.well-known/openid-configuration, or it names another issuer. Check the issuer URL.`,
+        },
+        400,
+      );
+    }
+    const enabled = ctx.form.get('enabled') === 'on';
+    await saveOidc(c.env, now, ctx.orgId, { issuer, clientId, clientSecret, enabled });
+    await record(c, ctx.session, 'org.oidc_saved', { org: ctx.orgId, enabled });
+    return c.redirect(directory(ctx.orgId, 'saml'), 303);
+  });
+
   app.post('/orgs/:org/saml', async (c) => {
     const ctx = await ownerChange(c);
     if (ctx instanceof Response) return ctx;
@@ -791,6 +858,12 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     )
       .bind(ctx.orgId, idpEntityId, url, certificate, ctx.form.get('enabled') === 'on' ? 1 : 0, now)
       .run();
+    // One way of single sign-on at a time (DESIGN §4.20).
+    if (ctx.form.get('enabled') === 'on') {
+      await c.env.DB.prepare('UPDATE org_oidc SET enabled = 0, updated_at = ? WHERE org_id = ?')
+        .bind(now, ctx.orgId)
+        .run();
+    }
     await record(c, ctx.session, 'org.saml_saved', {
       org: ctx.orgId,
       enabled: ctx.form.get('enabled') === 'on',
@@ -862,7 +935,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       );
     }
     if (ranges.length > MAX_RANGES) return refuse(`Up to ${String(MAX_RANGES)} ranges.`);
-    if (methods.length === 0 && !(await samlConfig(c.env.DB, ctx.orgId))?.enabled) {
+    if (methods.length === 0 && !(await ssoOn(c.env.DB, ctx.orgId))) {
       return refuse('Allow at least one way to sign in, or turn on single sign-on first.');
     }
     const policy = {
@@ -891,7 +964,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     if (redirect) return c.redirect(redirect, 303);
     const on = ctx.form.get('on') === '1';
     if (on) {
-      if (!(await samlConfig(c.env.DB, ctx.orgId))?.enabled) {
+      if (!(await ssoOn(c.env.DB, ctx.orgId))) {
         return showDirectory(c, ctx.orgId, { error: 'Turn on single sign-on first.' }, 409);
       }
       // Owners stay able to sign in other ways; the one turning it on must protect that way.

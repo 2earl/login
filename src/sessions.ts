@@ -40,7 +40,10 @@ export interface Session {
   user: SessionUser;
 }
 
-export type SignInMethod = 'google' | 'email' | 'passkey' | 'saml';
+export type SignInMethod = 'google' | 'email' | 'passkey' | 'saml' | 'oidc';
+
+/** Ways in through an organization's own identity provider (DESIGN §4.17, §4.20). */
+export const SSO_METHODS: readonly SignInMethod[] = ['saml', 'oidc'];
 
 export interface SessionMeta {
   ipPrefix: string | null;
@@ -114,7 +117,7 @@ export async function getSession(
               EXISTS (SELECT 1 FROM org_members m
                       WHERE m.org_id = u.managed_by AND m.user_id = u.id AND m.role = 'owner') AS policy_exempt,
               -- Required SSO (DESIGN §4.18): a session started another way ends.
-              (s.method IS NOT 'saml' AND ${SSO_REQUIRED_SQL}) AS sso_violation,
+              ((s.method IS NULL OR s.method NOT IN ('saml', 'oidc')) AND ${SSO_REQUIRED_SQL}) AS sso_violation,
               EXISTS (SELECT 1 FROM identities i
                       JOIN org_domains d ON d.managed_at IS NOT NULL AND d.verified_at IS NOT NULL
                         AND d.domain = substr(i.email, instr(i.email, '@') + 1) COLLATE NOCASE

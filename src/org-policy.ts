@@ -128,7 +128,7 @@ export async function policyFor(db: D1Database, userId: string): Promise<Session
 
 /** Whether a session started this way may continue (or a sign-in this way may happen). */
 export function methodAllowed(policy: SessionPolicy, method: SignInMethod | null): boolean {
-  if (policy.exempt || method === 'saml') return true;
+  if (policy.exempt || method === 'saml' || method === 'oidc') return true;
   return method !== null && (policy.methods as string[]).includes(method);
 }
 

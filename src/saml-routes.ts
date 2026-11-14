@@ -21,11 +21,20 @@ import {
   assertedEmail,
   samlConfig,
   samlFor,
-  samlOrgForEmail,
+  ssoOrgForEmail,
 } from './saml';
 import { accountFor } from './scim';
 import { signupMode } from './settings';
-import { startSession } from './sign-in';
+import { signInRefusal, startSession } from './sign-in';
+import {
+  OIDC_REQUEST_TTL_SECONDS,
+  authorizeRequest,
+  discover,
+  finishOidc,
+  oidcConfig,
+  oidcRedirectUri,
+  type OrgOidc,
+} from './sso-oidc';
 import { adoptNewAccount, managingOrgFor } from './managed';
 import { createEmailUser, emailInvited, isUserActive } from './users';
 
@@ -36,6 +45,7 @@ import { createEmailUser, emailInvited, isUserActive } from './users';
  */
 
 const SAML_TX_COOKIE = '__Host-saml_tx';
+const OIDC_TX_COOKIE = '__Host-oidc_tx';
 const RELAY_STATE = /^[A-Za-z0-9_-]{40,64}$/;
 
 const stateHash = (env: Env, relayState: string) =>
@@ -52,10 +62,11 @@ export function registerSamlRoutes(app: Hono<AppEnv>, deps: Deps): void {
     orgId: string | null,
     message: Message = MESSAGES.signInFailed,
     status: 400 | 403 = 400,
+    provider: 'saml' | 'oidc' = 'saml',
   ) => {
     await audit(c.env.DB, deps.now(), status === 400 ? 'login.failed' : 'login.denied', {
       ipPrefix: clientIp(c),
-      detail: { reason, provider: 'saml', org: orgId },
+      detail: { reason, provider, org: orgId },
     });
     return c.html(messagePage(message), status);
   };
@@ -87,7 +98,10 @@ export function registerSamlRoutes(app: Hono<AppEnv>, deps: Deps): void {
         }),
         400,
       );
-    const orgId = await samlOrgForEmail(c.env.DB, email);
+    const orgId = await ssoOrgForEmail(c.env.DB, email);
+    // OpenID Connect, when that's how the organization signs in (DESIGN §4.20).
+    const oidc = orgId ? await oidcConfig(c.env.DB, orgId) : null;
+    if (orgId && oidc?.enabled) return startOidc(c, orgId, oidc, email, returnTo);
     const config = orgId ? await samlConfig(c.env.DB, orgId) : null;
     if (!orgId || !config?.enabled) {
       return c.html(
@@ -191,9 +205,24 @@ export function registerSamlRoutes(app: Hono<AppEnv>, deps: Deps): void {
       return fail(c, 'assertion_invalid', orgId);
     }
     const email = profile ? assertedEmail(profile) : null;
-    // The IdP speaks only for addresses at the organization's verified domains (THREAT_MODEL L1).
+    return finishSso(c, orgId, email, state.return_to, 'saml');
+  });
+
+  /**
+   * The end of every single sign-on, SAML or OpenID Connect: the address the organization's
+   * provider asserts must be at one of its verified domains (THREAT_MODEL L1); then the account
+   * that signs in with it, or a new one.
+   */
+  async function finishSso(
+    c: AppContext,
+    orgId: string,
+    email: string | null,
+    returnTo: string | null,
+    method: 'saml' | 'oidc',
+  ): Promise<Response> {
+    const now = deps.now();
     if (!email || !(await addressAtVerifiedDomain(c.env.DB, orgId, email))) {
-      return fail(c, 'address_outside_domain', orgId);
+      return fail(c, 'address_outside_domain', orgId, MESSAGES.signInFailed, 400, method);
     }
 
     let userId = await accountFor(c.env.DB, email);
@@ -207,7 +236,7 @@ export function registerSamlRoutes(app: Hono<AppEnv>, deps: Deps): void {
         (await signupMode(c.env)) === 'invite' &&
         !(await emailInvited(c.env.DB, email))
       ) {
-        return fail(c, 'not_allowlisted', orgId, MESSAGES.notInvited, 403);
+        return fail(c, 'not_allowlisted', orgId, MESSAGES.notInvited, 403, method);
       }
       userId = await createEmailUser(c.env.DB, now, email);
       created = true;
@@ -215,8 +244,104 @@ export function registerSamlRoutes(app: Hono<AppEnv>, deps: Deps): void {
       await adoptNewAccount(c.env.DB, now, userId, email);
     }
     if (!(await isUserActive(c.env.DB, userId)))
-      return fail(c, 'user_suspended', orgId, MESSAGES.accountSuspended, 403);
-    return startSession(c, now, userId, state.return_to, { welcome: created, method: 'saml' });
+      return fail(c, 'user_suspended', orgId, MESSAGES.accountSuspended, 403, method);
+    // The organization's networks (DESIGN §4.19) apply to single sign-on too.
+    const refusal = await signInRefusal(c, userId, method);
+    if (refusal) {
+      await audit(c.env.DB, now, 'login.denied', {
+        actorUserId: userId,
+        ipPrefix: clientIp(c),
+        detail: { reason: 'policy', method, org: orgId },
+      });
+      return c.html(messagePage(refusal), 403);
+    }
+    return startSession(c, now, userId, returnTo, { welcome: created, method });
+  }
+
+  // ---- OpenID Connect (DESIGN §4.20) ------------------------------------------------------------
+
+  async function startOidc(
+    c: AppContext,
+    orgId: string,
+    config: OrgOidc,
+    email: string,
+    returnTo: string | null,
+  ): Promise<Response> {
+    const now = deps.now();
+    let discovery;
+    try {
+      discovery = await discover(deps.fetch, config.issuer);
+    } catch (error) {
+      console.warn('oidc discovery failed', error instanceof Error ? error.message : 'unknown');
+      return fail(c, 'provider_unreachable', orgId, MESSAGES.signInFailed, 400, 'oidc');
+    }
+    const request = await authorizeRequest(discovery, config, oidcRedirectUri(c.env, orgId), email);
+    const browser = randomToken(32);
+    await c.env.DB.batch([
+      c.env.DB.prepare('DELETE FROM oidc_states WHERE expires_at <= ?').bind(now),
+      c.env.DB.prepare(
+        `INSERT INTO oidc_states (state_hash, org_id, browser_hash, nonce, verifier, return_to, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        await stateHash(c.env, request.state),
+        orgId,
+        await browserHash(c.env, browser),
+        request.nonce,
+        request.verifier,
+        returnTo,
+        now + OIDC_REQUEST_TTL_SECONDS,
+      ),
+    ]);
+    setCookie(c, OIDC_TX_COOKIE, browser, OIDC_REQUEST_TTL_SECONDS);
+    await audit(c.env.DB, now, 'login.started', {
+      ipPrefix: clientIp(c),
+      detail: { provider: 'oidc', org: orgId },
+    });
+    return c.redirect(request.url, 302);
+  }
+
+  // The provider sends the person back here (a top-level GET, so the Lax cookie comes along).
+  app.get('/sso/:org/oidc', async (c) => {
+    if (!(await underRateLimit(c, 'callback')))
+      return c.html(messagePage(MESSAGES.tooManyAttempts), 429);
+    const orgId = c.req.param('org');
+    const state = c.req.query('state') ?? '';
+    const code = c.req.query('code');
+    const browser = readCookie(c.req.header('Cookie'), OIDC_TX_COOKIE);
+    clearCookie(c, OIDC_TX_COOKIE);
+    const now = deps.now();
+    const flow =
+      RELAY_STATE.test(state) && browser
+        ? await c.env.DB.prepare(
+            `DELETE FROM oidc_states
+             WHERE state_hash = ? AND org_id = ? AND browser_hash = ? AND expires_at > ?
+             RETURNING nonce, verifier, return_to`,
+          )
+            .bind(await stateHash(c.env, state), orgId, await browserHash(c.env, browser), now)
+            .first<{ nonce: string; verifier: string; return_to: string | null }>()
+        : null;
+    if (!flow) return fail(c, 'transaction_invalid', orgId, MESSAGES.signInFailed, 400, 'oidc');
+    // The person cancelled, or the provider refused.
+    if (!code) return fail(c, 'provider_denied', orgId, MESSAGES.signInFailed, 400, 'oidc');
+    const config = await oidcConfig(c.env.DB, orgId);
+    if (!config?.enabled) return fail(c, 'sso_disabled', orgId, MESSAGES.signInFailed, 400, 'oidc');
+    let email: string | null;
+    try {
+      ({ email } = await finishOidc(c.env, deps.fetch, config, {
+        code,
+        verifier: flow.verifier,
+        nonce: flow.nonce,
+        redirectUri: oidcRedirectUri(c.env, orgId),
+        now,
+      }));
+    } catch (error) {
+      console.warn(
+        'oidc response refused',
+        error instanceof Error ? error.message.slice(0, 120) : 'unknown',
+      );
+      return fail(c, 'assertion_invalid', orgId, MESSAGES.signInFailed, 400, 'oidc');
+    }
+    return finishSso(c, orgId, email, flow.return_to, 'oidc');
   });
 
   // What the organization's owner gives their IdP.

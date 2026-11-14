@@ -246,6 +246,19 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | P6 | An admin weakens the rules | Only owners change them, with a recent proof; changes are in the organization's activity (tested) |
 | P7 | Rules reach people the organization doesn't manage | Read only through `users.managed_by` (tested) |
 
+### O — Single sign-on with OpenID Connect (DESIGN §4.20, phase 10c)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| O1 | A provider asserts addresses outside the organization's domains | The address must be at one of its verified domains, as for SAML (L1) (tested) |
+| O2 | A personal Google account made with a work address signs in as the company | For Google, `hd` must be the address's domain (tested) |
+| O3 | Another tenant's users sign in (multi-tenant issuer) | Multi-tenant Microsoft issuers are refused; the issuer must match discovery and the token exactly (tested) |
+| O4 | A forged or replayed response, or one started in another browser | State once, bound to the browser cookie; nonce in the ID token; PKCE; the token endpoint authenticates login; ID tokens older than ten minutes refused (tested) |
+| O5 | Token substitution with another app's ID token | Audience must be the organization's client ID (tested) |
+| O6 | An `email_verified: false` address | Refused (tested) |
+| O7 | The client secret leaks from the database | Encrypted with `MFA_ENCRYPTION_KEY`, bound to the organization; never shown again |
+| O8 | Server-side requests to arbitrary URLs through the issuer field | https only, no credentials or query; responses limited to 256 KB and 8 s, redirects not followed; the Worker can't reach private networks |
+
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
 
 | # | Threat | Mitigation |

@@ -368,13 +368,28 @@ export async function dueDeletions(db: D1Database, now: number, limit = 20): Pro
 
 // ---- Required single sign-on --------------------------------------------------------------------
 
+/** SQL: the organization `org` has single sign-on on, SAML or OpenID Connect (§4.17, §4.20). */
+export const ssoOnSql = (org: string) =>
+  `(EXISTS (SELECT 1 FROM org_saml WHERE org_id = ${org} AND enabled = 1)
+    OR EXISTS (SELECT 1 FROM org_oidc WHERE org_id = ${org} AND enabled = 1))`;
+
+/** Whether the organization has single sign-on on. */
+export async function ssoOn(db: D1Database, orgId: string): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT ${ssoOnSql('?1')} AS ok`)
+    .bind(orgId)
+    .first<{ ok: number }>();
+  return row?.ok === 1;
+}
+
 /**
  * SQL: the account `u` must sign in through its organization's SSO. Owners are exempt; the rule
  * applies only while the organization is active and its SSO is on.
  */
 export const SSO_REQUIRED_SQL = `EXISTS (
-  SELECT 1 FROM organizations o JOIN org_saml x ON x.org_id = o.id AND x.enabled = 1
+  SELECT 1 FROM organizations o
   WHERE o.id = u.managed_by AND o.require_sso = 1 AND o.status = 'active'
+    AND ${ssoOnSql('o.id')}
     AND NOT EXISTS (SELECT 1 FROM org_members m
                     WHERE m.org_id = o.id AND m.user_id = u.id AND m.role = 'owner'))`;
 
@@ -406,7 +421,7 @@ export async function setRequireSso(
     statements.push(
       db
         .prepare(
-          `DELETE FROM sessions WHERE method IS NOT 'saml'
+          `DELETE FROM sessions WHERE (method IS NULL OR method NOT IN ('saml', 'oidc'))
              AND user_id IN (SELECT u.id FROM users u WHERE u.managed_by = ? AND ${SSO_REQUIRED_SQL})`,
         )
         .bind(orgId),

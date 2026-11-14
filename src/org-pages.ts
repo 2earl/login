@@ -336,6 +336,8 @@ const ACTIVITY: Record<string, (e: ActivityEntry) => string> = {
   'org.domain_managed': (e) => `started managing the accounts at ${str(e.detail.domain, '')}`,
   'org.domain_unmanaged': (e) => `stopped managing the accounts at ${str(e.detail.domain, '')}`,
   'org.policy_changed': () => 'changed the security rules for managed accounts',
+  'org.oidc_saved': (e) =>
+    `saved OpenID Connect single sign-on${e.detail.enabled ? ', on' : ', off'}`,
   'org.require_sso_changed': (e) =>
     `${e.detail.on ? 'required' : 'stopped requiring'} single sign-on for managed accounts`,
   'org.account_managed': (e) =>
@@ -480,6 +482,7 @@ export function directoryPage(params: {
   tokens: ScimTokenInfo[];
   provisioned: { active: number; waiting: number; inactive: number };
   saml: { idpEntityId: string; ssoUrl: string; certificate: string; enabled: boolean } | null;
+  oidc: { issuer: string; clientId: string; enabled: boolean } | null;
   managed: { managed: number; deactivated: number; requireSso: boolean };
   policy: OrgPolicy;
   newToken?: string;
@@ -530,7 +533,7 @@ export function directoryPage(params: {
       setupList({
         verified,
         managed: params.domains.some((d) => d.managedAt !== null),
-        sso: params.saml?.enabled === true,
+        sso: params.saml?.enabled === true || params.oidc?.enabled === true,
         directory: params.tokens.length > 0,
         rules: !isDefaultPolicy(params.policy),
       }) +
@@ -542,8 +545,13 @@ export function directoryPage(params: {
       '<button class="button secondary" type="submit">Add domain</button></form>' +
       '</section>' +
       // In the order of the setup steps.
-      managedSection(base, params.domains, params.managed, params.saml?.enabled === true) +
-      samlSection(base, params.issuer, params.org.id, verified, params.saml) +
+      managedSection(
+        base,
+        params.domains,
+        params.managed,
+        params.saml?.enabled === true || params.oidc?.enabled === true,
+      ) +
+      samlSection(base, params.issuer, params.org.id, verified, params.saml, params.oidc) +
       '<section class="section" aria-labelledby="scim-heading">' +
       '<h2 id="scim-heading">Directory sync (SCIM 2.0)</h2>' +
       '<dl class="details">' +
@@ -643,7 +651,7 @@ function setupSteps(state: SetupState) {
       done: state.sso,
       anchor: 'saml-heading',
       title: 'Connect single sign-on',
-      text: 'People sign in through your identity provider (SAML 2.0).',
+      text: 'People sign in through your identity provider (OpenID Connect or SAML 2.0).',
     },
     {
       done: state.directory,
@@ -743,12 +751,37 @@ function samlSection(
   orgId: string,
   verified: boolean,
   saml: { idpEntityId: string; ssoUrl: string; certificate: string; enabled: boolean } | null,
+  oidc: { issuer: string; clientId: string; enabled: boolean } | null,
 ): string {
   const sp = `${issuer}/saml/${encodeURIComponent(orgId)}`;
-  return (
-    '<section class="section" aria-labelledby="saml-heading">' +
-    '<h2 id="saml-heading">Single sign-on (SAML 2.0)</h2>' +
-    '<p class="section-text">People with an address at your verified domains can sign in through your identity provider. A second factor they set up on 2earl is still asked for. Turning it off also turns off required single sign-on.</p>' +
+  const redirectUri = `${issuer}/sso/${encodeURIComponent(orgId)}/oidc`;
+  const status = oidc?.enabled
+    ? 'On, with OpenID Connect'
+    : saml?.enabled
+      ? 'On, with SAML 2.0'
+      : 'Off';
+  const oidcForm =
+    `<details class="protocol"${oidc?.enabled || !saml?.enabled ? ' open' : ''}>` +
+    '<summary>OpenID Connect: Microsoft Entra ID, Google Workspace, Okta and others</summary>' +
+    '<dl class="details">' +
+    `<dt>Redirect URI</dt><dd><code>${escapeHtml(redirectUri)}</code></dd>` +
+    '<dt>Scopes</dt><dd><code>openid email profile</code></dd>' +
+    '<dt>Client authentication</dt><dd>Client secret (basic)</dd>' +
+    '</dl>' +
+    `<form method="post" action="${base}/oidc" class="stack-form">` +
+    '<label class="field"><span>Issuer URL</span>' +
+    `<input name="issuer" type="url" required maxlength="500" autocomplete="off" spellcheck="false" placeholder="https://login.microsoftonline.com/<tenant ID>/v2.0" value="${escapeHtml(oidc?.issuer ?? '')}">` +
+    '<span class="hint">Entra ID: https://login.microsoftonline.com/&lt;tenant ID&gt;/v2.0 · Google Workspace: https://accounts.google.com · Okta: https://&lt;your domain&gt;.okta.com</span></label>' +
+    '<label class="field"><span>Client ID</span>' +
+    `<input name="client_id" type="text" required maxlength="300" autocomplete="off" spellcheck="false" value="${escapeHtml(oidc?.clientId ?? '')}"></label>` +
+    '<label class="field"><span>Client secret</span>' +
+    `<input name="client_secret" type="password" maxlength="500" autocomplete="off"${oidc ? ' placeholder="Saved: leave empty to keep it"' : ' required'}></label>` +
+    `<label class="confirm"><input type="checkbox" name="enabled" value="on"${oidc?.enabled ? ' checked' : ''}><span>Let people sign in this way${saml?.enabled ? ' (turns SAML off)' : ''}</span></label>` +
+    '<div class="consent-actions"><button class="button secondary" type="submit">Check and save</button></div>' +
+    '</form></details>';
+  const samlForm =
+    `<details class="protocol"${saml?.enabled ? ' open' : ''}>` +
+    '<summary>SAML 2.0</summary>' +
     '<dl class="details">' +
     `<dt>Entity ID</dt><dd><code>${escapeHtml(sp)}</code></dd>` +
     `<dt>Reply (ACS) URL</dt><dd><code>${escapeHtml(sp)}/acs</code> (HTTP-POST)</dd>` +
@@ -756,20 +789,23 @@ function samlSection(
     (saml
       ? `<dt>Metadata</dt><dd><a href="${escapeHtml(sp)}/metadata">${escapeHtml(sp)}/metadata</a></dd>`
       : '') +
-    `<dt>Status</dt><dd>${saml?.enabled ? 'On' : 'Off'}</dd>` +
     '</dl>' +
-    (verified
-      ? `<form method="post" action="${base}/saml" class="stack-form">` +
-        '<label class="field"><span>Identity provider entity ID (issuer)</span>' +
-        `<input name="idp_entity_id" type="text" required maxlength="500" autocomplete="off" spellcheck="false" value="${escapeHtml(saml?.idpEntityId ?? '')}"></label>` +
-        '<label class="field"><span>Sign-in URL (HTTP-Redirect)</span>' +
-        `<input name="sso_url" type="url" required maxlength="1000" autocomplete="off" spellcheck="false" value="${escapeHtml(saml?.ssoUrl ?? '')}"></label>` +
-        '<label class="field"><span>Signing certificate (PEM or base64)</span>' +
-        `<textarea name="certificate" rows="6" required spellcheck="false">${escapeHtml(saml?.certificate ?? '')}</textarea></label>` +
-        `<label class="confirm"><input type="checkbox" name="enabled" value="on"${saml?.enabled ? ' checked' : ''}><span>Let people sign in this way</span></label>` +
-        '<div class="consent-actions"><button class="button secondary" type="submit">Save single sign-on</button></div>' +
-        '</form>'
-      : '<p class="note">Verify a domain first.</p>') +
+    `<form method="post" action="${base}/saml" class="stack-form">` +
+    '<label class="field"><span>Identity provider entity ID (issuer)</span>' +
+    `<input name="idp_entity_id" type="text" required maxlength="500" autocomplete="off" spellcheck="false" value="${escapeHtml(saml?.idpEntityId ?? '')}"></label>` +
+    '<label class="field"><span>Sign-in URL (HTTP-Redirect)</span>' +
+    `<input name="sso_url" type="url" required maxlength="1000" autocomplete="off" spellcheck="false" value="${escapeHtml(saml?.ssoUrl ?? '')}"></label>` +
+    '<label class="field"><span>Signing certificate (PEM or base64)</span>' +
+    `<textarea name="certificate" rows="6" required spellcheck="false">${escapeHtml(saml?.certificate ?? '')}</textarea></label>` +
+    `<label class="confirm"><input type="checkbox" name="enabled" value="on"${saml?.enabled ? ' checked' : ''}><span>Let people sign in this way${oidc?.enabled ? ' (turns OpenID Connect off)' : ''}</span></label>` +
+    '<div class="consent-actions"><button class="button secondary" type="submit">Save single sign-on</button></div>' +
+    '</form></details>';
+  return (
+    '<section class="section" aria-labelledby="saml-heading">' +
+    '<h2 id="saml-heading">Single sign-on</h2>' +
+    '<p class="section-text">People with an address at your verified domains sign in through your identity provider, with OpenID Connect or SAML 2.0: one at a time. A second factor they set up on 2earl is still asked for. Turning single sign-on off also lifts required single sign-on.</p>' +
+    `<dl class="details"><dt>Status</dt><dd>${status}</dd></dl>` +
+    (verified ? oidcForm + samlForm : '<p class="note">Verify a domain first.</p>') +
     '</section>'
   );
 }
