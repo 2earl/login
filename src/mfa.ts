@@ -46,10 +46,26 @@ export function mfaRequired(env: Env): boolean {
   return flag === 'true';
 }
 
-/** Enrolled users are always challenged, whatever the flag; the flag only forces enrolment. */
-export function mfaGate(env: Env, session: { aal: 'aal1' | 'aal2'; hasFactor: boolean }): MfaGate {
-  if (session.hasFactor) return session.aal === 'aal2' ? null : 'challenge';
-  return mfaRequired(env) ? 'enrol' : null;
+/**
+ * Enrolled users are always challenged, whatever the flag; the flag only forces enrolment. An
+ * organization's rules (DESIGN §4.19) can force it too, and require a passkey: an account that
+ * has only an authenticator app passes the challenge with it, then adds a passkey.
+ */
+export function mfaGate(
+  env: Env,
+  session: {
+    aal: 'aal1' | 'aal2';
+    hasFactor: boolean;
+    hasPasskey?: boolean;
+    user?: { policy: { requireFactor: boolean; passkeysOnly: boolean } | null };
+  },
+): MfaGate {
+  const policy = session.user?.policy ?? null;
+  if (session.hasFactor) {
+    if (session.aal !== 'aal2') return 'challenge';
+    return policy?.passkeysOnly && !session.hasPasskey ? 'enrol' : null;
+  }
+  return mfaRequired(env) || policy?.requireFactor || policy?.passkeysOnly ? 'enrol' : null;
 }
 
 export function isStepUpFresh(

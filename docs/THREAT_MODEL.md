@@ -234,6 +234,18 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | M7 | The organization learns who has a personal account at its domain | Nothing is shown until the person chooses: no names, no count. SCIM linking (S1) is unchanged |
 | M8 | Org deactivation undone by someone else, or the 2earl owner's suspension undone by an organization | `deactivated_at` marks the organization's; its reactivation lifts only that (tested) |
 
+### P — Security rules for managed accounts (DESIGN §4.19, phase 10b)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| P1 | Rules lock the organization out (no way in, a changed network) | Owners are exempt from ways in and networks; saving with no way in and no SSO is refused (tested) |
+| P2 | A session outlives a rule (old session, other network, other way in) | Checked on every request with the session, not only at sign-in (tested) |
+| P3 | Passkeys-only bypassed with an authenticator-app code | Codes are refused once the account has a passkey; the last passkey can't be removed (tested) |
+| P4 | A mistyped range lets in much of the internet | Ranges wider than /8 (IPv4) or /16 (IPv6) are refused (tested) |
+| P5 | Spoofed client address | The address is Cloudflare's `CF-Connecting-IP`, set at the edge; a request can't choose it |
+| P6 | An admin weakens the rules | Only owners change them, with a recent proof; changes are in the organization's activity (tested) |
+| P7 | Rules reach people the organization doesn't manage | Read only through `users.managed_by` (tested) |
+
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
 
 | # | Threat | Mitigation |

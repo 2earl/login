@@ -932,8 +932,10 @@ export function securityPage(params: {
   activity?: SecurityEvent[];
   recoveryRemaining: number;
   mfaRequired: boolean;
-  /** The account can't be used until a factor is added (MFA_REQUIRED). */
+  /** The account can't be used until a factor is added (MFA_REQUIRED, an organization's rules). */
   mustEnrol: boolean;
+  /** Why, in words. */
+  enrolReason?: string;
   /** Where to continue after the first factor is set up. */
   next: string;
   notice?: string;
@@ -953,7 +955,7 @@ export function securityPage(params: {
   return page(
     'Security',
     (params.mustEnrol
-      ? '<p class="warning" role="status">2earl requires a second factor. Add one to continue to your account.</p>'
+      ? `<p class="warning" role="status">${escapeHtml(params.enrolReason ?? '2earl requires a second factor. Add one to continue to your account.')}</p>`
       : '') +
       (params.notice ? `<p class="notice" role="status">${escapeHtml(params.notice)}</p>` : '') +
       (params.error ? `<p class="warning" role="alert">${escapeHtml(params.error)}</p>` : '') +

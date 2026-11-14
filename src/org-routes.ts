@@ -21,6 +21,15 @@ import {
   setRequireSso,
 } from './managed';
 import { authorizationServer } from './oauth';
+import {
+  MAX_RANGES,
+  POLICY_METHODS,
+  SESSION_HOURS,
+  parseRanges,
+  readPolicy,
+  savePolicy,
+  type PolicyMethod,
+} from './org-policy';
 import { noticeContext, removeAccount } from './sign-in';
 import { changeCheck } from './mfa-routes';
 import {
@@ -602,6 +611,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
           waiting: counts?.waiting ?? 0,
           inactive: counts?.inactive ?? 0,
         },
+        policy: await readPolicy(c.env.DB, orgId),
         managed: {
           ...(await managedCounts(c.env.DB, orgId)),
           requireSso: await c.env.DB.prepare('SELECT require_sso FROM organizations WHERE id = ?')
@@ -635,6 +645,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       'You stopped managing the accounts at the domain. They belong to their people again.',
     sso_required: 'Managed accounts now sign in only with single sign-on.',
     sso_optional: 'Managed accounts can sign in any way again.',
+    policy: 'Security rules saved. They apply from each person’s next request.',
   };
 
   app.get('/orgs/:org/directory', async (c) => {
@@ -801,6 +812,51 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       );
     }
     return c.redirect(directory(ctx.orgId, on ? 'managed' : 'unmanaged'), 303);
+  });
+
+  app.post('/orgs/:org/policy', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    const now = deps.now();
+    const redirect = changeCheck(ctx.session, now, `/orgs/${ctx.orgId}/directory`);
+    if (redirect) return c.redirect(redirect, 303);
+    const methods = ctx.form
+      .getAll('methods')
+      .filter((m): m is PolicyMethod => (POLICY_METHODS as readonly unknown[]).includes(m));
+    const hoursText = ctx.form.get('session_hours');
+    const hours = typeof hoursText === 'string' && hoursText ? Number(hoursText) : null;
+    const rangesText = ctx.form.get('ip_ranges');
+    const { ranges, invalid } = parseRanges(typeof rangesText === 'string' ? rangesText : '');
+    const refuse = (error: string) => showDirectory(c, ctx.orgId, { error }, 400);
+    if (hours !== null && !(SESSION_HOURS as readonly number[]).includes(hours)) {
+      return refuse('Choose a session length from the list.');
+    }
+    if (invalid.length > 0) {
+      return refuse(
+        `These aren’t network ranges (or are wider than /8 or /16): ${invalid.slice(0, 5).join(', ')}.`,
+      );
+    }
+    if (ranges.length > MAX_RANGES) return refuse(`Up to ${String(MAX_RANGES)} ranges.`);
+    if (methods.length === 0 && !(await samlConfig(c.env.DB, ctx.orgId))?.enabled) {
+      return refuse('Allow at least one way to sign in, or turn on single sign-on first.');
+    }
+    const policy = {
+      requireFactor: ctx.form.get('require_factor') === '1',
+      passkeysOnly: ctx.form.get('passkeys_only') === '1',
+      sessionHours: hours,
+      methods,
+      ipRanges: ranges,
+    };
+    await savePolicy(c.env.DB, now, ctx.orgId, policy);
+    await record(c, ctx.session, 'org.policy_changed', {
+      org: ctx.orgId,
+      requireFactor: policy.requireFactor || policy.passkeysOnly,
+      passkeysOnly: policy.passkeysOnly,
+      sessionHours: hours,
+      methods: methods.join(','),
+      ranges: ranges.length,
+    });
+    return c.redirect(directory(ctx.orgId, 'policy'), 303);
   });
 
   app.post('/orgs/:org/require-sso', async (c) => {

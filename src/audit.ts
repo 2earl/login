@@ -71,6 +71,7 @@ export type AuditEvent =
   | 'org.domain_managed'
   | 'org.domain_unmanaged'
   | 'org.require_sso_changed'
+  | 'org.policy_changed'
   | 'org.account_managed'
   | 'org.account_kept_personal'
   | 'org.accounts_released'

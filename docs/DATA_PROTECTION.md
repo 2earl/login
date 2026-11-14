@@ -62,6 +62,7 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | Account, sign-in, sessions, grants, consent | Art. 6(1)(b) GDPR: necessary to provide the service the user signs up for |
 | Security logging, rate limiting, audit | Art. 6(1)(f) GDPR: legitimate interest in securing the service. Minimised; short retention |
 | Accounts an organization manages (DESIGN §4.18) | The organization is the controller and decides about them (deactivation, deletion, required SSO); 2earl processes them on its behalf under its data processing terms (Art. 28, `https://2earl.com/dpa`), which an owner accepts when turning managing on. The person's own choice to let it manage the account is recorded (`org.account_managed`) |
+| An organization's allowed networks (DESIGN §4.19) | The request's address is compared with the ranges the organization set and not stored; the ranges are the organization's settings, not personal data |
 | Strictly necessary cookies | § 25(2) No. 2 TDDDG: no consent banner needed for `__Host-session`, `__Host-login_tx` and the consent-remember cookie |
 
 ## 4. Retention
