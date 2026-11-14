@@ -23,6 +23,7 @@ import {
   ssoOnSql,
 } from './managed';
 import { discover, issuerUrl, oidcConfig, saveOidc } from './sso-oidc';
+import { findGroup, listGroups, setGroupRole } from './scim-groups';
 import { authorizationServer } from './oauth';
 import {
   MAX_RANGES,
@@ -455,6 +456,21 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const next = ctx.form.get('role');
     if (!isOrgRole(next))
       return showOrg(c, ctx.session, ctx.orgId, { error: 'Choose a role.' }, 400);
+    // The directory decides admin or member for the people it provisioned (DESIGN §4.21).
+    if (
+      next !== 'owner' &&
+      (await listMembers(c.env.DB, ctx.orgId)).some(
+        (m) => m.userId === who.userId && m.roleFromDirectory,
+      )
+    ) {
+      return showOrg(
+        c,
+        ctx.session,
+        ctx.orgId,
+        { error: 'Your directory decides this person’s role: change their groups there.' },
+        409,
+      );
+    }
     if (!canSetRole(ctx.role, who.role, next)) {
       return showOrg(
         c,
@@ -645,6 +661,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
           inactive: counts?.inactive ?? 0,
         },
         policy: await readPolicy(c.env.DB, orgId),
+        groups: await listGroups(c.env.DB, orgId),
         managed: {
           ...(await managedCounts(c.env.DB, orgId)),
           requireSso: await c.env.DB.prepare('SELECT require_sso FROM organizations WHERE id = ?')
@@ -679,6 +696,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     sso_required: 'Managed accounts now sign in only with single sign-on.',
     sso_optional: 'Managed accounts can sign in any way again.',
     policy: 'Security rules saved. They apply from each person’s next request.',
+    group_role: 'Roles now follow your directory’s groups.',
   };
 
   app.get('/orgs/:org/directory', async (c) => {
@@ -910,6 +928,29 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       );
     }
     return c.redirect(directory(ctx.orgId, on ? 'managed' : 'unmanaged'), 303);
+  });
+
+  app.post('/orgs/:org/groups/role', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    const now = deps.now();
+    // Making people admins through the directory: a recent proof first.
+    const redirect = changeCheck(ctx.session, now, `/orgs/${ctx.orgId}/directory`);
+    if (redirect) return c.redirect(redirect, 303);
+    const groupId = ctx.form.get('group');
+    const role = ctx.form.get('role') === 'admin' ? 'admin' : null;
+    if (typeof groupId !== 'string')
+      return c.redirect(`/orgs/${encodeURIComponent(ctx.orgId)}/directory`, 303);
+    const group = await findGroup(c.env.DB, ctx.orgId, groupId);
+    if (group && (await setGroupRole(c.env.DB, now, ctx.orgId, groupId, role))) {
+      await record(c, ctx.session, 'org.group_role_changed', {
+        org: ctx.orgId,
+        group: groupId,
+        name: group.display_name,
+        role,
+      });
+    }
+    return c.redirect(directory(ctx.orgId, 'group_role'), 303);
   });
 
   app.post('/orgs/:org/policy', async (c) => {

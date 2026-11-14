@@ -23,6 +23,7 @@ import {
 } from './org-policy';
 import { escapeHtml, formatDate, formatDateTime, page } from './pages';
 import type { ScimTokenInfo } from './scim';
+import type { GroupSummary } from './scim-groups';
 
 /** Server-rendered pages for organizations (DESIGN §4.14). Every value is escaped. */
 
@@ -137,8 +138,12 @@ function memberRow(
   ]
     .filter(Boolean)
     .join(' · ');
+  // A role the directory decides can only become owner here (DESIGN §4.21).
   const roles = (['member', 'admin', 'owner'] as const).filter(
-    (r) => r !== member.role && canSetRole(actor.role, member.role, r),
+    (r) =>
+      r !== member.role &&
+      canSetRole(actor.role, member.role, r) &&
+      (!member.roleFromDirectory || r === 'owner'),
   );
   const actions =
     !editable || me
@@ -172,6 +177,7 @@ function memberRow(
     `<span class="avatar avatar-sm" aria-hidden="true">${escapeHtml(firstLetter(member.name ?? member.email))}</span>` +
     `<div class="person-main"><p class="person-name">${who}${me ? ' <span class="tag">You</span>' : ''} <span class="role-badge role-${member.role}">${escapeHtml(ROLE_LABEL[member.role])}</span>` +
     (member.managed ? ' <span class="tag tag-muted">Managed</span>' : '') +
+    (member.roleFromDirectory ? ' <span class="tag tag-muted">Role from directory</span>' : '') +
     (member.deactivated ? ' <span class="tag tag-alert">Deactivated</span>' : '') +
     '</p>' +
     `<p class="person-meta">${meta}</p></div>` +
@@ -351,6 +357,13 @@ const ACTIVITY: Record<string, (e: ActivityEntry) => string> = {
   'org.account_deletion_due': () =>
     'deleted a managed account, 30 days after the directory removed it',
   'scim.account_created': (e) => `created a managed account for ${e.target ?? 'someone'}`,
+  'scim.group_created': () => 'added a group',
+  'scim.group_updated': () => 'changed a group',
+  'scim.group_deleted': () => 'removed a group',
+  'scim.role_changed': (e) =>
+    `made ${e.target ?? 'someone'} ${e.detail.role === 'admin' ? 'an admin' : 'a member'}`,
+  'org.group_role_changed': (e) =>
+    `${e.detail.role === 'admin' ? 'made' : 'stopped making'} the members of “${str(e.detail.name, 'a group')}” admins`,
   'scim.account_deactivated': (e) => `deactivated ${e.target ?? 'an account'}`,
   'scim.account_reactivated': (e) => `reactivated ${e.target ?? 'an account'}`,
   'scim.account_deletion_scheduled': (e) =>
@@ -485,6 +498,7 @@ export function directoryPage(params: {
   oidc: { issuer: string; clientId: string; enabled: boolean } | null;
   managed: { managed: number; deactivated: number; requireSso: boolean };
   policy: OrgPolicy;
+  groups?: GroupSummary[];
   newToken?: string;
   notice?: string | undefined;
   error?: string | undefined;
@@ -568,6 +582,7 @@ export function directoryPage(params: {
         ? `<form method="post" action="${base}/scim-tokens" class="actions"><button class="button secondary" type="submit">Create a token</button></form>` +
           '<p class="note">Up to two tokens, so you can rotate: create the new one, put it in your directory, then revoke the old one.</p>'
         : '<p class="note">Verify a domain first.</p>') +
+      groupsBlock(base, params.groups ?? []) +
       '</section>' +
       policySection(
         base,
@@ -683,6 +698,36 @@ function setupList(state: SetupState): string {
       )
       .join('') +
     '</ol></nav>'
+  );
+}
+
+/** Groups from the directory, and the role each gives (DESIGN §4.21). */
+function groupsBlock(base: string, groups: GroupSummary[]): string {
+  const deciding = groups.some((g) => g.role === 'admin');
+  return (
+    '<h3 class="subhead">Groups and roles</h3>' +
+    (groups.length === 0
+      ? '<p class="note">Groups your directory sends appear here. Give a group the admin role, and your directory decides who is an admin.</p>'
+      : '<p class="section-text">' +
+        (deciding
+          ? 'Your directory decides roles: members of a group marked admin are admins, everyone else it provisioned is a member. Owners never change.'
+          : 'Mark a group admin, and your directory decides who is an admin. Owners never change.') +
+        '</p>' +
+        '<ul class="admin-list">' +
+        groups
+          .map(
+            (g) =>
+              '<li class="admin-row"><div class="app-main">' +
+              `<p class="app-name">${escapeHtml(g.name)}${g.role === 'admin' ? ' <span class="role-badge role-admin">Admin</span>' : ''}</p>` +
+              `<p class="app-meta">${String(g.members)} ${g.members === 1 ? 'person' : 'people'}</p>` +
+              '</div><div class="row-actions">' +
+              `<form method="post" action="${base}/groups/role">` +
+              hidden({ group: g.id, role: g.role === 'admin' ? '' : 'admin' }) +
+              `<button class="button secondary small" type="submit">${g.role === 'admin' ? 'Stop making admins' : 'Make its members admins'}</button></form>` +
+              '</div></li>',
+          )
+          .join('') +
+        '</ul>')
   );
 }
 
