@@ -6,6 +6,10 @@ import { normaliseEmail } from './directory';
 import { clientIp, type AppContext, type AppEnv } from './http';
 import { addressAtVerifiedDomain } from './org-domains';
 import { orgForScimToken, syncMembership, type ScimUserInput, type ScimUserRow } from './scim';
+import { DELETE_AFTER_SECONDS } from './managed';
+import { authorizationServer } from './oauth';
+
+const oauth = (c: AppContext) => authorizationServer(c.env).getOAuthApi(c.env);
 
 /**
  * The SCIM 2.0 service provider (RFC 7644, DESIGN §4.16) at /scim/v2: Users only. Each request
@@ -235,7 +239,7 @@ export function registerScimRoutes(app: Hono<AppEnv>, deps: Deps): void {
         // A new address belongs to someone else: unlink, so membership follows the new address.
         const relink = existing.user_name.toLowerCase() !== input.userName;
         if (relink && existing.user_id) {
-          await syncMembership(c.env.DB, now, { ...existing, active: 0 });
+          await syncMembership(c.env.DB, now, { ...existing, active: 0 }, { oauth: oauth(c) });
         }
         row = await c.env.DB.prepare(
           `UPDATE scim_users SET user_name = ?, external_id = ?, display_name = ?, given_name = ?,
@@ -283,7 +287,7 @@ export function registerScimRoutes(app: Hono<AppEnv>, deps: Deps): void {
       throw error;
     }
     if (!row) return scimError(404, 'User not found');
-    if (!(await syncMembership(c.env.DB, now, row))) {
+    if (!(await syncMembership(c.env.DB, now, row, { oauth: oauth(c) }))) {
       return scimError(
         409,
         'This person is the organization’s last owner: make someone else an owner in 2earl first',
@@ -507,7 +511,14 @@ export function registerScimRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const existing = await findUser(c, orgId, c.req.param('id'));
     if (!existing) return scimError(404, 'User not found');
     const now = deps.now();
-    if (!(await syncMembership(c.env.DB, now, { ...existing, active: 0 }))) {
+    // A managed account is deactivated now and deleted in 30 days (DESIGN §4.18).
+    const removed = await syncMembership(
+      c.env.DB,
+      now,
+      { ...existing, active: 0 },
+      { oauth: oauth(c), deleteAfter: now + DELETE_AFTER_SECONDS },
+    );
+    if (!removed) {
       return scimError(
         409,
         'This person is the organization’s last owner: make someone else an owner in 2earl first',

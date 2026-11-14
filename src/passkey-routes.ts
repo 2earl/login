@@ -22,7 +22,7 @@ import { fromBase64url, relyingParty } from './mfa-routes';
 import { MESSAGES, sessionsPage } from './pages';
 import { safeReturnTo } from './return-to';
 import { endOtherSessions, endSession, listSessions } from './sessions';
-import { openSession } from './sign-in';
+import { openSession, signInRefusal } from './sign-in';
 
 /**
  * Phase 8a (DESIGN §4.10, §7): signing in with a passkey as the first and only step, and the
@@ -180,6 +180,15 @@ export function registerPasskeyRoutes(app: Hono<AppEnv>, deps: Deps): void {
         detail: { reason: 'user_suspended', method: 'passkey' },
       });
       return c.json({ message: MESSAGES.accountSuspended.body }, 403);
+    }
+    const refusal = await signInRefusal(c, row.user_id, 'passkey');
+    if (refusal) {
+      await audit(c.env.DB, now, 'login.denied', {
+        actorUserId: row.user_id,
+        ipPrefix: ip,
+        detail: { reason: 'sso_required', method: 'passkey' },
+      });
+      return c.json({ message: refusal.body }, 403);
     }
 
     await c.env.DB.prepare(

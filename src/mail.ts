@@ -285,7 +285,10 @@ export type Notice =
   | { kind: 'recovery_codes' }
   | { kind: 'app_connected'; app: string }
   | { kind: 'account_deleted' }
-  | { kind: 'org_owner'; org: string };
+  | { kind: 'org_owner'; org: string }
+  | { kind: 'domain_managed'; org: string; domain: string }
+  | { kind: 'account_deactivated'; org: string }
+  | { kind: 'account_reactivated'; org: string };
 
 /** Where a change came from, as the notice reports it. */
 export interface NoticeContext {
@@ -393,6 +396,44 @@ export function noticeMail(notice: Notice, context?: NoticeContext): Mail {
         ],
         action: { label: 'Open your organizations', url: `${ISSUER}/account/orgs` },
         // When only: the device and network were the previous owner's, not this person's.
+        ...(context ? { facts: [['When', when(context.at)]] as [string, string][] } : {}),
+      };
+    case 'domain_managed':
+      return {
+        subject: `${notice.org} now manages 2earl accounts at ${notice.domain}`,
+        preview: 'Choose whether it manages your account, the next time you sign in.',
+        heading: 'Your organization manages accounts at your address’s domain',
+        body: [
+          `The organization “${notice.org}” proved it controls ${notice.domain} and now manages the 2earl accounts there.`,
+          'Your account has an address at that domain. The next time you sign in, choose whether the organization manages your account, or keep it your own by removing that address from it.',
+          'Nothing changes until you choose.',
+        ],
+        action: { label: 'Choose now', url: `${ISSUER}/account/managed` },
+        ...(context ? { facts: [['When', when(context.at)]] as [string, string][] } : {}),
+      };
+    case 'account_deactivated':
+      return {
+        subject: 'Your 2earl account was deactivated',
+        preview: `${notice.org} deactivated the account it manages.`,
+        heading: 'Your account was deactivated',
+        alert: true,
+        body: [
+          `“${notice.org}” manages your 2earl account and deactivated it. You can’t sign in, and connected apps lost access.`,
+          'Your account and its data are kept. If you think this is a mistake, ask the organization’s admins.',
+        ],
+        ...(context ? { facts: [['When', when(context.at)]] as [string, string][] } : {}),
+        accountLink: false,
+      };
+    case 'account_reactivated':
+      return {
+        subject: 'Your 2earl account works again',
+        preview: `${notice.org} reactivated your account.`,
+        heading: 'Your account works again',
+        body: [
+          `“${notice.org}” reactivated the 2earl account it manages. You can sign in again.`,
+          'Apps you used before need to be connected again.',
+        ],
+        action: { label: 'Sign in', url: `${ISSUER}/login` },
         ...(context ? { facts: [['When', when(context.at)]] as [string, string][] } : {}),
       };
     case 'account_deleted':

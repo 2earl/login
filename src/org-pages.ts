@@ -146,15 +146,26 @@ function memberRow(
             '</select><button class="button secondary small" type="submit">Change</button></form>'
           : '') +
         (canRemove(actor.role, member.role)
-          ? `<form method="post" action="${base}/members/remove">` +
-            hidden({ user: member.userId }) +
-            '<button class="button secondary small" type="submit">Remove</button></form>'
+          ? member.managed
+            ? // A managed account is deactivated, not removed (DESIGN §4.18).
+              `<form method="post" action="${base}/members/${member.deactivated ? 'reactivate' : 'deactivate'}">` +
+              hidden({ user: member.userId }) +
+              `<button class="button secondary small" type="submit">${member.deactivated ? 'Reactivate' : 'Deactivate'}</button></form>` +
+              (actor.role === 'owner'
+                ? `<a class="button danger-outline small" href="${base}/accounts/delete?user=${encodeURIComponent(member.userId)}">Delete account…</a>`
+                : '')
+            : `<form method="post" action="${base}/members/remove">` +
+              hidden({ user: member.userId }) +
+              '<button class="button secondary small" type="submit">Remove</button></form>'
           : '') +
         '</div>';
   return (
     '<li class="person">' +
     `<span class="avatar avatar-sm" aria-hidden="true">${escapeHtml(firstLetter(member.name ?? member.email))}</span>` +
-    `<div class="person-main"><p class="person-name">${who}${me ? ' <span class="tag">You</span>' : ''} <span class="role-badge role-${member.role}">${escapeHtml(ROLE_LABEL[member.role])}</span></p>` +
+    `<div class="person-main"><p class="person-name">${who}${me ? ' <span class="tag">You</span>' : ''} <span class="role-badge role-${member.role}">${escapeHtml(ROLE_LABEL[member.role])}</span>` +
+    (member.managed ? ' <span class="tag tag-muted">Managed</span>' : '') +
+    (member.deactivated ? ' <span class="tag tag-alert">Deactivated</span>' : '') +
+    '</p>' +
     `<p class="person-meta">${meta}</p></div>` +
     actions +
     '</li>'
@@ -231,6 +242,8 @@ export function orgSettingsPage(params: {
   org: Organization;
   role: OrgRole;
   owners: number;
+  /** The organization manages the viewer's account: they can't leave (DESIGN §4.18). */
+  managed?: boolean;
   notice?: string | undefined;
   error?: string | undefined;
 }): string {
@@ -254,12 +267,14 @@ export function orgSettingsPage(params: {
       '</section>' +
       '<section class="section" aria-labelledby="leave-heading">' +
       '<h2 id="leave-heading">Leave</h2>' +
-      (lastOwner
-        ? '<p class="section-text">You’re the only owner. To leave, make someone else an owner first, or delete the organization.</p>'
-        : `<form method="post" action="${base}/leave" class="delete-form">` +
-          '<label class="confirm"><input type="checkbox" name="confirm" value="on" required>' +
-          '<span>I want to leave this organization. Rejoining needs a new invitation.</span></label>' +
-          '<div class="consent-actions"><button class="button secondary" type="submit">Leave organization</button></div></form>') +
+      (params.managed
+        ? '<p class="section-text">This organization manages your account, so you can’t leave it. Ask its admins.</p>'
+        : lastOwner
+          ? '<p class="section-text">You’re the only owner. To leave, make someone else an owner first, or delete the organization.</p>'
+          : `<form method="post" action="${base}/leave" class="delete-form">` +
+            '<label class="confirm"><input type="checkbox" name="confirm" value="on" required>' +
+            '<span>I want to leave this organization. Rejoining needs a new invitation.</span></label>' +
+            '<div class="consent-actions"><button class="button secondary" type="submit">Leave organization</button></div></form>') +
       '</section>' +
       (active && canManageOrganization(role)
         ? '<section class="section" aria-labelledby="delete-heading">' +
@@ -300,6 +315,25 @@ const ACTIVITY: Record<string, (e: ActivityEntry) => string> = {
   'org.scim_token_revoked': () => 'revoked a directory sync token',
   'org.saml_saved': (e) =>
     `${e.detail.enabled ? 'turned on' : 'saved, turned off,'} single sign-on`,
+  'org.domain_managed': (e) => `started managing the accounts at ${str(e.detail.domain, '')}`,
+  'org.domain_unmanaged': (e) => `stopped managing the accounts at ${str(e.detail.domain, '')}`,
+  'org.require_sso_changed': (e) =>
+    `${e.detail.on ? 'required' : 'stopped requiring'} single sign-on for managed accounts`,
+  'org.account_managed': (e) =>
+    e.detail.how === 'created' ? 'got a managed account' : 'made their account a managed account',
+  'org.account_kept_personal': () => 'kept their account personal',
+  'org.accounts_released': (e) =>
+    `${String(typeof e.detail.count === 'number' ? e.detail.count : 'some')} managed accounts became personal again`,
+  'org.account_deactivated': (e) => `deactivated ${e.target ?? 'an account'}`,
+  'org.account_reactivated': (e) => `reactivated ${e.target ?? 'an account'}`,
+  'org.account_deleted': () => 'deleted a managed account',
+  'org.account_deletion_due': () =>
+    'deleted a managed account, 30 days after the directory removed it',
+  'scim.account_created': (e) => `created a managed account for ${e.target ?? 'someone'}`,
+  'scim.account_deactivated': (e) => `deactivated ${e.target ?? 'an account'}`,
+  'scim.account_reactivated': (e) => `reactivated ${e.target ?? 'an account'}`,
+  'scim.account_deletion_scheduled': (e) =>
+    `removed ${e.target ?? 'an account'}: deactivated, deleted in 30 days`,
   'scim.member_added': (e) => `added ${e.target ?? 'someone'}`,
   'scim.member_removed': (e) => `removed ${e.target ?? 'someone'}`,
   'scim.user_created': () => 'provisioned a person',
@@ -336,6 +370,34 @@ export function orgActivityPage(params: {
         : '<p class="empty">Nothing yet. Invitations, role changes, members joining and leaving, and directory changes appear here.</p>') +
       '<p class="note">The last 90 days, newest first, up to 200 events.</p>' +
       '</section>',
+    { section: 'Organization' },
+  );
+}
+
+/** Deleting an account the organization manages (DESIGN §4.18): owners, with a confirmation. */
+export function deleteManagedAccountPage(params: {
+  org: Organization;
+  member: Member;
+  error?: string;
+}): string {
+  const base = `/orgs/${escapeHtml(params.org.id)}`;
+  const who = params.member.name ?? params.member.email ?? 'this account';
+  return page(
+    'Delete account',
+    `<p class="crumb"><a href="${base}">${escapeHtml(params.org.name)}</a></p>` +
+      `<h1>Delete ${escapeHtml(who)}’s account</h1>` +
+      '<p class="lede">The 2earl account and everything in it are deleted now, in every 2earl service, and every connected app loses access. It can’t be restored. Deactivating keeps the account instead.</p>' +
+      (params.member.name && params.member.email
+        ? `<p class="section-text">${escapeHtml(params.member.email)}</p>`
+        : '') +
+      flash({ error: params.error }) +
+      `<form method="post" action="${base}/accounts/delete" class="delete-form">` +
+      hidden({ user: params.member.userId }) +
+      '<label class="confirm"><input type="checkbox" name="confirm" value="on" required>' +
+      '<span>I want to delete this account and its data for good.</span></label>' +
+      '<div class="consent-actions"><button class="button danger" type="submit">Delete account</button>' +
+      `<a class="button secondary" href="${base}">Keep it</a></div>` +
+      '</form>',
     { section: 'Organization' },
   );
 }
@@ -399,6 +461,7 @@ export function directoryPage(params: {
   tokens: ScimTokenInfo[];
   provisioned: { active: number; waiting: number; inactive: number };
   saml: { idpEntityId: string; ssoUrl: string; certificate: string; enabled: boolean } | null;
+  managed: { managed: number; deactivated: number; requireSso: boolean };
   newToken?: string;
   notice?: string | undefined;
   error?: string | undefined;
@@ -412,6 +475,7 @@ export function directoryPage(params: {
         (d.verifiedAt !== null
           ? '<span class="tag">Verified</span>'
           : '<span class="tag tag-muted">Not verified</span>') +
+        (d.managedAt !== null ? ' <span class="tag">Accounts managed</span>' : '') +
         '</p>' +
         (d.verifiedAt !== null
           ? `<p class="app-meta">Verified ${formatDate(d.verifiedAt)}</p>`
@@ -442,7 +506,7 @@ export function directoryPage(params: {
     'Domains and directory sync',
     orgHeader(params.org, 'owner', 'directory') +
       flash(params) +
-      '<p class="lede">Your company directory (Okta, Microsoft Entra ID or any other SCIM 2.0 client) can add people to this organization and remove them, for addresses at domains you’ve verified. It never creates 2earl accounts: people join with their own account when they sign in with that address.</p>' +
+      '<p class="lede">Verify your company’s domains, manage the 2earl accounts at them, connect your directory (Okta, Microsoft Entra ID or any SCIM 2.0 client) and your single sign-on.</p>' +
       '<section class="section" aria-labelledby="domains-heading">' +
       '<h2 id="domains-heading">Domains</h2>' +
       (domainRows ? `<ul class="admin-list">${domainRows}</ul>` : '') +
@@ -467,8 +531,55 @@ export function directoryPage(params: {
           '<p class="note">Up to two tokens, so you can rotate: create the new one, put it in your directory, then revoke the old one.</p>'
         : '<p class="note">Verify a domain first.</p>') +
       '</section>' +
+      managedSection(base, params.domains, params.managed, params.saml?.enabled === true) +
       samlSection(base, params.issuer, params.org.id, verified, params.saml),
     { section: 'Organization' },
+  );
+}
+
+/** Managing the accounts at verified domains, and required SSO (DESIGN §4.18). */
+function managedSection(
+  base: string,
+  domains: OrgDomain[],
+  counts: { managed: number; deactivated: number; requireSso: boolean },
+  ssoOn: boolean,
+): string {
+  const verified = domains.filter((d) => d.verifiedAt !== null);
+  const rows = verified
+    .map(
+      (d) =>
+        '<li class="admin-row"><div class="app-main">' +
+        `<p class="app-name">${escapeHtml(d.domain)}</p>` +
+        `<p class="app-meta">${d.managedAt !== null ? `Managed since ${formatDate(d.managedAt)}` : 'Not managed: accounts there belong to their people'}</p>` +
+        '</div><div class="row-actions">' +
+        `<form method="post" action="${base}/domains/manage" class="${d.managedAt !== null ? '' : 'manage-form'}">` +
+        hidden({ domain: d.domain, on: d.managedAt !== null ? '0' : '1' }) +
+        (d.managedAt !== null
+          ? '<button class="button secondary small" type="submit">Stop managing</button>'
+          : '<label class="confirm small"><input type="checkbox" name="accept" value="on" required>' +
+            '<span>We accept 2earl’s <a href="https://2earl.com/dpa">data processing terms</a> for these accounts</span></label>' +
+            '<button class="button secondary small" type="submit">Manage accounts</button>') +
+        '</form></div></li>',
+    )
+    .join('');
+  return (
+    '<section class="section" aria-labelledby="managed-heading">' +
+    '<h2 id="managed-heading">Managed accounts</h2>' +
+    '<p class="section-text">Manage the 2earl accounts at a verified domain. New accounts there are managed from the start; people who already have one choose at their next sign-in, or keep it their own by removing the address. You can deactivate and delete managed accounts, and require your single sign-on. People can always download their data.</p>' +
+    (verified.length > 0
+      ? '<dl class="details">' +
+        `<dt>Accounts</dt><dd>${String(counts.managed)} managed · ${String(counts.deactivated)} deactivated</dd>` +
+        '</dl>' +
+        `<ul class="admin-list">${rows}</ul>` +
+        '<h3 class="subhead">Require single sign-on</h3>' +
+        (ssoOn
+          ? `<form method="post" action="${base}/require-sso" class="stack-form">` +
+            `<label class="confirm"><input type="checkbox" name="on" value="1"${counts.requireSso ? ' checked' : ''}>` +
+            '<span>Managed accounts sign in only through your identity provider. Owners can still sign in other ways, so a broken identity provider can’t lock you out. Sessions started another way end at once.</span></label>' +
+            '<div class="consent-actions"><button class="button secondary" type="submit">Save</button></div></form>'
+          : `<p class="note">${counts.requireSso ? 'Required, but single sign-on is off, so it doesn’t apply. ' : ''}Turn on single sign-on below first.</p>`)
+      : '<p class="note">Verify a domain first.</p>') +
+    '</section>'
   );
 }
 
@@ -483,7 +594,7 @@ function samlSection(
   return (
     '<section class="section" aria-labelledby="saml-heading">' +
     '<h2 id="saml-heading">Single sign-on (SAML 2.0)</h2>' +
-    '<p class="section-text">People with an address at your verified domains can sign in through your identity provider. A second factor they set up on 2earl is still asked for.</p>' +
+    '<p class="section-text">People with an address at your verified domains can sign in through your identity provider. A second factor they set up on 2earl is still asked for. Turning it off also turns off required single sign-on.</p>' +
     '<dl class="details">' +
     `<dt>Entity ID</dt><dd><code>${escapeHtml(sp)}</code></dd>` +
     `<dt>Reply (ACS) URL</dt><dd><code>${escapeHtml(sp)}/acs</code> (HTTP-POST)</dd>` +

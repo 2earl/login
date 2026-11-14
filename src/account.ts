@@ -131,7 +131,9 @@ export async function exportAccount(
   ] = await db.batch<Record<string, unknown>>([
     db
       .prepare(
-        'SELECT id, status, display_name, primary_email, created_at, updated_at FROM users WHERE id = ?',
+        `SELECT id, status, display_name, primary_email, created_at, updated_at,
+                managed_by, managed_since, deactivated_at, delete_after
+         FROM users WHERE id = ?`,
       )
       .bind(userId),
     db

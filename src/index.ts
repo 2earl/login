@@ -4,6 +4,9 @@ import { createApp } from './app';
 import { GOOGLE_JWKS_URL } from './google';
 import { authorizationServer, type GrantProps } from './oauth';
 import { deliverDeletionNotices } from './deletion-notices';
+import { deleteAccount } from './account';
+import { audit } from './audit';
+import { dueDeletions } from './managed';
 import { serviceForResource } from './services';
 import { boundKey, challenge, checkAccessToken } from './token-check';
 
@@ -126,6 +129,7 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
         if (result.cursor) await this.env.OAUTH_KV.put(PURGE_CURSOR_KEY, result.cursor);
         else await this.env.OAUTH_KV.delete(PURGE_CURSOR_KEY);
       })(),
+      deleteDueManagedAccounts(this.env, now),
     ]);
     for (const result of results) {
       if (result.status === 'rejected') {
@@ -136,4 +140,22 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
       }
     }
   }
+}
+
+/**
+ * Managed accounts a directory removed 30 days ago and nobody reactivated (DESIGN §4.18): deleted
+ * like any account, and every service is told.
+ */
+async function deleteDueManagedAccounts(env: Env, now: number): Promise<void> {
+  const oauth = authorizationServer(env).getOAuthApi(env);
+  for (const userId of await dueDeletions(env.DB, now)) {
+    const org = await env.DB.prepare('SELECT managed_by FROM users WHERE id = ?')
+      .bind(userId)
+      .first<{ managed_by: string | null }>();
+    await deleteAccount(env.DB, oauth, userId, now, null);
+    await audit(env.DB, now, 'org.account_deletion_due', {
+      detail: { org: org?.managed_by ?? null },
+    });
+  }
+  await deliverDeletionNotices(env, now);
 }
