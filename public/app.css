@@ -1946,3 +1946,30 @@ code {
 .plain-list li + li {
   margin-top: 0.375rem;
 }
+
+/* Security rules (DESIGN §4.19): groups of checkboxes. */
+.choices {
+  margin: 0 0 1.25rem;
+  padding: 0;
+  border: 0;
+}
+
+.choices legend {
+  margin: 0 0 0.5rem;
+  padding: 0;
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.choices .confirm {
+  margin: 0 0 0.5rem;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.field .hint {
+  font-size: 0.8125rem;
+}

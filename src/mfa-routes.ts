@@ -165,6 +165,7 @@ export function registerMfaRoutes(app: Hono<AppEnv>, deps: Deps): void {
       recoveryRemaining: await remainingRecoveryCodes(c.env.DB, session.user.id),
       mfaRequired: mfaRequired(c.env),
       mustEnrol: mfaGate(c.env, session) === 'enrol',
+      enrolReason: enrolReason(c.env, session),
       next: returnTo ? safeReturnTo(returnTo) : '/account',
       ...(notice ? { notice } : {}),
       ...extra,
@@ -346,6 +347,18 @@ export function registerMfaRoutes(app: Hono<AppEnv>, deps: Deps): void {
         400,
       );
     }
+    // The managing organization's rules (DESIGN §4.19).
+    const policy = session.user.policy;
+    const remaining = factors.filter((f) => f.id !== factorId);
+    const refusal =
+      policy?.passkeysOnly && !remaining.some((f) => f.kind === 'webauthn')
+        ? `“${policy.orgName}” requires a passkey. Add another one before removing this one.`
+        : policy?.requireFactor && remaining.length === 0
+          ? `“${policy.orgName}” requires a second factor. Add another one before removing this one.`
+          : null;
+    if (refusal && factors.some((f) => f.id === factorId)) {
+      return mfaHtml(await securityHtml(c, session, { error: refusal }), 400);
+    }
     const kind = factors.find((f) => f.id === factorId)?.kind;
     if (await removeFactor(c.env.DB, session.user.id, factorId)) {
       await audit(c.env.DB, now, 'mfa.removed', {
@@ -453,7 +466,8 @@ export function registerMfaRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const returnTo = safeReturnTo(c.req.query('return_to'));
     const stepUp = c.req.query('step_up') === '1';
     const gate = mfaGate(c.env, session);
-    if (gate === 'enrol')
+    // A step-up still comes here when the account must add a passkey (DESIGN §4.19).
+    if (gate === 'enrol' && !(stepUp && session.hasFactor))
       return c.redirect(`/account/security?return_to=${encodeURIComponent(returnTo)}`, 303);
     if (!session.hasFactor || (gate === null && !stepUp)) return c.redirect(returnTo, 303);
     return mfaHtml(await challengeHtml(c, session, returnTo, stepUp));
@@ -565,6 +579,16 @@ export function registerMfaRoutes(app: Hono<AppEnv>, deps: Deps): void {
     if (await lockedUntil(c.env.DB, session.user.id, now)) {
       return mfaHtml(await challengeHtml(c, session, returnTo, stepUp), 429);
     }
+    // An organization that requires passkeys: once the account has one, it's the one to use.
+    const policy = session.user.policy;
+    if (policy?.passkeysOnly && session.hasPasskey) {
+      return mfaHtml(
+        await challengeHtml(c, session, returnTo, stepUp, {
+          error: `“${policy.orgName}” requires a passkey. Use your passkey, or a recovery code.`,
+        }),
+        403,
+      );
+    }
 
     const totp = await getTotp(c.env.DB, session.user.id);
     const step = totp
@@ -675,4 +699,16 @@ async function recentSecurityEvents(db: D1Database, userId: string, now: number)
     method: r.method,
     client: null,
   }));
+}
+
+/** Why the account must add a factor, in words (DESIGN §4.7, §4.19). */
+function enrolReason(env: Env, session: Session): string {
+  const policy = session.user.policy;
+  if (policy?.passkeysOnly && !session.hasPasskey) {
+    return `“${policy.orgName}” manages this account and requires a passkey. Add one to continue.`;
+  }
+  if (policy?.requireFactor && !session.hasFactor) {
+    return `“${policy.orgName}” manages this account and requires a second factor. Add one to continue.`;
+  }
+  return '2earl requires a second factor. Add one to continue to your account.';
 }

@@ -73,6 +73,7 @@ import {
   startSession,
 } from './sign-in';
 import { adoptNewAccount, managerOf } from './managed';
+import { networkAllowed } from './org-policy';
 import {
   accountWithEmail,
   addGoogleIdentity,
@@ -295,15 +296,19 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       await next();
       return;
     }
-    c.set(
-      'session',
-      await getSession(
-        c.env.DB,
-        c.env.SESSION_PEPPER,
-        deps.now(),
-        readCookie(c.req.header('Cookie'), SESSION_COOKIE),
-      ),
+    let session = await getSession(
+      c.env.DB,
+      c.env.SESSION_PEPPER,
+      deps.now(),
+      readCookie(c.req.header('Cookie'), SESSION_COOKIE),
     );
+    // The managing organization's networks (DESIGN §4.19): elsewhere the session ends.
+    const policy = session?.user.policy;
+    if (session && policy && !networkAllowed(policy, c.req.header('CF-Connecting-IP') ?? null)) {
+      await deleteSession(c.env.DB, session.idHash);
+      session = null;
+    }
+    c.set('session', session);
     await next();
   });
 

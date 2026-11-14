@@ -13,6 +13,13 @@ import {
   type InvitationView,
 } from './orgs';
 import { challengeRecordName, type OrgDomain } from './org-domains';
+import {
+  MAX_RANGES,
+  POLICY_METHODS,
+  SESSION_HOURS,
+  type OrgPolicy,
+  type PolicyMethod,
+} from './org-policy';
 import { escapeHtml, formatDate, formatDateTime, page } from './pages';
 import type { ScimTokenInfo } from './scim';
 
@@ -317,6 +324,7 @@ const ACTIVITY: Record<string, (e: ActivityEntry) => string> = {
     `${e.detail.enabled ? 'turned on' : 'saved, turned off,'} single sign-on`,
   'org.domain_managed': (e) => `started managing the accounts at ${str(e.detail.domain, '')}`,
   'org.domain_unmanaged': (e) => `stopped managing the accounts at ${str(e.detail.domain, '')}`,
+  'org.policy_changed': () => 'changed the security rules for managed accounts',
   'org.require_sso_changed': (e) =>
     `${e.detail.on ? 'required' : 'stopped requiring'} single sign-on for managed accounts`,
   'org.account_managed': (e) =>
@@ -462,6 +470,7 @@ export function directoryPage(params: {
   provisioned: { active: number; waiting: number; inactive: number };
   saml: { idpEntityId: string; ssoUrl: string; certificate: string; enabled: boolean } | null;
   managed: { managed: number; deactivated: number; requireSso: boolean };
+  policy: OrgPolicy;
   newToken?: string;
   notice?: string | undefined;
   error?: string | undefined;
@@ -532,6 +541,11 @@ export function directoryPage(params: {
         : '<p class="note">Verify a domain first.</p>') +
       '</section>' +
       managedSection(base, params.domains, params.managed, params.saml?.enabled === true) +
+      policySection(
+        base,
+        params.policy,
+        params.domains.some((d) => d.managedAt !== null),
+      ) +
       samlSection(base, params.issuer, params.org.id, verified, params.saml),
     { section: 'Organization' },
   );
@@ -579,6 +593,62 @@ function managedSection(
             '<div class="consent-actions"><button class="button secondary" type="submit">Save</button></div></form>'
           : `<p class="note">${counts.requireSso ? 'Required, but single sign-on is off, so it doesn’t apply. ' : ''}Turn on single sign-on below first.</p>`)
       : '<p class="note">Verify a domain first.</p>') +
+    '</section>'
+  );
+}
+
+/** Security rules for managed accounts (DESIGN §4.19). */
+function policySection(base: string, policy: OrgPolicy, managing: boolean): string {
+  const check = (name: string, on: boolean, label: string, hint: string) =>
+    `<label class="confirm"><input type="checkbox" name="${name}" value="1"${on ? ' checked' : ''}>` +
+    `<span><strong>${label}</strong><br><span class="hint">${hint}</span></span></label>`;
+  const methodLabel: Record<PolicyMethod, string> = {
+    google: 'Google',
+    email: 'A code by email',
+    passkey: 'A passkey',
+  };
+  const hours = (h: number) => (h < 24 ? `${String(h)} hours` : `${String(h / 24)} days`);
+  return (
+    '<section class="section" aria-labelledby="rules-heading">' +
+    '<h2 id="rules-heading">Security rules</h2>' +
+    '<p class="section-text">For the accounts you manage. Owners keep every way in and every network, so a broken identity provider or a new office network can’t lock you out; the second-factor rules and the session length apply to them too.</p>' +
+    (managing
+      ? `<form method="post" action="${base}/policy" class="stack-form">` +
+        '<fieldset class="choices"><legend>Second factor</legend>' +
+        check(
+          'require_factor',
+          policy.requireFactor,
+          'Require a second factor',
+          'People without one add a passkey or an authenticator app before going on.',
+        ) +
+        check(
+          'passkeys_only',
+          policy.passkeysOnly,
+          'Require a passkey',
+          'Phishing-resistant. Authenticator-app codes stop counting once someone has a passkey; recovery codes still work.',
+        ) +
+        '</fieldset>' +
+        '<fieldset class="choices"><legend>Ways to sign in</legend>' +
+        '<p class="hint">Single sign-on is always allowed while it’s on.</p>' +
+        POLICY_METHODS.map(
+          (m) =>
+            `<label class="confirm"><input type="checkbox" name="methods" value="${m}"${policy.methods.includes(m) ? ' checked' : ''}><span>${methodLabel[m]}</span></label>`,
+        ).join('') +
+        '</fieldset>' +
+        '<label class="field"><span>Sessions last</span>' +
+        '<select name="session_hours">' +
+        `<option value=""${policy.sessionHours === null ? ' selected' : ''}>7 days (2earl’s default)</option>` +
+        SESSION_HOURS.map(
+          (h) =>
+            `<option value="${String(h)}"${policy.sessionHours === h ? ' selected' : ''}>${hours(h)}</option>`,
+        ).join('') +
+        '</select><span class="hint">Counted from sign-in. Sessions end after 12 hours unused in any case.</span></label>' +
+        '<label class="field"><span>Allowed networks</span>' +
+        `<textarea name="ip_ranges" rows="3" spellcheck="false" placeholder="203.0.113.0/24&#10;2001:db8::/32">${escapeHtml(policy.ipRanges.join('\n'))}</textarea>` +
+        `<span class="hint">One range per line (IPv4 or IPv6, CIDR), up to ${String(MAX_RANGES)}. Empty: anywhere. Apps that people connected keep working elsewhere.</span></label>` +
+        '<div class="consent-actions"><button class="button secondary" type="submit">Save rules</button></div>' +
+        '</form>'
+      : '<p class="note">Manage the accounts at a domain first.</p>') +
     '</section>'
   );
 }

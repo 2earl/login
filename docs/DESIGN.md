@@ -966,6 +966,33 @@ controller and 2earl processes the account for it; the privacy policy says so, a
 accept 2earl's data processing terms when they turn managing on. Until someone chooses, the
 organization learns nothing about accounts at its domain: no names, no count.
 
+### 4.19 Security rules for managed accounts (phase 10b)
+
+An organization sets rules for the accounts it manages (§4.18) on Domains & SSO
+(`/orgs/:id/directory`; owners, with a recent proof). `org_policies`, `src/org-policy.ts`.
+
+| Rule | Effect | Owners |
+|---|---|---|
+| **Require a second factor** | An account without one adds one before going on (the `enrol` gate, as with `MFA_REQUIRED`) | Apply |
+| **Require a passkey** | An account without a passkey passes the challenge with what it has, then adds a passkey. Once it has one, authenticator-app codes are refused; recovery codes still work. The last passkey can't be removed | Apply |
+| **Session length** (1, 8, 12, 24 or 72 hours) | Sessions end that long after sign-in. The 12-hour idle limit and the 7-day maximum stay | Apply |
+| **Ways to sign in** (Google, email code, passkey) | Sign-in another way is refused with the organization's name; sessions started another way end. SSO is always allowed while it's on; at least one way, or SSO, must stay | Exempt |
+| **Allowed networks** (up to 50 IPv4 or IPv6 ranges, nothing wider than /8 or /16) | Sign-in from elsewhere is refused; a session used from elsewhere ends. The address is compared and not stored | Exempt |
+
+**Owners are exempt from the ways in and the networks** for the same reason as from required SSO
+(§4.18): a broken identity provider, a removed sign-in method or a new office network must not
+lock the organization out. The factor rules and the session length make an owner's own access
+stronger, so they apply to owners too.
+
+**Where they're checked.** At every sign-in (`signInRefusal`), and on every request: the session
+lookup reads the rules with the session, ends sessions that are too old or started a way no longer
+allowed, and the session middleware ends sessions used from another network. Rules apply from each
+person's next request; nothing is sent.
+
+**Not covered.** Access tokens that apps already hold are used from wherever those apps run, so
+networks don't apply to them; their lifetimes (§4.4) and deactivation (§4.18) do. Accounts the
+organization doesn't manage never get its rules.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -1071,8 +1098,10 @@ org_members      (org_id FK, user_id FK) PK, role (owner|admin|member), joined_a
 org_invitations  id PK ('inv_…'), token_hash UNIQUE (HMAC), org_id FK, email, role
                  (admin|member), invited_by FK NULL, created_at, expires_at  (≤ 7 days)
 org_deletion_notices (service, org_id) PK, created_at, attempts, last_attempt_at, last_error
-org_domains      (org_id FK, domain) PK, challenge, verified_at NULL, created_at
-                 UNIQUE(domain) WHERE verified                       (§4.16)
+org_domains      (org_id FK, domain) PK, challenge, verified_at NULL, created_at,
+                 managed_at NULL (§4.18); UNIQUE(domain) WHERE verified (§4.16)
+org_policies     org_id PK FK, require_factor, passkeys_only, session_hours NULL, methods,
+                 ip_ranges, updated_at                               (§4.19)
 scim_tokens      id PK ('st_…'), org_id FK, token_hash UNIQUE (SHA-256), created_at, last_used_at
 scim_users       id PK ('scu_…'), org_id FK, user_name, external_id, display_name, given_name,
                  family_name, active, user_id FK NULL (SET NULL), created_at, updated_at,
@@ -1294,6 +1323,7 @@ Resolved:
 | 9c | **SAML 2.0**: organizations sign in through their own identity provider (§4.17) |
 | 9d | **DPoP and PAR** (§4.15) |
 | 10a | **Accounts an organization manages** (§4.18): managed domains, deactivation, required SSO |
+| 10b | **Security rules for managed accounts** (§4.19): second factor, passkeys, session length, ways in, networks |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 

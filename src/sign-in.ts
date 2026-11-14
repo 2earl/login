@@ -2,6 +2,13 @@ import { deleteAccount } from './account';
 import type { OwnershipPlan } from './orgs';
 import { claimProvisioned } from './scim';
 import { managerOf, ssoRequiredBy } from './managed';
+import { methodAllowed, networkAllowed, policyFor, type PolicyMethod } from './org-policy';
+
+const METHOD_LABEL: Record<PolicyMethod, string> = {
+  google: 'Google',
+  email: 'a code by email',
+  passkey: 'a passkey',
+};
 import { audit } from './audit';
 import { sha256Hex } from './crypto';
 import { deliverDeletionNotices } from './deletion-notices';
@@ -60,17 +67,35 @@ export async function openSession(
 
 /**
  * Why this account can't sign in this way, if it can't: its organization requires single sign-on
- * (DESIGN §4.18). Checked before every sign-in that isn't SAML; sessions are checked again on
- * every request.
+ * (DESIGN §4.18), or its rules don't allow this way in or this network (§4.19). Checked before
+ * every sign-in, SAML included for networks; sessions are checked again on every request.
  */
 export async function signInRefusal(
   c: AppContext,
   userId: string,
   method: SignInMethod,
 ): Promise<Message | null> {
+  // The organization's rules (DESIGN §4.19): which networks, which ways in.
+  const policy = await policyFor(c.env.DB, userId);
+  if (policy && !networkAllowed(policy, c.req.header('CF-Connecting-IP') ?? null)) {
+    return {
+      title: 'Not from this network',
+      body: `${policy.orgName} manages this account and allows it only from its own networks. Connect to one of them (for example your company’s VPN), then sign in again.`,
+      action: { href: '/login', label: 'Back to sign-in' },
+    };
+  }
   if (method === 'saml') return null;
   const org = await ssoRequiredBy(c.env.DB, userId);
-  if (!org) return null;
+  if (!org) {
+    if (policy && !methodAllowed(policy, method)) {
+      return {
+        title: 'Sign in another way',
+        body: `${policy.orgName} manages this account and doesn’t allow signing in this way. Use one it allows${policy.methods.length > 0 ? ` (${policy.methods.map((m) => METHOD_LABEL[m]).join(', ')})` : ''}, or its single sign-on.`,
+        action: { href: '/login', label: 'Back to sign-in' },
+      };
+    }
+    return null;
+  }
   return {
     title: 'Sign in with single sign-on',
     body: `${org.name} manages this account and asks you to sign in through its single sign-on. Choose “Sign in with your organization (SSO)” and enter your work address.`,

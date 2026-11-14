@@ -1,5 +1,6 @@
 import { hmacHex, randomToken } from './crypto';
 import { SSO_REQUIRED_SQL } from './managed';
+import { methodAllowed, policyFromRow, type SessionPolicy } from './org-policy';
 
 /** DESIGN §7: 12 h idle, 7 days absolute. */
 export const SESSION_IDLE_SECONDS = 12 * 60 * 60;
@@ -19,6 +20,8 @@ export interface SessionUser {
    * choose before going on (`/account/managed`).
    */
   mustChoose: boolean;
+  /** The managing organization's security rules (DESIGN §4.19), if it set any. */
+  policy: SessionPolicy | null;
 }
 
 export interface Session {
@@ -28,6 +31,8 @@ export interface Session {
   aal2At: number | null;
   /** Whether the user has enrolled a second factor. */
   hasFactor: boolean;
+  /** A passkey is among the second factors. */
+  hasPasskey: boolean;
   /** How this session signed in (null for sessions from before phase 8a). */
   method: SignInMethod | null;
   createdAt: number;
@@ -102,6 +107,12 @@ export async function getSession(
               u.id AS user_id, u.status, u.display_name, u.primary_email, u.created_at AS user_created_at,
               u.managed_by,
               EXISTS (SELECT 1 FROM mfa_factors f WHERE f.user_id = u.id) AS has_factor,
+              EXISTS (SELECT 1 FROM mfa_factors f WHERE f.user_id = u.id AND f.kind = 'webauthn') AS has_passkey,
+              -- The managing organization's rules (DESIGN §4.19); owners are exempt from some.
+              p.require_factor, p.passkeys_only, p.session_hours, p.methods, p.ip_ranges,
+              po.name AS policy_org_name,
+              EXISTS (SELECT 1 FROM org_members m
+                      WHERE m.org_id = u.managed_by AND m.user_id = u.id AND m.role = 'owner') AS policy_exempt,
               -- Required SSO (DESIGN §4.18): a session started another way ends.
               (s.method IS NOT 'saml' AND ${SSO_REQUIRED_SQL}) AS sso_violation,
               EXISTS (SELECT 1 FROM identities i
@@ -111,6 +122,8 @@ export async function getSession(
                       WHERE i.user_id = u.id AND i.email_verified = 1
                         AND d.org_id IS NOT u.managed_by) AS must_choose
        FROM sessions s JOIN users u ON u.id = s.user_id
+       LEFT JOIN organizations po ON po.id = u.managed_by AND po.status = 'active'
+       LEFT JOIN org_policies p ON p.org_id = po.id
        WHERE s.id_hash = ?`,
     )
     .bind(idHash)
@@ -119,6 +132,14 @@ export async function getSession(
       aal2_at: number | null;
       method: SignInMethod | null;
       has_factor: number;
+      has_passkey: number;
+      require_factor: number | null;
+      passkeys_only: number | null;
+      session_hours: number | null;
+      methods: string | null;
+      ip_ranges: string | null;
+      policy_org_name: string | null;
+      policy_exempt: number;
       created_at: number;
       last_seen_at: number;
       expires_at: number;
@@ -133,8 +154,32 @@ export async function getSession(
     }>();
   if (!row) return null;
 
-  const expired = row.expires_at <= now || row.last_seen_at + SESSION_IDLE_SECONDS <= now;
-  if (expired || row.status !== 'active' || row.sso_violation === 1) {
+  const policy: SessionPolicy | null =
+    row.methods !== null && row.managed_by !== null && row.policy_org_name !== null
+      ? {
+          ...policyFromRow({
+            require_factor: row.require_factor ?? 0,
+            passkeys_only: row.passkeys_only ?? 0,
+            session_hours: row.session_hours,
+            methods: row.methods,
+            ip_ranges: row.ip_ranges ?? '',
+          }),
+          orgId: row.managed_by,
+          orgName: row.policy_org_name,
+          exempt: row.policy_exempt === 1,
+        }
+      : null;
+  const expired =
+    row.expires_at <= now ||
+    row.last_seen_at + SESSION_IDLE_SECONDS <= now ||
+    // The organization's session length (DESIGN §4.19), counted from sign-in.
+    (policy?.sessionHours != null && row.created_at + policy.sessionHours * 3600 <= now);
+  if (
+    expired ||
+    row.status !== 'active' ||
+    row.sso_violation === 1 ||
+    (policy !== null && !methodAllowed(policy, row.method))
+  ) {
     await db.prepare('DELETE FROM sessions WHERE id_hash = ?').bind(idHash).run();
     return null;
   }
@@ -151,6 +196,7 @@ export async function getSession(
     aal: row.aal,
     aal2At: row.aal2_at,
     hasFactor: row.has_factor === 1,
+    hasPasskey: row.has_passkey === 1,
     method: row.method,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
@@ -161,6 +207,7 @@ export async function getSession(
       createdAt: row.user_created_at,
       managedBy: row.managed_by,
       mustChoose: row.must_choose === 1,
+      policy,
     },
   };
 }
