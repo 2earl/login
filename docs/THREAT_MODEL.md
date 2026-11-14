@@ -301,6 +301,17 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | K5 | Key guessing | 256-bit keys; rate limit per address |
 | K6 | An admin mints keys | Only owners, with a recent proof (tested) |
 
+### U — Single sign-on that keeps working (DESIGN §4.25, phase 10h)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| U1 | The start link used for login CSRF | It only starts login's own request; the state is bound to this browser, and the provider authenticates the person (tested). An `iss` other than the organization's issuer is refused (tested) |
+| U2 | The start link as an open redirect | `target_link_uri` is followed only to pages of login, through the usual return-to checks (tested) |
+| U3 | A next certificate lets someone else sign | Only owners set it, with a recent proof, like the first; any other key is refused (tested); the change is in the activity |
+| U4 | The SSO-first page tells which addresses have accounts | It depends only on the domain (tested) |
+| U5 | Expiry warnings used to spam | Owners only, each threshold once (tested); the text is fixed, with the organization's name |
+| U6 | An admin signs an owner out | Admins can't act on owners, and the API never does (tested) |
+
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
 
 | # | Threat | Mitigation |

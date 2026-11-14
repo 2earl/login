@@ -78,6 +78,7 @@ comes back. Events of the last few seconds appear on the next call.
 | `POST /members/{id}/role` | `{ "role": "admin" }` or `"member"` | Changes the role. `409 directory` when the directory decides it (DESIGN §4.21) |
 | `POST /members/{id}/deactivate` | none | A managed account can't sign in; sessions and app access end. `409 not_managed` otherwise |
 | `POST /members/{id}/reactivate` | none | Lifts the organization's deactivation |
+| `POST /members/{id}/sign-out` | none | Signs a managed account out everywhere: sessions and app access end, the account stays active. `409 not_managed` otherwise |
 | `POST /members/{id}/remove` | none | Removes a member the organization doesn't manage. `409 managed` for managed accounts: deactivate them |
 
 Every change is in the organization's activity, with `"via": "api"` and the key's ID.

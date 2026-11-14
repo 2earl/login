@@ -445,3 +445,37 @@ export async function managedCounts(
     .first<{ managed: number; deactivated: number | null }>();
   return { managed: row?.managed ?? 0, deactivated: row?.deactivated ?? 0 };
 }
+
+/**
+ * Whether accounts at this address's domain must sign in with single sign-on: the domain is
+ * managed by an active organization that requires it and has it on (DESIGN §4.25). By domain,
+ * not by account, so asking reveals nothing about who has one.
+ */
+export async function ssoRequiredAtDomain(db: D1Database, email: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 AS ok FROM org_domains d
+       JOIN organizations o ON o.id = d.org_id AND o.status = 'active' AND o.require_sso = 1
+       WHERE d.domain = ? AND d.verified_at IS NOT NULL AND d.managed_at IS NOT NULL
+         AND ${ssoOnSql('o.id')}`,
+    )
+    .bind(domainOf(email))
+    .first<{ ok: number }>();
+  return row !== null;
+}
+
+/**
+ * Signs a managed account out everywhere: every session ends and every app's access is revoked;
+ * the account stays active (DESIGN §4.25). For a lost laptop, without locking the person out.
+ */
+export async function signOutEverywhere(
+  db: D1Database,
+  oauth: OAuthHelpers,
+  userId: string,
+  orgId: string,
+): Promise<boolean> {
+  if (!(await isManagedBy(db, userId, orgId))) return false;
+  await db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run();
+  await revokeAllGrants(oauth, userId);
+  return true;
+}

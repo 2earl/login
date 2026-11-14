@@ -22,6 +22,8 @@ export interface OrgOidc {
   clientId: string;
   /** Encrypted with MFA_ENCRYPTION_KEY, bound to the organization. */
   clientSecretEnc: string;
+  /** When the client secret expires, if the owner said (§4.25). */
+  secretExpiresAt: number | null;
   enabled: boolean;
 }
 
@@ -40,7 +42,7 @@ const secretContext = (orgId: string) => `oidc-client-secret:${orgId}`;
 export async function oidcConfig(db: D1Database, orgId: string): Promise<OrgOidc | null> {
   const row = await db
     .prepare(
-      `SELECT x.org_id, x.issuer, x.client_id, x.client_secret_enc, x.enabled
+      `SELECT x.org_id, x.issuer, x.client_id, x.client_secret_enc, x.secret_expires_at, x.enabled
        FROM org_oidc x JOIN organizations o ON o.id = x.org_id AND o.status = 'active'
        WHERE x.org_id = ?`,
     )
@@ -50,6 +52,7 @@ export async function oidcConfig(db: D1Database, orgId: string): Promise<OrgOidc
       issuer: string;
       client_id: string;
       client_secret_enc: string;
+      secret_expires_at: number | null;
       enabled: number;
     }>();
   return row
@@ -58,6 +61,7 @@ export async function oidcConfig(db: D1Database, orgId: string): Promise<OrgOidc
         issuer: row.issuer,
         clientId: row.client_id,
         clientSecretEnc: row.client_secret_enc,
+        secretExpiresAt: row.secret_expires_at,
         enabled: row.enabled === 1,
       }
     : null;
@@ -68,18 +72,33 @@ export async function saveOidc(
   env: Env,
   now: number,
   orgId: string,
-  input: { issuer: string; clientId: string; clientSecret: string | null; enabled: boolean },
+  input: {
+    issuer: string;
+    clientId: string;
+    clientSecret: string | null;
+    secretExpiresAt: number | null;
+    enabled: boolean;
+  },
 ): Promise<void> {
   const sealed = input.clientSecret
     ? await encryptSecret(env.MFA_ENCRYPTION_KEY, secretContext(orgId), input.clientSecret)
     : null;
   const statements = [
     env.DB.prepare(
-      `INSERT INTO org_oidc (org_id, issuer, client_id, client_secret_enc, enabled, created_at, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+      `INSERT INTO org_oidc (org_id, issuer, client_id, client_secret_enc, secret_expires_at, enabled, created_at, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?7, ?5, ?6, ?6)
        ON CONFLICT (org_id) DO UPDATE SET issuer = ?2, client_id = ?3,
-         client_secret_enc = COALESCE(?4, client_secret_enc), enabled = ?5, updated_at = ?6`,
-    ).bind(orgId, input.issuer, input.clientId, sealed, input.enabled ? 1 : 0, now),
+         client_secret_enc = COALESCE(?4, client_secret_enc), secret_expires_at = ?7,
+         expiry_notice = NULL, enabled = ?5, updated_at = ?6`,
+    ).bind(
+      orgId,
+      input.issuer,
+      input.clientId,
+      sealed,
+      input.enabled ? 1 : 0,
+      now,
+      input.secretExpiresAt,
+    ),
   ];
   // One way of single sign-on at a time (DESIGN §4.20).
   if (input.enabled) {
@@ -174,7 +193,7 @@ export async function authorizeRequest(
   discovery: Discovery,
   config: OrgOidc,
   redirectUri: string,
-  loginHint: string,
+  loginHint: string | null,
 ): Promise<OidcRequest> {
   const state = randomToken(32);
   const nonce = randomToken(32);
@@ -190,7 +209,7 @@ export async function authorizeRequest(
     code_challenge: await pkceChallenge(verifier),
     code_challenge_method: 'S256',
     // The person's work address, so the provider can skip asking for it.
-    login_hint: loginHint,
+    ...(loginHint ? { login_hint: loginHint } : {}),
   }).toString();
   return { url: url.toString(), state, nonce, verifier };
 }

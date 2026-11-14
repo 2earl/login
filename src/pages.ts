@@ -1249,3 +1249,28 @@ export function ssoPage(params: {
       `<p class="note"><a href="${escapeHtml(withReturn('/login', params.returnTo))}">Sign in another way</a></p>`,
   );
 }
+
+/**
+ * An address at a domain whose organization requires single sign-on (DESIGN §4.25): offered the
+ * organization's sign-in first. The same for every address at the domain, so nothing about the
+ * account is revealed; owners, who are exempt, can still ask for a code.
+ */
+export function ssoFirstPage(params: { email: string; returnTo: string | null }): string {
+  const domain = params.email.slice(params.email.lastIndexOf('@') + 1);
+  return page(
+    'Single sign-on',
+    '<h1>Sign in with your organization</h1>' +
+      `<p class="lede">Accounts at ${escapeHtml(domain)} sign in through their organization’s single sign-on.</p>` +
+      '<form method="post" action="/login/sso" class="email-form">' +
+      returnField(params.returnTo) +
+      `<input type="hidden" name="email" value="${escapeHtml(params.email)}">` +
+      '<button class="button primary wide" type="submit">Continue with single sign-on</button>' +
+      '</form>' +
+      '<form method="post" action="/login/email" class="email-form">' +
+      returnField(params.returnTo) +
+      `<input type="hidden" name="email" value="${escapeHtml(params.email)}">` +
+      '<input type="hidden" name="code" value="1">' +
+      '<p class="note">An owner of the organization? <button class="link-button" type="submit">Send me a code instead</button></p>' +
+      '</form>',
+  );
+}

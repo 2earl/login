@@ -359,6 +359,32 @@ describe('SAML sign-in', () => {
     ).toBe(404);
   });
 
+  it('accepts the next signing certificate too, so the provider can switch (§4.25)', async () => {
+    await person('bob');
+    const next = await newIdpKey();
+    const stranger = await newIdpKey();
+    await post(ada.session, `/orgs/${orgId}/saml`, {
+      idp_entity_id: IDP_ENTITY,
+      sso_url: IDP_SSO,
+      certificate: idp.publicKey,
+      certificate_next: next.publicKey,
+      enabled: 'on',
+    });
+    for (const [key, status] of [
+      [idp.privateKey, 303],
+      [next.privateKey, 303],
+      [stranger.privateKey, 400],
+    ] as const) {
+      const { cookie, relayState, requestId } = await startSso('bob@example.com');
+      const done = await finish(
+        cookie,
+        relayState,
+        samlResponse({ requestId, email: 'bob@example.com', key }),
+      );
+      expect(done.status).toBe(status);
+    }
+  });
+
   it('settings need an https URL and a certificate, from an owner', async () => {
     expect(signingKeyPem('not a certificate')).toBeNull();
     expect(signingKeyPem(idp.publicKey)).toContain('-----BEGIN PUBLIC KEY-----');

@@ -540,6 +540,8 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'org.accounts_released': 'Managed accounts released',
   'org.account_deactivated': 'Organization deactivated an account',
   'org.account_reactivated': 'Organization reactivated an account',
+  'org.account_signed_out': 'Organization signed an account out everywhere',
+  'org.sso_expiry_warned': 'Owners warned that SSO credentials expire',
   'org.account_deleted': 'Organization deleted an account',
   'org.account_deletion_due': 'Scheduled deletion of a managed account',
   'scim.account_created': 'Directory created a managed account',

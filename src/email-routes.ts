@@ -32,13 +32,14 @@ import {
   emailLinkPage,
   messagePage,
   signInPage,
+  ssoFirstPage,
   welcomePage,
   type Message,
 } from './pages';
 import { safeReturnTo } from './return-to';
 import { signupMode } from './settings';
 import { finishDeletion, notifyLater, signInRefusal, startSession } from './sign-in';
-import { adoptNewAccount } from './managed';
+import { adoptNewAccount, ssoRequiredAtDomain } from './managed';
 import {
   accountWithEmail,
   addEmailIdentity,
@@ -119,6 +120,10 @@ export function registerEmailRoutes(app: Hono<AppEnv>, deps: Deps): void {
         }),
         400,
       );
+    }
+    // A domain whose organization requires single sign-on: its sign-in first (DESIGN §4.25).
+    if (form.get('code') !== '1' && (await ssoRequiredAtDomain(c.env.DB, email))) {
+      return c.html(ssoFirstPage({ email, returnTo }));
     }
     // The same answer whether or not the address has an account: nothing is revealed here.
     return sendCode(c, deps.now(), { email, purpose: 'sign_in', returnTo });

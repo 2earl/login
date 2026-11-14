@@ -26,6 +26,7 @@ import type { ScimTokenInfo } from './scim';
 import type { GroupSummary } from './scim-groups';
 import type { AuditStream } from './org-audit';
 import { MAX_KEYS, type ApiKeyInfo } from './org-api';
+import { dateValue } from './sso-upkeep';
 
 /** Server-rendered pages for organizations (DESIGN §4.14). Every value is escaped. */
 
@@ -163,6 +164,11 @@ function memberRow(
         (canRemove(actor.role, member.role)
           ? member.managed
             ? // A managed account is deactivated, not removed (DESIGN §4.18).
+              (member.deactivated
+                ? ''
+                : `<form method="post" action="${base}/members/sign-out">` +
+                  hidden({ user: member.userId }) +
+                  `<button class="button secondary small" type="submit" aria-label="Sign ${who} out everywhere">Sign out everywhere</button></form>`) +
               `<form method="post" action="${base}/members/${member.deactivated ? 'reactivate' : 'deactivate'}">` +
               hidden({ user: member.userId }) +
               `<button class="button secondary small" type="submit">${member.deactivated ? 'Reactivate' : 'Deactivate'}</button></form>` +
@@ -441,6 +447,9 @@ const ACTIVITY: Record<string, (e: ActivityEntry) => string> = {
     `${String(typeof e.detail.count === 'number' ? e.detail.count : 'some')} managed accounts became personal again`,
   'org.account_deactivated': (e) => `deactivated ${e.target ?? 'an account'}`,
   'org.account_reactivated': (e) => `reactivated ${e.target ?? 'an account'}`,
+  'org.account_signed_out': (e) => `signed ${e.target ?? 'an account'} out everywhere`,
+  'org.sso_expiry_warned': (e) =>
+    `told the owners that single sign-on’s ${e.detail.protocol === 'oidc' ? 'client secret' : 'certificate'} ${e.detail.days === 0 ? 'has expired' : `expires in ${String(e.detail.days)} ${e.detail.days === 1 ? 'day' : 'days'}`}`,
   'org.account_deleted': () => 'deleted a managed account',
   'org.account_deletion_due': () =>
     'deleted a managed account, 30 days after the directory removed it',
@@ -484,7 +493,11 @@ export function orgActivityPage(params: {
   const rows = params.entries
     .map((e) => {
       const what = ACTIVITY[e.event]?.(e) ?? e.event;
-      const who = e.event.startsWith('scim.') ? 'Directory sync' : (e.actor ?? 'Someone');
+      const who = e.event.startsWith('scim.')
+        ? 'Directory sync'
+        : e.event === 'org.sso_expiry_warned'
+          ? '2earl'
+          : (e.actor ?? 'Someone');
       return (
         '<li class="activity-row">' +
         `<time datetime="${new Date(e.at * 1000).toISOString()}">${escapeHtml(formatDateTime(e.at))}</time>` +
@@ -644,8 +657,9 @@ export function directoryPage(params: {
   domains: OrgDomain[];
   tokens: ScimTokenInfo[];
   provisioned: { active: number; waiting: number; inactive: number };
-  saml: { idpEntityId: string; ssoUrl: string; certificate: string; enabled: boolean } | null;
-  oidc: { issuer: string; clientId: string; enabled: boolean } | null;
+  saml: SamlView | null;
+  oidc: OidcView | null;
+  now: number;
   managed: { managed: number; deactivated: number; requireSso: boolean };
   policy: OrgPolicy;
   groups?: GroupSummary[];
@@ -716,7 +730,15 @@ export function directoryPage(params: {
         params.managed,
         params.saml?.enabled === true || params.oidc?.enabled === true,
       ) +
-      samlSection(base, params.issuer, params.org.id, verified, params.saml, params.oidc) +
+      samlSection(
+        base,
+        params.issuer,
+        params.org.id,
+        verified,
+        params.saml,
+        params.oidc,
+        params.now,
+      ) +
       '<section class="section" aria-labelledby="scim-heading">' +
       '<h2 id="scim-heading">Directory sync (SCIM 2.0)</h2>' +
       '<dl class="details">' +
@@ -1029,13 +1051,41 @@ function policySection(base: string, policy: OrgPolicy, managing: boolean): stri
   );
 }
 
+export interface SamlView {
+  idpEntityId: string;
+  ssoUrl: string;
+  certificate: string;
+  certificateNext: string | null;
+  certificateExpiresAt: number | null;
+  certificateNextExpiresAt: number | null;
+  enabled: boolean;
+}
+
+export interface OidcView {
+  issuer: string;
+  clientId: string;
+  secretExpiresAt: number | null;
+  enabled: boolean;
+}
+
+/** "Expires 19 December 2027", flagged when it's within 30 days or past. */
+function expiryText(at: number | null, now: number): string {
+  if (at === null) return '';
+  const date = formatDate(at);
+  if (at <= now) return `<span class="tag tag-alert">Expired ${escapeHtml(date)}</span>`;
+  if (at - now <= 30 * 86_400)
+    return `<span class="tag tag-alert">Expires ${escapeHtml(date)}</span>`;
+  return `<span class="tag tag-muted">Expires ${escapeHtml(date)}</span>`;
+}
+
 function samlSection(
   base: string,
   issuer: string,
   orgId: string,
   verified: boolean,
-  saml: { idpEntityId: string; ssoUrl: string; certificate: string; enabled: boolean } | null,
-  oidc: { issuer: string; clientId: string; enabled: boolean } | null,
+  saml: SamlView | null,
+  oidc: OidcView | null,
+  now: number,
 ): string {
   const sp = `${issuer}/saml/${encodeURIComponent(orgId)}`;
   const redirectUri = `${issuer}/sso/${encodeURIComponent(orgId)}/oidc`;
@@ -1060,6 +1110,9 @@ function samlSection(
     `<input name="client_id" type="text" required maxlength="300" autocomplete="off" spellcheck="false" value="${escapeHtml(oidc?.clientId ?? '')}"></label>` +
     '<label class="field"><span>Client secret</span>' +
     `<input name="client_secret" type="password" maxlength="500" autocomplete="off"${oidc ? ' placeholder="Saved: leave empty to keep it"' : ' required'}></label>` +
+    '<label class="field"><span>Client secret expires (optional)</span>' +
+    `<input name="secret_expires" type="date" value="${dateValue(oidc?.secretExpiresAt ?? null)}">` +
+    `<span class="hint">Entra ID’s secrets expire. Owners get an email 30, 7 and 1 days before. ${expiryText(oidc?.secretExpiresAt ?? null, now)}</span></label>` +
     `<label class="confirm"><input type="checkbox" name="enabled" value="on"${oidc?.enabled ? ' checked' : ''}><span>Let people sign in this way${saml?.enabled ? ' (turns SAML off)' : ''}</span></label>` +
     '<div class="consent-actions"><button class="button secondary" type="submit">Check and save</button></div>' +
     '</form></details>';
@@ -1079,8 +1132,11 @@ function samlSection(
     `<input name="idp_entity_id" type="text" required maxlength="500" autocomplete="off" spellcheck="false" value="${escapeHtml(saml?.idpEntityId ?? '')}"></label>` +
     '<label class="field"><span>Sign-in URL (HTTP-Redirect)</span>' +
     `<input name="sso_url" type="url" required maxlength="1000" autocomplete="off" spellcheck="false" value="${escapeHtml(saml?.ssoUrl ?? '')}"></label>` +
-    '<label class="field"><span>Signing certificate (PEM or base64)</span>' +
+    `<label class="field"><span>Signing certificate (PEM or base64) ${expiryText(saml?.certificateExpiresAt ?? null, now)}</span>` +
     `<textarea name="certificate" rows="6" required spellcheck="false">${escapeHtml(saml?.certificate ?? '')}</textarea></label>` +
+    `<label class="field"><span>Next signing certificate (optional) ${expiryText(saml?.certificateNextExpiresAt ?? null, now)}</span>` +
+    `<textarea name="certificate_next" rows="4" spellcheck="false">${escapeHtml(saml?.certificateNext ?? '')}</textarea>` +
+    '<span class="hint">When your provider announces a new certificate, paste it here: both are accepted, so sign-in keeps working when it switches. Owners get an email 30, 7 and 1 days before the certificates expire.</span></label>' +
     `<label class="confirm"><input type="checkbox" name="enabled" value="on"${saml?.enabled ? ' checked' : ''}><span>Let people sign in this way${oidc?.enabled ? ' (turns OpenID Connect off)' : ''}</span></label>` +
     '<div class="consent-actions"><button class="button secondary" type="submit">Save single sign-on</button></div>' +
     '</form></details>';
@@ -1088,7 +1144,9 @@ function samlSection(
     '<section class="section" aria-labelledby="saml-heading">' +
     '<h2 id="saml-heading">Single sign-on</h2>' +
     '<p class="section-text">People with an address at your verified domains sign in through your identity provider, with OpenID Connect or SAML 2.0: one at a time. A second factor they set up on 2earl is still asked for. Turning single sign-on off also lifts required single sign-on.</p>' +
-    `<dl class="details"><dt>Status</dt><dd>${status}</dd></dl>` +
+    `<dl class="details"><dt>Status</dt><dd>${status}</dd>` +
+    `<dt>Sign-in link for your app dashboard</dt><dd><code>${escapeHtml(issuer)}/sso/${escapeHtml(encodeURIComponent(orgId))}/start</code>` +
+    '<br><span class="hint">Entra ID: the application’s “Sign on URL”. Okta: “Initiate login URI”, or a bookmark app. It starts sign-in through your provider, so the 2earl tile in My Apps or the Okta dashboard works.</span></dd></dl>' +
     (verified ? oidcForm + samlForm : '<p class="note">Verify a domain first.</p>') +
     '</section>'
   );

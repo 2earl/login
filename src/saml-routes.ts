@@ -48,6 +48,31 @@ const SAML_TX_COOKIE = '__Host-saml_tx';
 const OIDC_TX_COOKIE = '__Host-oidc_tx';
 const RELAY_STATE = /^[A-Za-z0-9_-]{40,64}$/;
 
+/** What a launch link to an organization without single sign-on gets. */
+const SSO_NOT_ON: Message = {
+  title: 'Single sign-on isn’t on',
+  body: 'This organization doesn’t sign people in with single sign-on on 2earl. Sign in another way, or ask its admins.',
+  action: { href: '/login', label: 'Sign in' },
+};
+
+/**
+ * Where to go after a sign-in started from the provider: `target_link_uri` or `return_to`, if it
+ * is a page of login itself; otherwise the default.
+ */
+export function launchTarget(env: Env, query: Record<string, string>): string | null {
+  const raw = query.target_link_uri ?? query.return_to;
+  if (!raw) return null;
+  if (raw.startsWith('/')) return safeReturnTo(raw);
+  try {
+    const url = new URL(raw);
+    return url.origin === new URL(env.ISSUER).origin
+      ? safeReturnTo(url.pathname + url.search)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 const stateHash = (env: Env, relayState: string) =>
   hmacHex(env.SESSION_PEPPER, `saml-state:${relayState}`);
 const browserHash = (env: Env, cookie: string) =>
@@ -99,20 +124,54 @@ export function registerSamlRoutes(app: Hono<AppEnv>, deps: Deps): void {
         400,
       );
     const orgId = await ssoOrgForEmail(c.env.DB, email);
-    // OpenID Connect, when that's how the organization signs in (DESIGN §4.20).
-    const oidc = orgId ? await oidcConfig(c.env.DB, orgId) : null;
-    if (orgId && oidc?.enabled) return startOidc(c, orgId, oidc, email, returnTo);
-    const config = orgId ? await samlConfig(c.env.DB, orgId) : null;
-    if (!orgId || !config?.enabled) {
-      return c.html(
+    const started = orgId ? await startFor(c, orgId, email, returnTo) : null;
+    return (
+      started ??
+      c.html(
         ssoPage({
           returnTo,
           email,
           error: 'No organization signs in this address with single sign-on. Sign in another way.',
         }),
         404,
-      );
+      )
+    );
+  });
+
+  /**
+   * Single sign-on started from the identity provider: its app dashboard tile (Entra ID's "Sign on
+   * URL", Okta's "Initiate login URI") opens this, and login starts its own request, so nothing
+   * the provider sends unasked is ever accepted (THREAT_MODEL L3). OpenID Connect's third-party
+   * initiated login parameters: `iss` must be the organization's provider, `login_hint` is passed
+   * on, `target_link_uri` is where to go afterwards, if it's here (DESIGN §4.25).
+   */
+  app.get('/sso/:org/start', async (c) => {
+    if (!(await underRateLimit(c, 'login')))
+      return c.html(messagePage(MESSAGES.tooManyAttempts), 429);
+    const orgId = c.req.param('org');
+    const oidc = await oidcConfig(c.env.DB, orgId);
+    const iss = c.req.query('iss');
+    if (iss !== undefined && !(oidc?.enabled && iss.replace(/\/+$/, '') === oidc.issuer)) {
+      return fail(c, 'issuer_mismatch', orgId, MESSAGES.signInFailed, 400, 'oidc');
     }
+    const hint = c.req.query('login_hint');
+    const loginHint = hint ? normaliseEmail(hint) : null;
+    const started = await startFor(c, orgId, loginHint, launchTarget(c.env, c.req.query()));
+    return started ?? c.html(messagePage(SSO_NOT_ON), 404);
+  });
+
+  /** Starts the organization's single sign-on, whichever protocol is on; null if none is. */
+  async function startFor(
+    c: AppContext,
+    orgId: string,
+    loginHint: string | null,
+    returnTo: string | null,
+  ): Promise<Response | null> {
+    // OpenID Connect, when that's how the organization signs in (DESIGN §4.20).
+    const oidc = await oidcConfig(c.env.DB, orgId);
+    if (oidc?.enabled) return startOidc(c, orgId, oidc, loginHint, returnTo);
+    const config = await samlConfig(c.env.DB, orgId);
+    if (!config?.enabled) return null;
     const now = deps.now();
     const relayState = randomToken(32);
     const browser = randomToken(32);
@@ -141,7 +200,7 @@ export function registerSamlRoutes(app: Hono<AppEnv>, deps: Deps): void {
       detail: { provider: 'saml', org: orgId },
     });
     return c.redirect(url, 302);
-  });
+  }
 
   // The IdP's cross-site POST: park the response, continue same-site.
   app.post('/saml/:org/acs', async (c) => {
@@ -264,7 +323,7 @@ export function registerSamlRoutes(app: Hono<AppEnv>, deps: Deps): void {
     c: AppContext,
     orgId: string,
     config: OrgOidc,
-    email: string,
+    loginHint: string | null,
     returnTo: string | null,
   ): Promise<Response> {
     const now = deps.now();
@@ -275,7 +334,12 @@ export function registerSamlRoutes(app: Hono<AppEnv>, deps: Deps): void {
       console.warn('oidc discovery failed', error instanceof Error ? error.message : 'unknown');
       return fail(c, 'provider_unreachable', orgId, MESSAGES.signInFailed, 400, 'oidc');
     }
-    const request = await authorizeRequest(discovery, config, oidcRedirectUri(c.env, orgId), email);
+    const request = await authorizeRequest(
+      discovery,
+      config,
+      oidcRedirectUri(c.env, orgId),
+      loginHint,
+    );
     const browser = randomToken(32);
     await c.env.DB.batch([
       c.env.DB.prepare('DELETE FROM oidc_states WHERE expires_at <= ?').bind(now),

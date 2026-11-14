@@ -1,3 +1,4 @@
+import { X509Certificate } from 'node:crypto';
 import { ssoOnSql } from './managed';
 import { SAML, ValidateInResponseTo, type CacheProvider, type Profile } from '@node-saml/node-saml';
 import { normaliseEmail } from './directory';
@@ -21,6 +22,11 @@ export interface OrgSaml {
   idpEntityId: string;
   ssoUrl: string;
   certificate: string;
+  /** The provider's next signing certificate, accepted too while it changes over (§4.25). */
+  certificateNext: string | null;
+  /** When each expires, from the certificate; null for a bare public key. */
+  certificateExpiresAt: number | null;
+  certificateNextExpiresAt: number | null;
   enabled: boolean;
 }
 
@@ -30,7 +36,8 @@ export const acsUrl = (env: Env, orgId: string) => `${env.ISSUER}/saml/${orgId}/
 export async function samlConfig(db: D1Database, orgId: string): Promise<OrgSaml | null> {
   const row = await db
     .prepare(
-      `SELECT s.org_id, s.idp_entity_id, s.sso_url, s.certificate, s.enabled
+      `SELECT s.org_id, s.idp_entity_id, s.sso_url, s.certificate, s.certificate_next,
+              s.certificate_expires_at, s.certificate_next_expires_at, s.enabled
        FROM org_saml s JOIN organizations o ON o.id = s.org_id AND o.status = 'active'
        WHERE s.org_id = ?`,
     )
@@ -40,6 +47,9 @@ export async function samlConfig(db: D1Database, orgId: string): Promise<OrgSaml
       idp_entity_id: string;
       sso_url: string;
       certificate: string;
+      certificate_next: string | null;
+      certificate_expires_at: number | null;
+      certificate_next_expires_at: number | null;
       enabled: number;
     }>();
   return row
@@ -48,6 +58,9 @@ export async function samlConfig(db: D1Database, orgId: string): Promise<OrgSaml
         idpEntityId: row.idp_entity_id,
         ssoUrl: row.sso_url,
         certificate: row.certificate,
+        certificateNext: row.certificate_next,
+        certificateExpiresAt: row.certificate_expires_at,
+        certificateNextExpiresAt: row.certificate_next_expires_at,
         enabled: row.enabled === 1,
       }
     : null;
@@ -88,6 +101,20 @@ export function signingKeyPem(raw: unknown): string | null {
   }
   const lines = body.match(/.{1,64}/g) ?? [];
   return `-----BEGIN ${kind}-----\n${lines.join('\n')}\n-----END ${kind}-----`;
+}
+
+/**
+ * When a certificate expires (Unix seconds), or null for a public key or anything unreadable.
+ * login doesn't refuse an expired certificate, but providers change certificates around then.
+ */
+export function certificateExpiry(pem: string): number | null {
+  if (!pem.startsWith('-----BEGIN CERTIFICATE-----')) return null;
+  try {
+    const time = Date.parse(new X509Certificate(pem).validTo);
+    return Number.isNaN(time) ? null : Math.floor(time / 1000);
+  } catch {
+    return null;
+  }
 }
 
 /** An https URL for the IdP's sign-in endpoint. */
@@ -160,7 +187,10 @@ export function samlFor(env: Env, config: OrgSaml, nowMs: () => number, flow = '
     issuer: spEntityId(env, config.orgId),
     audience: spEntityId(env, config.orgId),
     callbackUrl: acsUrl(env, config.orgId),
-    idpCert: config.certificate,
+    // The next certificate too, so the provider can switch without breaking sign-in.
+    idpCert: config.certificateNext
+      ? [config.certificate, config.certificateNext]
+      : config.certificate,
     idpIssuer: config.idpEntityId,
     // The assertion itself must be signed: a signed envelope around an unsigned assertion isn't enough.
     wantAssertionsSigned: true,

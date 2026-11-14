@@ -288,7 +288,16 @@ export type Notice =
   | { kind: 'org_owner'; org: string }
   | { kind: 'domain_managed'; org: string; domain: string }
   | { kind: 'account_deactivated'; org: string }
-  | { kind: 'account_reactivated'; org: string };
+  | { kind: 'account_reactivated'; org: string }
+  | { kind: 'account_signed_out'; org: string }
+  | {
+      kind: 'sso_expiring';
+      org: string;
+      orgId: string;
+      protocol: 'saml' | 'oidc';
+      expiresAt: number;
+      expired: boolean;
+    };
 
 /** Where a change came from, as the notice reports it. */
 export interface NoticeContext {
@@ -436,6 +445,53 @@ export function noticeMail(notice: Notice, context?: NoticeContext): Mail {
         action: { label: 'Sign in', url: `${ISSUER}/login` },
         ...(context ? { facts: [['When', when(context.at)]] as [string, string][] } : {}),
       };
+    case 'account_signed_out':
+      return {
+        subject: 'You were signed out of 2earl everywhere',
+        preview: `${notice.org} signed you out on every device.`,
+        heading: 'You were signed out everywhere',
+        alert: true,
+        body: [
+          `“${notice.org}” manages your 2earl account and signed it out on every device. Connected apps lost access too.`,
+          'You can sign in again as usual; apps you use need to be connected again. If you didn’t expect this, ask the organization’s admins.',
+        ],
+        action: { label: 'Sign in', url: `${ISSUER}/login` },
+        ...(context ? { facts: [['When', when(context.at)]] as [string, string][] } : {}),
+      };
+    case 'sso_expiring': {
+      const what =
+        notice.protocol === 'saml'
+          ? 'identity provider’s signing certificate'
+          : 'OpenID Connect client secret';
+      const date = new Intl.DateTimeFormat('en-GB', { dateStyle: 'long', timeZone: 'UTC' }).format(
+        new Date(notice.expiresAt * 1000),
+      );
+      const fix =
+        notice.protocol === 'saml'
+          ? 'Your identity provider will sign with a new certificate around then. Paste the new one as the next signing certificate on Domains & SSO now: 2earl accepts both, so sign-in keeps working when the provider switches.'
+          : 'Create a new client secret at your identity provider and save it, with its expiry date, on Domains & SSO before the old one stops working.';
+      return {
+        subject: notice.expired
+          ? `${notice.org}: single sign-on’s ${notice.protocol === 'saml' ? 'certificate' : 'client secret'} has expired`
+          : `${notice.org}: single sign-on’s ${notice.protocol === 'saml' ? 'certificate' : 'client secret'} expires on ${date}`,
+        preview: notice.expired
+          ? 'People may not be able to sign in with single sign-on.'
+          : 'Replace it before then so people can keep signing in.',
+        heading: notice.expired ? 'Single sign-on needs attention' : 'Single sign-on expires soon',
+        alert: notice.expired,
+        body: [
+          notice.expired
+            ? `The ${what} for “${notice.org}” expired on ${date}. People may not be able to sign in with single sign-on.`
+            : `The ${what} for “${notice.org}” expires on ${date}.`,
+          fix,
+          'You get this because you’re an owner of the organization.',
+        ],
+        action: {
+          label: 'Open Domains & SSO',
+          url: `${ISSUER}/orgs/${encodeURIComponent(notice.orgId)}/directory`,
+        },
+      };
+    }
     case 'account_deleted':
       return {
         subject: 'Your 2earl account was deleted',
