@@ -74,6 +74,7 @@ import {
 } from './sign-in';
 import { adoptNewAccount, managerOf } from './managed';
 import { networkAllowed } from './org-policy';
+import { appAllowed } from './app-access';
 import {
   accountWithEmail,
   addGoogleIdentity,
@@ -883,6 +884,31 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       return c.redirect(
         `/login?return_to=${encodeURIComponent(original.pathname + original.search)}`,
         303,
+      );
+    }
+
+    // The organization that manages the account may allow only some apps (DESIGN §4.22).
+    const access = await appAllowed(c.env.DB, session.user.id, request.clientId);
+    if (!access.allowed) {
+      if (prompt.has('none')) {
+        return c.redirect(
+          authorizationErrorRedirect(request, 'access_denied', 'The app is not allowed'),
+          302,
+        );
+      }
+      await audit(c.env.DB, deps.now(), 'consent.denied', {
+        actorUserId: session.user.id,
+        clientId: request.clientId,
+        ipPrefix: clientIp(c),
+        detail: { reason: 'app_not_allowed' },
+      });
+      return c.html(
+        messagePage({
+          title: 'Your organization doesn’t allow this app',
+          body: `“${access.orgName ?? 'Your organization'}” manages your account and allows only some apps. Ask its admins to allow this one.`,
+          action: { href: '/account', label: 'Your account' },
+        }),
+        403,
       );
     }
 

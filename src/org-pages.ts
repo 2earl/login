@@ -362,6 +362,10 @@ const ACTIVITY: Record<string, (e: ActivityEntry) => string> = {
   'scim.group_deleted': () => 'removed a group',
   'scim.role_changed': (e) =>
     `made ${e.target ?? 'someone'} ${e.detail.role === 'admin' ? 'an admin' : 'a member'}`,
+  'org.apps_restricted': (e) =>
+    e.detail.on ? 'allowed only chosen apps for managed accounts' : 'allowed any app again',
+  'org.app_allowed': () => 'allowed an app',
+  'org.app_disallowed': () => 'removed an allowed app',
   'org.group_role_changed': (e) =>
     `${e.detail.role === 'admin' ? 'made' : 'stopped making'} the members of “${str(e.detail.name, 'a group')}” admins`,
   'scim.account_deactivated': (e) => `deactivated ${e.target ?? 'an account'}`,
@@ -499,6 +503,7 @@ export function directoryPage(params: {
   managed: { managed: number; deactivated: number; requireSso: boolean };
   policy: OrgPolicy;
   groups?: GroupSummary[];
+  apps?: AppsView;
   newToken?: string;
   notice?: string | undefined;
   error?: string | undefined;
@@ -588,7 +593,15 @@ export function directoryPage(params: {
         base,
         params.policy,
         params.domains.some((d) => d.managedAt !== null),
-      ),
+      ) +
+      (params.apps
+        ? appsSection(
+            base,
+            params.apps,
+            params.groups ?? [],
+            params.domains.some((d) => d.managedAt !== null),
+          )
+        : ''),
     { section: 'Organization' },
   );
 }
@@ -698,6 +711,86 @@ function setupList(state: SetupState): string {
       )
       .join('') +
     '</ol></nav>'
+  );
+}
+
+export interface AppsView {
+  restrict: boolean;
+  allowed: { clientId: string; name: string; groupId: string; groupName: string | null }[];
+  /** Apps managed people connected recently and that aren't allowed for everyone yet. */
+  inUse: { clientId: string; name: string }[];
+}
+
+/** Which apps managed accounts may use (DESIGN §4.22). */
+function appsSection(
+  base: string,
+  apps: AppsView,
+  groups: GroupSummary[],
+  managing: boolean,
+): string {
+  const who = (groupId: string, groupName: string | null) =>
+    groupId === '' ? 'Everyone' : `Members of “${escapeHtml(groupName ?? 'a removed group')}”`;
+  const groupSelect = (inRow: boolean) =>
+    `<select name="group" aria-label="Who may use it"${inRow ? ' class="role-select"' : ''}>` +
+    '<option value="">Everyone</option>' +
+    groups
+      .map((g) => `<option value="${escapeHtml(g.id)}">Members of “${escapeHtml(g.name)}”</option>`)
+      .join('') +
+    '</select>';
+  const allowedRows = apps.allowed
+    .map(
+      (a) =>
+        '<li class="admin-row"><div class="app-main">' +
+        `<p class="app-name">${escapeHtml(a.name)}</p>` +
+        `<p class="app-meta">${who(a.groupId, a.groupName)} · <code>${escapeHtml(a.clientId)}</code></p>` +
+        '</div><div class="row-actions">' +
+        `<form method="post" action="${base}/apps">` +
+        hidden({ action: 'remove', client_id: a.clientId, group: a.groupId }) +
+        '<button class="button secondary small" type="submit">Remove</button></form>' +
+        '</div></li>',
+    )
+    .join('');
+  const inUseRows = apps.inUse
+    .map(
+      (a) =>
+        '<li class="admin-row"><div class="app-main">' +
+        `<p class="app-name">${escapeHtml(a.name)}</p>` +
+        `<p class="app-meta"><code>${escapeHtml(a.clientId)}</code></p>` +
+        '</div><div class="row-actions">' +
+        `<form method="post" action="${base}/apps" class="manage-form">` +
+        hidden({ action: 'allow', client_id: a.clientId }) +
+        groupSelect(true) +
+        '<button class="button secondary small" type="submit">Allow</button></form>' +
+        '</div></li>',
+    )
+    .join('');
+  return (
+    '<section class="section" aria-labelledby="apps-heading">' +
+    '<h2 id="apps-heading">Apps</h2>' +
+    '<p class="section-text">Choose which apps the accounts you manage may connect, owners’ too. Apps that aren’t allowed lose access within 15 minutes.</p>' +
+    (!managing
+      ? '<p class="note">Available once you manage the accounts at a domain (step 2 above).</p>'
+      : `<form method="post" action="${base}/apps" class="stack-form">` +
+        hidden({ action: 'restrict' }) +
+        `<label class="confirm"><input type="checkbox" name="on" value="1"${apps.restrict ? ' checked' : ''}>` +
+        '<span><strong>Only allow the apps below</strong><br><span class="hint">Off: managed accounts may connect any app.</span></span></label>' +
+        '<div class="consent-actions"><button class="button secondary" type="submit">Save</button></div></form>' +
+        '<h3 class="subhead">Allowed</h3>' +
+        (allowedRows
+          ? `<ul class="admin-list">${allowedRows}</ul>`
+          : '<p class="note">No apps allowed yet.</p>') +
+        (inUseRows
+          ? '<h3 class="subhead">In use by your people</h3>' +
+            `<ul class="admin-list">${inUseRows}</ul>`
+          : '') +
+        '<h3 class="subhead">Allow another app</h3>' +
+        `<form method="post" action="${base}/apps" class="stack-form">` +
+        hidden({ action: 'allow' }) +
+        '<label class="field"><span>Client ID</span>' +
+        '<input name="client_id" type="text" required maxlength="500" autocomplete="off" spellcheck="false" placeholder="The app’s client ID, or its https client metadata URL"></label>' +
+        `<label class="field"><span>Who may use it</span>${groupSelect(false)}</label>` +
+        '<div class="consent-actions"><button class="button secondary" type="submit">Allow</button></div></form>') +
+    '</section>'
   );
 }
 
