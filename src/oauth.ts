@@ -1,3 +1,4 @@
+import { appAllowed } from './app-access';
 import {
   GrantType,
   OAuthAuthorizationServer,
@@ -123,7 +124,15 @@ export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
       accessTokenTTL: ACCESS_TOKEN_TTL_SECONDS,
       refreshTokenTTL: REFRESH_TOKEN_TTL_SECONDS,
       refreshTokenIdleTTL: REFRESH_TOKEN_IDLE_TTL_SECONDS,
-      tokenExchangeCallback: async ({ grantType, props, userId, grantId, env, resource }) => {
+      tokenExchangeCallback: async ({
+        grantType,
+        props,
+        userId,
+        grantId,
+        env,
+        resource,
+        clientId,
+      }) => {
         // Every code exchange and refresh checks that the account still exists and is active.
         // Deletion and suspension revoke grants, but a grant created while that was running (a
         // consent submitted in another tab) is caught here, at the latest 15 minutes later.
@@ -132,6 +141,19 @@ export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
           await audit(env.DB, clock(), 'grant.refused', { detail: { reason: 'user_inactive' } });
           throw new OAuthError('invalid_grant', {
             description: 'This account is no longer active.',
+          });
+        }
+        // The organization that manages the account may allow only some apps (DESIGN §4.22):
+        // checked at every exchange and refresh, so access ends within one access token's life.
+        if (!(await appAllowed(env.DB, userId, clientId)).allowed) {
+          await authorizationServer(env).getOAuthApi(env).revokeGrant(grantId, userId);
+          await audit(env.DB, clock(), 'grant.refused', {
+            actorUserId: userId,
+            clientId,
+            detail: { reason: 'app_not_allowed' },
+          });
+          throw new OAuthError('invalid_grant', {
+            description: 'The organization that manages this account doesn’t allow this app.',
           });
         }
         const binding = dpopBinding(env, props as GrantProps, resource);

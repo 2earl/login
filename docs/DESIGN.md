@@ -1045,7 +1045,26 @@ changes owners, so a directory can't take an organization over or lock its owner
 the last mark leaves roles as they are. Accounts the directory didn't provision keep the roles
 set in 2earl.
 
-**App access by group** (which members may use which app) is the next phase.
+App access by group: §4.22.
+
+### 4.22 Which apps managed accounts may use (phase 10e)
+
+By default the accounts an organization manages may connect any app, as everyone can. An owner
+can turn on **"Only allow the apps below"** (Domains & SSO → Apps, recent proof): from then on
+they may use only the apps it allows, **for everyone it manages or for the members of a directory
+group** (§4.21). It applies to owners' managed accounts too: login's own pages aren't an app, so
+nobody is locked out of changing it. `org_app_access`, `organizations.restrict_apps`,
+`src/app-access.ts`.
+
+- **Allowing an app:** from "In use by your people" (apps managed accounts connected in the last 90
+  days, from the security log), or by client ID or client metadata URL. Only apps registered with
+  login can be allowed, so a typo can't look like it worked. Up to 200 entries.
+- **Checked twice:** when an app is authorized (a page names the organization; `prompt=none` gets
+  `access_denied`), and at **every code exchange and refresh** (`tokenExchangeCallback`), which
+  also covers the device flow and pushed requests. A refused grant is revoked. An app that's no
+  longer allowed, or a person who left the group, loses access when its access token expires:
+  within 15 minutes.
+- Accounts the organization doesn't manage are never restricted by it.
 
 ## 5. Protocol surface
 
@@ -1163,6 +1182,7 @@ scim_users       id PK ('scu_…'), org_id FK, user_name, external_id, display_n
 scim_groups      id PK ('scg_…'), org_id FK, display_name (UNIQUE per org, NOCASE), external_id,
                  role NULL|'admin', created_at, updated_at           (§4.21)
 scim_group_members (group_id FK, scim_user_id FK) PK
+org_app_access   (org_id FK, client_id, group_id ('' = everyone)) PK, created_at  (§4.22)
 org_saml         org_id PK FK, idp_entity_id, sso_url, certificate (public), enabled,
                  created_at, updated_at                              (§4.17)
 org_oidc         org_id PK FK, issuer, client_id, client_secret_enc (AES-GCM), enabled,
@@ -1387,6 +1407,7 @@ Resolved:
 | 10b | **Security rules for managed accounts** (§4.19): second factor, passkeys, session length, ways in, networks |
 | 10c | **Single sign-on with OpenID Connect** (§4.20): Entra ID, Google Workspace, Okta |
 | 10d | **Groups from the directory, and roles** (§4.21) |
+| 10e | **Which apps managed accounts may use** (§4.22) |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 

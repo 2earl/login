@@ -269,6 +269,16 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | G4 | An admin marks a group to make themselves or others admins | Only owners mark groups, with a recent proof; it's in the organization's activity (tested) |
 | G5 | Huge groups exhaust the Worker | 500 groups, 5,000 members, 64 KB bodies, 100 per list page |
 
+### A — Which apps managed accounts may use (DESIGN §4.22, phase 10e)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| A1 | A disallowed app keeps access through a grant made earlier | Every code exchange and refresh checks; the grant is revoked; access ends with the 15-minute access token (tested) |
+| A2 | The check is skipped through another flow (device, pushed request, remembered consent) | The token exchange callback is the one place every flow passes (tested for code and refresh) |
+| A3 | Someone outside the group uses an app allowed for a group | Membership is the directory's, for active provisioned users only (tested) |
+| A4 | An admin opens apps up | Only owners change app access, with a recent proof; it's in the organization's activity (tested) |
+| A5 | The rules reach people the organization doesn't manage | Read only through `users.managed_by` (tested) |
+
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
 
 | # | Threat | Mitigation |

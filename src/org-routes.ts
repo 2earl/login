@@ -24,6 +24,14 @@ import {
 } from './managed';
 import { discover, issuerUrl, oidcConfig, saveOidc } from './sso-oidc';
 import { findGroup, listGroups, setGroupRole } from './scim-groups';
+import {
+  allowApp,
+  appsInUse,
+  disallowApp,
+  listAllowedApps,
+  restrictsApps,
+  setRestrictApps,
+} from './app-access';
 import { authorizationServer } from './oauth';
 import {
   MAX_RANGES,
@@ -39,6 +47,7 @@ import { noticeContext, removeAccount } from './sign-in';
 import { changeCheck } from './mfa-routes';
 import {
   deleteManagedAccountPage,
+  type AppsView,
   type SetupState,
   deleteOrgPage,
   directoryPage,
@@ -662,6 +671,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         },
         policy: await readPolicy(c.env.DB, orgId),
         groups: await listGroups(c.env.DB, orgId),
+        apps: await appsView(c, orgId),
         managed: {
           ...(await managedCounts(c.env.DB, orgId)),
           requireSso: await c.env.DB.prepare('SELECT require_sso FROM organizations WHERE id = ?')
@@ -697,6 +707,10 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     sso_optional: 'Managed accounts can sign in any way again.',
     policy: 'Security rules saved. They apply from each person’s next request.',
     group_role: 'Roles now follow your directory’s groups.',
+    apps_restricted: 'Managed accounts may now use only the allowed apps.',
+    apps_open: 'Managed accounts may connect any app again.',
+    app_allowed: 'App allowed.',
+    app_removed: 'App removed. Its access ends within 15 minutes.',
   };
 
   app.get('/orgs/:org/directory', async (c) => {
@@ -928,6 +942,94 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       );
     }
     return c.redirect(directory(ctx.orgId, on ? 'managed' : 'unmanaged'), 303);
+  });
+
+  /** The organization's app access, with names (DESIGN §4.22). */
+  async function appsView(c: AppContext, orgId: string): Promise<AppsView> {
+    const oauth = authorizationServer(c.env).getOAuthApi(c.env);
+    const names = new Map<string, string>();
+    const nameOf = async (clientId: string) => {
+      if (!names.has(clientId)) {
+        const client = await oauth.lookupClient(clientId).catch(() => null);
+        names.set(clientId, client?.clientName ?? clientId);
+      }
+      return names.get(clientId) ?? clientId;
+    };
+    const allowed = await listAllowedApps(c.env.DB, orgId);
+    const forEveryone = new Set(allowed.filter((a) => a.groupId === '').map((a) => a.clientId));
+    const inUse = (await appsInUse(c.env.DB, orgId)).filter((id) => !forEveryone.has(id));
+    return {
+      restrict: await restrictsApps(c.env.DB, orgId),
+      allowed: await Promise.all(
+        allowed.map(async (a) => ({ ...a, name: await nameOf(a.clientId) })),
+      ),
+      inUse: await Promise.all(
+        inUse.map(async (clientId) => ({ clientId, name: await nameOf(clientId) })),
+      ),
+    };
+  }
+
+  app.post('/orgs/:org/apps', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    const now = deps.now();
+    const redirect = changeCheck(ctx.session, now, `/orgs/${ctx.orgId}/directory`);
+    if (redirect) return c.redirect(redirect, 303);
+    const action = ctx.form.get('action');
+    const clientRaw = ctx.form.get('client_id');
+    const clientId = typeof clientRaw === 'string' ? clientRaw.trim().slice(0, 500) : '';
+    const groupRaw = ctx.form.get('group');
+    const groupId = typeof groupRaw === 'string' ? groupRaw : '';
+    if (action === 'restrict') {
+      const on = ctx.form.get('on') === '1';
+      await setRestrictApps(c.env.DB, now, ctx.orgId, on);
+      await record(c, ctx.session, 'org.apps_restricted', { org: ctx.orgId, on });
+      return c.redirect(directory(ctx.orgId, on ? 'apps_restricted' : 'apps_open'), 303);
+    }
+    if (!clientId) return showDirectory(c, ctx.orgId, { error: 'Enter the app’s client ID.' }, 400);
+    if (action === 'allow') {
+      // Only apps login knows: a typo would otherwise allow nothing and look like it worked.
+      const known = await authorizationServer(c.env)
+        .getOAuthApi(c.env)
+        .lookupClient(clientId)
+        .catch(() => null);
+      if (!known) {
+        return showDirectory(
+          c,
+          ctx.orgId,
+          { error: 'No app with that client ID has registered with 2earl.' },
+          400,
+        );
+      }
+      const result = await allowApp(c.env.DB, now, ctx.orgId, clientId, groupId);
+      if (result !== 'added') {
+        return showDirectory(
+          c,
+          ctx.orgId,
+          {
+            error:
+              result === 'unknown_group'
+                ? 'That group no longer exists.'
+                : 'An organization can allow up to 200 apps.',
+          },
+          400,
+        );
+      }
+      await record(c, ctx.session, 'org.app_allowed', {
+        org: ctx.orgId,
+        client: clientId,
+        group: groupId || null,
+      });
+      return c.redirect(directory(ctx.orgId, 'app_allowed'), 303);
+    }
+    if (action === 'remove' && (await disallowApp(c.env.DB, ctx.orgId, clientId, groupId))) {
+      await record(c, ctx.session, 'org.app_disallowed', {
+        org: ctx.orgId,
+        client: clientId,
+        group: groupId || null,
+      });
+    }
+    return c.redirect(directory(ctx.orgId, 'app_removed'), 303);
   });
 
   app.post('/orgs/:org/groups/role', async (c) => {
