@@ -144,6 +144,8 @@ export interface Member {
   managed: boolean;
   /** Deactivated by the organization. */
   deactivated: boolean;
+  /** The directory decides this member's role (DESIGN §4.21). */
+  roleFromDirectory: boolean;
 }
 
 /** Owners first, then admins, then members; each by when they joined. */
@@ -152,7 +154,11 @@ export async function listMembers(db: D1Database, orgId: string): Promise<Member
     .prepare(
       `SELECT m.user_id, u.display_name, u.primary_email, m.role, m.joined_at,
               u.managed_by IS m.org_id AS managed,
-              (u.managed_by IS m.org_id AND u.deactivated_at IS NOT NULL) AS deactivated
+              (u.managed_by IS m.org_id AND u.deactivated_at IS NOT NULL) AS deactivated,
+              (m.role != 'owner'
+               AND EXISTS (SELECT 1 FROM scim_groups g WHERE g.org_id = m.org_id AND g.role = 'admin')
+               AND EXISTS (SELECT 1 FROM scim_users su WHERE su.org_id = m.org_id AND su.user_id = m.user_id)
+              ) AS role_from_directory
        FROM org_members m JOIN users u ON u.id = m.user_id
        WHERE m.org_id = ?
        ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, m.joined_at, m.user_id
@@ -167,6 +173,7 @@ export async function listMembers(db: D1Database, orgId: string): Promise<Member
       joined_at: number;
       managed: number;
       deactivated: number;
+      role_from_directory: number;
     }>();
   return results.map((r) => ({
     userId: r.user_id,
@@ -176,6 +183,7 @@ export async function listMembers(db: D1Database, orgId: string): Promise<Member
     joinedAt: r.joined_at,
     managed: r.managed === 1,
     deactivated: r.deactivated === 1,
+    roleFromDirectory: r.role_from_directory === 1,
   }));
 }
 

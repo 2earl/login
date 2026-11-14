@@ -834,7 +834,7 @@ SCIM 2.0 client) adds and removes its members. login is the SCIM service provide
   `count` (at most 100).
 - PATCH: `add`, `replace` and `remove`, with or without a path. Attributes login doesn't keep are
   accepted and ignored.
-- Groups, bulk, sort and ETags are not supported (`501`).
+- Bulk, sort and ETags are not supported (`501`). Groups: §4.21.
 - Bodies are limited to 64 KB. Limit: 1,000 requests a minute per address (the token
   endpoint's).
 - The zone firewall allows PUT, PATCH and DELETE on `/scim/v2/` only (`infra/firewall.tf`).
@@ -1025,6 +1025,28 @@ rules (§4.19) and the second factor. Sessions record `oidc`; required SSO count
 front-channel logout, client authentication with a private key. Revisit when an organization
 needs one.
 
+### 4.21 Groups from the directory, and roles (phase 10d)
+
+The organization's directory sends groups as well as users (SCIM 2.0 `/Groups`, RFC 7643 §4.2):
+create, list, filter (`displayName eq`, `externalId eq`), read (with
+`excludedAttributes=members`), replace, patch and delete. Patches cover what Microsoft Entra ID
+and Okta send: members added, removed by path filter (`members[value eq "…"]`) or by value, all
+removed, replaced; `displayName` and `externalId` replaced, with or without a path; operation
+names in any case. Members are users this organization's directory provisioned; others are
+skipped. At most 500 groups per organization and 5,000 members per group; names are unique per
+organization, ignoring case. `scim_groups`, `scim_group_members`, `src/scim-groups.ts`.
+
+**Roles.** An owner marks a group "admin" on Domains & SSO (recent proof). From then on **the
+directory decides admin or member** for every account it provisioned: admin while the person is
+active and in a group marked admin, member otherwise. Roles follow every change: a user saved or
+deleted, a group changed, a mark set or removed. In 2earl, those people's roles can't be changed
+by hand any more, except to make one an owner. The directory never makes owners and never
+changes owners, so a directory can't take an organization over or lock its owners out. Removing
+the last mark leaves roles as they are. Accounts the directory didn't provision keep the roles
+set in 2earl.
+
+**App access by group** (which members may use which app) is the next phase.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -1138,6 +1160,9 @@ scim_tokens      id PK ('st_…'), org_id FK, token_hash UNIQUE (SHA-256), creat
 scim_users       id PK ('scu_…'), org_id FK, user_name, external_id, display_name, given_name,
                  family_name, active, user_id FK NULL (SET NULL), created_at, updated_at,
                  UNIQUE(org_id, user_name)
+scim_groups      id PK ('scg_…'), org_id FK, display_name (UNIQUE per org, NOCASE), external_id,
+                 role NULL|'admin', created_at, updated_at           (§4.21)
+scim_group_members (group_id FK, scim_user_id FK) PK
 org_saml         org_id PK FK, idp_entity_id, sso_url, certificate (public), enabled,
                  created_at, updated_at                              (§4.17)
 org_oidc         org_id PK FK, issuer, client_id, client_secret_enc (AES-GCM), enabled,
@@ -1361,6 +1386,7 @@ Resolved:
 | 10a | **Accounts an organization manages** (§4.18): managed domains, deactivation, required SSO |
 | 10b | **Security rules for managed accounts** (§4.19): second factor, passkeys, session length, ways in, networks |
 | 10c | **Single sign-on with OpenID Connect** (§4.20): Entra ID, Google Workspace, Okta |
+| 10d | **Groups from the directory, and roles** (§4.21) |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 
@@ -1415,7 +1441,7 @@ updates (Dependabot), and it is on only for organizations that turn it on.
 | RFC 9101 JAR | Signed request objects; PAR (9d) already keeps the request off the browser | A FAPI-grade client |
 | Microsoft, GitHub, Apple and other social sign-in | The owner decided on 2026-11-12: Google, email codes and passkeys are the ways in | The owner decides otherwise |
 | SAML single logout, encrypted assertions, signed AuthnRequests, IdP-initiated sign-in | TLS protects the POST; IdP-initiated responses can't be tied to a request login made. "Require SSO" now exists for managed accounts (§4.18) | An organization needs one of them |
-| SCIM Groups, bulk operations, roles from the directory | Members are what organizations need now; roles stay in 2earl | A directory customer needs group-based roles |
+| SCIM bulk operations | Directories send one change at a time anyway | A directory needs bulk |
 | DPoP server nonces (RFC 9449 §8) and `dpop_jkt` | Proofs already expire in 60 seconds and work once; PKCE binds the code | A client or resource needs them |
 | FedCM | Browser-mediated sign-in for third-party sites; only useful once sites embed "Sign in with 2earl" | A site asks for it |
 | Shared Signals (CAEP, RISC) | Pushes session and credential events to relying parties; there is one relying party, our own gateway, which already checks every token | Several independent relying parties |

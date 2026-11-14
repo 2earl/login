@@ -204,7 +204,8 @@ describe('SCIM 2.0', () => {
       await scim(token, '/ServiceProviderConfig')
     ).json<{ patch: { supported: boolean } }>();
     expect(config.patch.supported).toBe(true);
-    expect((await scim(token, '/Groups')).status).toBe(501);
+    expect((await scim(token, '/Groups')).status).toBe(200);
+    expect((await scim(token, '/Bulk', { method: 'POST', body: {} })).status).toBe(501);
   });
 
   it('adds an existing account at a verified domain, and only such addresses', async () => {
@@ -352,5 +353,120 @@ describe('SCIM 2.0', () => {
     expect(data.directoryRecords).toEqual([
       expect.objectContaining({ externalId: 'e-7', givenName: 'Given' }),
     ]);
+  });
+});
+
+describe('SCIM groups (DESIGN §4.21)', () => {
+  /** Ada's organization, with Bob provisioned and linked. */
+  async function withBob() {
+    const ada = people.ada as Person;
+    const bob = people.bob as Person;
+    const { orgId, token } = await orgWithDirectory(ada);
+    const listed = await (
+      await scim(token, '/Users', { method: 'POST', body: user('bob@example.com') })
+    ).json<{ id: string }>();
+    return { ada, bob, orgId, token, bobScim: listed.id };
+  }
+
+  const group = (displayName: string, members: string[] = []) => ({
+    schemas: ['urn:ietf:params:scim:schemas:core:2.0:Group'],
+    displayName,
+    members: members.map((value) => ({ value })),
+  });
+
+  it('are created, listed, filtered, patched the ways Entra ID and Okta do, and deleted', async () => {
+    const { token, bobScim } = await withBob();
+    const created = await scim(token, '/Groups', {
+      method: 'POST',
+      body: group('Engineering', [bobScim, 'scu_unknown']),
+    });
+    expect(created.status).toBe(201);
+    const engineering = await created.json<{ id: string; members: { value: string }[] }>();
+    // Unknown users are skipped.
+    expect(engineering.members.map((m) => m.value)).toEqual([bobScim]);
+    expect(
+      (await scim(token, '/Groups', { method: 'POST', body: group('engineering') })).status,
+    ).toBe(409);
+
+    const found = await (
+      await scim(
+        token,
+        `/Groups?filter=${encodeURIComponent('displayName eq "Engineering"')}&excludedAttributes=members`,
+      )
+    ).json<{ totalResults: number; Resources: Record<string, unknown>[] }>();
+    expect(found.totalResults).toBe(1);
+    expect(found.Resources[0]?.members).toBeUndefined();
+
+    const path = `/Groups/${engineering.id}`;
+    // Okta: remove by path filter.
+    await scim(token, path, {
+      method: 'PATCH',
+      body: patch([{ op: 'remove', path: `members[value eq "${bobScim}"]` }]),
+    });
+    expect(await count('scim_group_members', 'group_id = ?', engineering.id)).toBe(0);
+    // Entra ID: capitalized ops, add by value, rename without a path.
+    await scim(token, path, {
+      method: 'PATCH',
+      body: patch([
+        { op: 'Add', path: 'members', value: [{ value: bobScim }] },
+        { op: 'Replace', value: { displayName: 'Platform' } },
+      ]),
+    });
+    const after = await (
+      await scim(token, path)
+    ).json<{
+      displayName: string;
+      members: unknown[];
+    }>();
+    expect(after.displayName).toBe('Platform');
+    expect(after.members).toHaveLength(1);
+    // Entra ID: remove by value.
+    await scim(token, path, {
+      method: 'PATCH',
+      body: patch([{ op: 'Remove', path: 'members', value: [{ value: bobScim }] }]),
+    });
+    expect(await count('scim_group_members', 'group_id = ?', engineering.id)).toBe(0);
+    expect(
+      (
+        await scim(token, path, {
+          method: 'PATCH',
+          body: patch([{ op: 'move', path: 'members' }]),
+        })
+      ).status,
+    ).toBe(400);
+    expect((await scim(token, path, { method: 'DELETE' })).status).toBe(204);
+    expect(await count('scim_groups')).toBe(0);
+  });
+
+  it('give roles once an owner marks a group admin; owners never change', async () => {
+    const { ada, bob, orgId, token, bobScim } = await withBob();
+    const admins = await (
+      await scim(token, '/Groups', { method: 'POST', body: group('2earl admins', [bobScim]) })
+    ).json<{ id: string }>();
+    // No group has a role yet: the directory doesn't touch roles.
+    expect(await roleOf(orgId, bob.id)).toBe('member');
+
+    const marked = await post(ada, `/orgs/${orgId}/groups/role`, {
+      group: admins.id,
+      role: 'admin',
+    });
+    expect(marked.headers.get('Location')).toBe(`/orgs/${orgId}/directory?done=group_role`);
+    expect(await roleOf(orgId, bob.id)).toBe('admin');
+
+    // Leaving the group in the directory makes Bob a member again.
+    await scim(token, `/Groups/${admins.id}`, {
+      method: 'PATCH',
+      body: patch([{ op: 'remove', path: 'members' }]),
+    });
+    expect(await roleOf(orgId, bob.id)).toBe('member');
+
+    // In 2earl, the role can't be changed by hand any more, except to owner.
+    const byHand = await post(ada, `/orgs/${orgId}/members/role`, { user: bob.id, role: 'admin' });
+    expect(byHand.status).toBe(409);
+    expect(await roleOf(orgId, ada.id)).toBe('owner');
+    // A member isn't the owner who can mark groups.
+    expect(
+      (await post(bob, `/orgs/${orgId}/groups/role`, { group: admins.id, role: '' })).status,
+    ).toBe(404);
   });
 });

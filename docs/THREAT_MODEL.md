@@ -259,6 +259,16 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | O7 | The client secret leaks from the database | Encrypted with `MFA_ENCRYPTION_KEY`, bound to the organization; never shown again |
 | O8 | Server-side requests to arbitrary URLs through the issuer field | https only, no credentials or query; responses limited to 256 KB and 8 s, redirects not followed; the Worker can't reach private networks |
 
+### G — Groups from the directory (DESIGN §4.21, phase 10d)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| G1 | A directory (or a stolen SCIM token) makes itself owner, or demotes the owners | The directory decides only admin or member; owners are never changed (tested) |
+| G2 | A directory token adds other organizations' users to a group | Members must be users this organization's directory provisioned; others are skipped (tested) |
+| G3 | An admin edits a role the directory decides, and it drifts | Hand changes are refused except to owner (tested); every directory change re-applies the roles |
+| G4 | An admin marks a group to make themselves or others admins | Only owners mark groups, with a recent proof; it's in the organization's activity (tested) |
+| G5 | Huge groups exhaust the Worker | 500 groups, 5,000 members, 64 KB bodies, 100 per list page |
+
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
 
 | # | Threat | Mitigation |
