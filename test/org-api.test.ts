@@ -131,6 +131,22 @@ function api(key: string, path: string, body?: unknown) {
   });
 }
 
+describe('the published reference', () => {
+  it('is served by login itself, for everyone, since the repository is private', async () => {
+    const response = await call(app, '/docs/api');
+    expect(response.status).toBe(200);
+    const page = await response.text();
+    expect(page).toContain('The organization API');
+    expect(page).toContain('id="directory-sync-scim-2-0"');
+    expect(page).toContain('<code>https://login.2earl.com/api/v1</code>');
+    expect(page).not.toContain('github.com');
+    const settings = await (
+      await call(app, `/orgs/${orgId}/settings`, { cookies: { '__Host-session': ada.session } })
+    ).text();
+    expect(settings).toContain('href="/docs/api"');
+  });
+});
+
 describe('the organization’s API', () => {
   it('reads members, domains and the audit log with a key', async () => {
     const key = await createKey('read');
