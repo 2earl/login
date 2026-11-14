@@ -792,7 +792,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       );
     }
     // Multi-tenant endpoints accept anyone's tenant: only the organization's own will do.
-    if (/login\.microsoftonline\.com\/(common|organizations|consumers)\b/i.test(issuer)) {
+    if (/^https:\/\/login\.microsoftonline\.com\/(?:common|organizations|consumers)(?:$|[/?#])/i.test(issuer)) {
       return showDirectory(
         c,
         ctx.orgId,
