@@ -43,7 +43,7 @@ async function person(key: string): Promise<Person> {
     .bind(`al-${key}`, email)
     .run();
   const { session } = await signIn(app, google, {
-    claims: { sub: `sub-${key}`, email, name: key[0]?.toUpperCase() + key.slice(1) },
+    claims: { sub: `sub-${key}`, email, name: key.charAt(0).toUpperCase() + key.slice(1) },
   });
   const row = await env.DB.prepare(
     "SELECT user_id AS id FROM identities WHERE provider = 'google' AND subject = ?",
