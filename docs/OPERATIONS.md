@@ -131,9 +131,11 @@ be tried before production, so this is the plan when the owner decides on it:
 
 ## 8. Private repositories: what the GitHub plan decides
 
-Since 2026-11-14 the code is proprietary (LICENSE) and the repositories are to be private. What
-GitHub enforces on a **private** repository depends on the organization's plan; on a public one
-it was free. Check this **before** switching visibility, or the protections below stop silently.
+Since 2026-11-14 the code is proprietary (LICENSE). The repositories **stay public** for now
+(owner, 2026-11-15): anyone can read the code, nobody may use it without an agreement. Making
+them private waits for a paid GitHub plan, because what GitHub enforces on a **private**
+repository depends on the plan; on a public one it is free. Check this **before** switching
+visibility, or the protections below stop silently.
 
 | Protection | Free | Team | Enterprise Cloud |
 |---|---|---|---|

@@ -36,7 +36,7 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
 
 | # | Decision | Source |
 |---|---|---|
-| D1 | Private repo `2earl/login`, proprietary (public under AGPL-3.0 until 2026-11-14) | Owner |
+| D1 | Public repo `2earl/login`, proprietary since 2026-11-14 (AGPL-3.0 before); private when the GitHub plan allows it (OPERATIONS §8) | Owner |
 | D2 | Cloudflare Workers + D1 + KV; domain `2earl.com` already on Cloudflare | Owner |
 | D3 | Build on `@cloudflare/workers-oauth-provider` **1.2.x** (`OAuthAuthorizationServer` / `OAuthResourceServer`), not a hand-written OAuth implementation | Agreed |
 | D4 | Google is the only login method in v1. **Superseded** 2026-11-10: Google or a one-time code by email (§4.9) | Owner |

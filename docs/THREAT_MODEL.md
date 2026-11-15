@@ -28,8 +28,8 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 - **Malicious web page** visited by a signed-in user (CSRF, clickjacking, login CSRF).
 - **Network attacker on loopback/native client** (intercepted redirect).
 - **Compromised dependency or GitHub Action** (supply chain).
-- **Outside contributor** opening pull requests: none once the repositories are private; only
-  members of `2earl` can.
+- **Outside contributor** opening pull requests to the public repo (the code is proprietary, but
+  anyone can read it and propose changes).
 - **Privileged insider** — any GitHub org owner, any installed GitHub App with org-wide access,
   any Cloudflare or HCP account member.
 - **Upstream compromise** — a user's Google account, or Google itself.
