@@ -76,6 +76,7 @@ import {
 import { addDomain, listDomains, normaliseDomain, removeDomain, verifyDomain } from './org-domains';
 import { createScimToken, listScimTokens, revokeScimToken } from './scim';
 import { certificateExpiry, samlConfig, signingKeyPem, ssoUrl } from './saml';
+import { MetadataError, certificateColumns, fetchMetadata, metadataUrl } from './saml-metadata';
 import { dateField } from './sso-upkeep';
 import {
   MAX_INVITATIONS_PER_DAY,
@@ -836,6 +837,9 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
                 certificateNext: config.certificateNext,
                 certificateExpiresAt: config.certificateExpiresAt,
                 certificateNextExpiresAt: config.certificateNextExpiresAt,
+                metadataUrl: config.metadataUrl,
+                metadataCheckedAt: config.metadataCheckedAt,
+                metadataError: config.metadataError,
                 enabled: config.enabled,
               }
             : null,
@@ -1060,23 +1064,49 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     if (redirect) return c.redirect(redirect, 303);
     const verified = (await listDomains(c.env.DB, ctx.orgId)).some((d) => d.verifiedAt !== null);
     if (!verified) return showDirectory(c, ctx.orgId, { error: 'Verify a domain first.' }, 409);
-    const idp = ctx.form.get('idp_entity_id');
-    const idpEntityId = typeof idp === 'string' ? idp.trim().slice(0, 500) : '';
-    const url = ssoUrl(ctx.form.get('sso_url'));
-    const certificate = signingKeyPem(ctx.form.get('certificate'));
-    const nextRaw = ctx.form.get('certificate_next');
-    const hasNext = typeof nextRaw === 'string' && nextRaw.trim() !== '';
-    const certificateNext = hasNext ? signingKeyPem(nextRaw) : null;
-    if (hasNext && !certificateNext) {
-      return showDirectory(
-        c,
-        ctx.orgId,
-        {
-          error:
-            'The next signing certificate isn’t one: paste it as PEM or base64, or leave it empty.',
-        },
-        400,
-      );
+    // From the provider's metadata URL, when given: it decides the rest (DESIGN §4.26).
+    const rawMetadata = ctx.form.get('metadata_url');
+    const wantsMetadata = typeof rawMetadata === 'string' && rawMetadata.trim() !== '';
+    const metadataAt = wantsMetadata ? metadataUrl(rawMetadata) : null;
+    if (wantsMetadata && !metadataAt) {
+      return showDirectory(c, ctx.orgId, { error: 'The metadata URL must be an https URL.' }, 400);
+    }
+    let idpEntityId: string;
+    let url: string | null;
+    let certificate: string | null;
+    let certificateNext: string | null;
+    if (metadataAt) {
+      try {
+        const metadata = await fetchMetadata(deps.fetch, metadataAt);
+        const columns = certificateColumns(metadata);
+        idpEntityId = metadata.entityId;
+        url = metadata.ssoUrl;
+        certificate = columns.certificate;
+        certificateNext = columns.certificateNext;
+      } catch (cause) {
+        const reason =
+          cause instanceof MetadataError ? cause.message : 'The metadata couldn’t be read.';
+        return showDirectory(c, ctx.orgId, { error: reason }, 400);
+      }
+    } else {
+      const idp = ctx.form.get('idp_entity_id');
+      idpEntityId = typeof idp === 'string' ? idp.trim().slice(0, 500) : '';
+      url = ssoUrl(ctx.form.get('sso_url'));
+      certificate = signingKeyPem(ctx.form.get('certificate'));
+      const nextRaw = ctx.form.get('certificate_next');
+      const hasNext = typeof nextRaw === 'string' && nextRaw.trim() !== '';
+      certificateNext = hasNext ? signingKeyPem(nextRaw) : null;
+      if (hasNext && !certificateNext) {
+        return showDirectory(
+          c,
+          ctx.orgId,
+          {
+            error:
+              'The next signing certificate isn’t one: paste it as PEM or base64, or leave it empty.',
+          },
+          400,
+        );
+      }
     }
     if (!idpEntityId || !url || !certificate) {
       return showDirectory(
@@ -1084,7 +1114,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         ctx.orgId,
         {
           error:
-            'Enter the identity provider’s entity ID, an https sign-in URL and its signing certificate.',
+            'Enter the identity provider’s metadata URL, or its entity ID, an https sign-in URL and its signing certificate.',
         },
         400,
       );
@@ -1092,11 +1122,13 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const now = deps.now();
     await c.env.DB.prepare(
       `INSERT INTO org_saml (org_id, idp_entity_id, sso_url, certificate, enabled, created_at, updated_at,
-                             certificate_next, certificate_expires_at, certificate_next_expires_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?8, ?9)
+                             certificate_next, certificate_expires_at, certificate_next_expires_at,
+                             metadata_url, metadata_checked_at, metadata_error)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?8, ?9, ?10, ?11, NULL)
        ON CONFLICT (org_id) DO UPDATE SET idp_entity_id = ?2, sso_url = ?3, certificate = ?4,
          enabled = ?5, updated_at = ?6, certificate_next = ?7, certificate_expires_at = ?8,
-         certificate_next_expires_at = ?9, expiry_notice = NULL`,
+         certificate_next_expires_at = ?9, expiry_notice = NULL, metadata_url = ?10,
+         metadata_checked_at = ?11, metadata_error = NULL`,
     )
       .bind(
         ctx.orgId,
@@ -1108,6 +1140,8 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         certificateNext,
         certificateExpiry(certificate),
         certificateNext ? certificateExpiry(certificateNext) : null,
+        metadataAt,
+        metadataAt ? now : null,
       )
       .run();
     // One way of single sign-on at a time (DESIGN §4.20).

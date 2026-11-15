@@ -5,6 +5,7 @@ import { setRequireSso } from '../src/managed';
 import { setOAuthClock } from '../src/oauth';
 import { certificateExpiry } from '../src/saml';
 import { dateField, samlExpiry, warnExpiringSso, warningDue } from '../src/sso-upkeep';
+import { CERT, CERT_EXPIRES } from './certs';
 import {
   FakeGoogle,
   NOW,
@@ -26,27 +27,6 @@ const FORM = {
 };
 const IDP = 'https://idp.example.com';
 
-/** A self-signed test certificate (public part only); it expires 2027-12-19 12:13:39 UTC. */
-const CERT = `-----BEGIN CERTIFICATE-----
-MIIDFTCCAf2gAwIBAgIUJkhCy0vdWuNEP0N32JNZEKy7L2EwDQYJKoZIhvcNAQEL
-BQAwGjEYMBYGA1UEAwwPaWRwLmV4YW1wbGUuY29tMB4XDTI2MTExNDEyMTMzOVoX
-DTI3MTIxOTEyMTMzOVowGjEYMBYGA1UEAwwPaWRwLmV4YW1wbGUuY29tMIIBIjAN
-BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv6MKmA6Jp9RQFo6VbLVY99S2kasu
-jvu4kXNMXAcilJNQE1KGcqpKE5bryT8xIezBUwZtnpqGXQT1HwBi51563xM0uzg/
-Sk/X3FSizzEIUcYI5LjAJyV0DXBnphV/inYm9x26lEbmW3yeNXJGg/NccQPc8eSs
-xWN1ParYJquq8Tywawm9T2lWrHvsOBSBHYXD32HK0QVLnYHGbkfTm4ikYJMqgoCr
-bsN02XGaePv/bX6KGH/4LL0lV67YnL+sgc3O9pey6lH4O2NCnVVwq7ucSfocFGHi
-jQE5VpSBoNJOHKxtuDTXT59lpfw1xm1RPix782fM6odMaijrEFBkH1ENtwIDAQAB
-o1MwUTAdBgNVHQ4EFgQUz14pURbQmT80OrbIIhFxAz4645IwHwYDVR0jBBgwFoAU
-z14pURbQmT80OrbIIhFxAz4645IwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0B
-AQsFAAOCAQEAqinQfzDqKOWpoBZ3lPUy52eC3VqpAXxULGT8x3boh0CDh1P3GiqT
-OyrD1S2/2O4vfokZIFlWm/oqKFyVXEvdywq7YCG61lqHDRBLYAy0CjmD0gzLLP4i
-7JgqKI6qpLJra9gDuzZQsMS86Tq6wR/QgvBH3kwdz6lkBpNRsrd6DbtW6FPe82RS
-4D0xVW8/3GWJPzDkbbzg3LFwq9UicMOVFXFOVcmycc5LQYhc+PQ1Rn2UEch8fGZ1
-YDEG5mm3OMlicFpFtvYlDMjhWFoO42qRV67uuR4dkKMSEsYs9vGiTL2nX+quDXV7
-4yOM383Xxzex6u5eyaJ62UMTV6K5aASm5A==
------END CERTIFICATE-----`;
-const CERT_EXPIRES = Date.parse('2027-12-19T12:13:39Z') / 1000;
 const DAY = 86_400;
 
 interface Sent {

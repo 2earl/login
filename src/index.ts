@@ -1,6 +1,7 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { createRemoteJWKSet } from 'jose';
 import { createApp } from './app';
+import { refreshSamlMetadata } from './saml-metadata';
 import { warnExpiringSso } from './sso-upkeep';
 import { GOOGLE_JWKS_URL } from './google';
 import { authorizationServer, type GrantProps } from './oauth';
@@ -142,8 +143,12 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
         else await this.env.OAUTH_KV.delete(PURGE_CURSOR_KEY);
       })(),
       deleteDueManagedAccounts(this.env, now),
-      // Owners hear ahead of time when their SSO certificate or secret expires (DESIGN §4.25).
-      warnExpiringSso(this.env, now),
+      // New signing certificates from the providers' metadata URLs (DESIGN §4.26), then the
+      // owners hear ahead of time about what still expires (§4.25).
+      (async () => {
+        await refreshSamlMetadata(this.env, fetch, now);
+        await warnExpiringSso(this.env, now);
+      })(),
     ]);
     for (const result of results) {
       if (result.status === 'rejected') {
