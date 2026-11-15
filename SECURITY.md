@@ -1,6 +1,7 @@
 # Security Policy
 
-This repository contains the 2earl identity service (login.2earl.com). It is private and proprietary.
+This repository contains the 2earl identity service (login.2earl.com). It is public to read but proprietary:
+see LICENSE.
 
 ## Reporting a vulnerability
 

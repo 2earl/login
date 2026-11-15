@@ -35,6 +35,7 @@ On **Domains & SSO** (owner, after a recent proof it's you):
 | OpenID Connect | Redirect URI `https://login.2earl.com/sso/<org>/oidc` | Issuer URL, client ID, client secret |
 | SAML | Entity ID `https://login.2earl.com/saml/<org>`, Reply (ACS) URL `…/acs` (HTTP-POST), metadata `…/metadata` | The provider's entity ID, sign-in URL (HTTP-Redirect), signing certificate |
 | Directory (SCIM) | Base URL `https://login.2earl.com/scim/v2`, a token (`scim_…`, shown once) | — |
+| App dashboard tile | Sign-in link `https://login.2earl.com/sso/<org>/start` | — |
 
 Only one way of single sign-on is on at a time; turning OpenID Connect on turns SAML off and the
 other way round. Test each in turn.
@@ -71,11 +72,12 @@ custom domain (Entra → Domain names) and create a test user at it.
 login shows it. Certificates & secrets → new client secret. In login, the issuer is
 `https://login.microsoftonline.com/<tenant ID>/v2.0` (not `common` or `organizations`: refused).
 Optional: Token configuration → add the optional claim `email`; without it login uses
-`preferred_username`, which is the sign-in name.
+`preferred_username`, which is the sign-in name. Enter the secret's expiry date in login too.
 
 **SAML.** Enterprise applications → New → Create your own (non-gallery) → Single sign-on → SAML.
 Identifier = login's entity ID, Reply URL = the ACS URL. Unique user identifier (Name ID) =
-`user.userprincipalname` or `user.mail`, whichever is the address at the test domain. From
+`user.userprincipalname` or `user.mail`, whichever is the address at the test domain. **Sign on
+URL** = login's sign-in link, so the tile in My Apps works. From
 "SAML certificates" download the Base64 certificate; in login, the provider's entity ID is the
 "Microsoft Entra Identifier" and the sign-in URL is the "Login URL". Assign the test user.
 
@@ -93,7 +95,8 @@ doesn't check the domain).
 **OpenID Connect.** Applications → Create App Integration → OIDC → Web application. Sign-in
 redirect URI as login shows it; grant type Authorization Code. The issuer is the organization's
 URL (`https://<your org>.okta.com`), from its default authorization server, not
-`…/oauth2/default`, unless you change it in both places. Assign the test user.
+`…/oauth2/default`, unless you change it in both places. For the dashboard tile: "Login initiated
+by: Either Okta or App", "Initiate login URI" = login's sign-in link. Assign the test user.
 
 **SAML.** Create App Integration → SAML 2.0. Single sign-on URL = the ACS URL ("Use this for
 Recipient URL and Destination URL" on), Audience URI = login's entity ID, Name ID format
@@ -140,6 +143,12 @@ Run these with the test user in the second browser. Each check names where to se
    Put the right one back.
 7. Switching: turn SAML on while OpenID Connect is on: OpenID Connect turns off, and the other way
    round.
+8. The tile: My Apps (Entra ID) or the Okta dashboard → the 2earl tile → signed in to login, no
+   address asked. With OpenID Connect, Okta's `iss` is checked: a tile of another Okta
+   organization pointing at the link is refused.
+9. Certificate change (SAML): add a second signing certificate in the provider (Entra ID: "New
+   certificate", don't activate yet), paste it in login as the next certificate, then activate it
+   in the provider: sign-in keeps working. Both expiry dates show next to the certificates.
 
 **Directory (Entra ID and Okta)**
 1. Provision the test user: it appears under Domains & SSO → Directory.
@@ -156,8 +165,11 @@ Run these with the test user in the second browser. Each check names where to se
 Turn on "Manage accounts at <test domain>" and repeat:
 - First SSO sign-in of a new test user creates a **managed** account (Members shows it as managed).
 - SCIM provisioning creates the account before anyone signs in.
-- "Require single sign-on": the test user signing in with an email code is refused; you (owner)
-  are not.
+- "Require single sign-on": the email form offers "Continue with single sign-on" for any address
+  at the test domain instead of sending a code; "Send me a code instead" still works for you
+  (owner) and is refused for the test user.
+- Members → "Sign out everywhere" on the test user: their session ends at the next request, they
+  get an email, they can sign in again.
 - Rules: require a second factor → the test user is sent to add one at the next request.
 - Deactivate in the provider → the test user's session ends at its next request, apps lose access.
 - SCIM `DELETE` → deactivated now, deletion scheduled in 30 days; reactivate from Members to

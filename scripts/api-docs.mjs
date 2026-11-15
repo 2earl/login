@@ -1,5 +1,5 @@
 // Publishes docs/API.md at login.2earl.com/docs/api: converts it to HTML and writes
-// src/api-docs.generated.ts. The repository is private; customers read the page instead.
+// src/api-docs.generated.ts, so customers read it on login rather than in the repository.
 //
 //   node scripts/api-docs.mjs          rewrite src/api-docs.generated.ts
 //   node scripts/api-docs.mjs --check  fail if it is out of date (CI)
