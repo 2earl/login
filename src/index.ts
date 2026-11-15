@@ -1,6 +1,8 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { createRemoteJWKSet } from 'jose';
 import { createApp } from './app';
+import { serverErrorPage } from './pages';
+import { rayId, redact } from './request-log';
 import { refreshSamlMetadata } from './saml-metadata';
 import { warnExpiringSso } from './sso-upkeep';
 import { GOOGLE_JWKS_URL } from './google';
@@ -32,8 +34,26 @@ export const DAILY_CRON = '17 3 * * *';
  * gateway's Service Binding only: it is never reachable from the Internet (DESIGN §4.4).
  */
 export default class LoginWorker extends WorkerEntrypoint<Env> {
-  override fetch(request: Request): Response | Promise<Response> {
-    return app.fetch(request, this.env, this.ctx);
+  override async fetch(request: Request): Promise<Response> {
+    try {
+      return await app.fetch(request, this.env, this.ctx);
+    } catch (error) {
+      // Outside the app's own handler (it catches its routes' errors): logged, and a page
+      // instead of Cloudflare's "Worker threw exception".
+      const err = error instanceof Error ? error : new Error(String(error));
+      console.error(
+        JSON.stringify({
+          event: 'fatal',
+          name: err.name,
+          message: redact(err.message),
+          ray: rayId(request),
+        }),
+      );
+      return new Response(serverErrorPage(rayId(request)), {
+        status: 500,
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
+    }
   }
 
   /**

@@ -8,6 +8,7 @@ import {
 import { Hono } from 'hono';
 import type { JWTVerifyGetKey } from 'jose';
 import { exportAccount } from './account';
+import { logError, logResponse, rayId } from './request-log';
 import { exportFromServices } from './service-exports';
 import { registerOrgRoutes } from './org-routes';
 import { isShellPath, withShell } from './shell';
@@ -40,6 +41,7 @@ import {
   deleteAccountPage,
   messagePage,
   notFoundPage,
+  serverErrorPage,
   signInPage,
   type ConnectedApp,
   type Message,
@@ -283,8 +285,12 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.use('*', async (c, next) => {
+    const started = Date.now();
     await next();
     applySecurityHeaders(c.res.headers);
+    // Refusals and failures go to Workers Logs, without paths or queries (DESIGN §9.4).
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- Hono types a '*' middleware's input as any
+    logResponse(c, c.res.status, Date.now() - started);
   });
 
   // Resolve the session once per request. OAuth protocol endpoints never use it.
@@ -365,7 +371,25 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       : mfaHtml(signInPage({ mode: await signupMode(c.env) })),
   );
 
-  app.get('/healthz', (c) => c.json({ status: 'ok' }));
+  // Also reaches D1 and KV, so the uptime check (.github/workflows/uptime.yml) sees what users
+  // would: a page needs both.
+  app.get('/healthz', async (c) => {
+    // Each in its own async function, so a binding that throws at once counts as down too.
+    const [d1, kv] = await Promise.allSettled([
+      (async () => c.env.DB.prepare('SELECT 1 AS ok').first())(),
+      (async () => c.env.OAUTH_KV.get('healthz'))(),
+    ]);
+    const ok = d1.status === 'fulfilled' && kv.status === 'fulfilled';
+    return c.json(
+      {
+        status: ok ? 'ok' : 'degraded',
+        d1: d1.status === 'fulfilled',
+        kv: kv.status === 'fulfilled',
+      },
+      ok ? 200 : 503,
+      { 'Cache-Control': 'no-store' },
+    );
+  });
 
   // Sign in or sign up: Google, or a code by email (DESIGN §4.9). reauth=1: a signed-in user
   // proves it's them again, with the methods their account has.
@@ -1183,9 +1207,14 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   );
 
   app.onError((err, c) => {
-    // Never echo error details to the client; they may contain request data.
-    console.error('unhandled error', err.name);
-    return c.json({ error: 'server_error' }, 500);
+    // Never echo error details to the client; they may contain request data. The log keeps
+    // the name and a redacted message; the person gets the Ray ID to quote.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- Hono types onError's input as any
+    logError(c, err);
+    const reference = rayId(c.req.raw);
+    return (c.req.header('Accept') ?? '').includes('text/html')
+      ? c.html(serverErrorPage(reference), 500)
+      : c.json({ error: 'server_error', reference }, 500);
   });
 
   return app;

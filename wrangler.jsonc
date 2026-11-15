@@ -18,10 +18,13 @@
     "directory": "./public",
   },
 
-  // Phase 4 will decide what is logged. Invocation logs would record full request URLs,
-  // which carry authorization codes and state on /authorize and /callback/*.
+  // Workers Logs, 7 days. Cloudflare's per-request invocation logs stay off: they record full
+  // URLs, which carry authorization codes and state on /authorize and /callback/*. The Worker
+  // writes its own lines for refusals, failures and exceptions (src/request-log.ts).
   "observability": {
-    "enabled": false,
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "invocation_logs": false },
   },
 
   "vars": {
