@@ -302,7 +302,7 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | K5 | Key guessing | 256-bit keys; rate limit per address |
 | K6 | An admin mints keys | Only owners, with a recent proof (tested) |
 
-### U — Single sign-on that keeps working (DESIGN §4.25, phase 10h)
+### U — Single sign-on that keeps working (DESIGN §4.25–§4.26, phases 10h–10i)
 
 | # | Threat | Mitigation |
 |---|---|---|
@@ -312,6 +312,8 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | U4 | The SSO-first page tells which addresses have accounts | It depends only on the domain (tested) |
 | U5 | Expiry warnings used to spam | Owners only, each threshold once (tested); the text is fixed, with the organization's name |
 | U6 | An admin signs an owner out | Admins can't act on owners, and the API never does (tested) |
+| U7 | Metadata XML used to attack the parser (entity expansion, huge documents) | DTDs refused, 512 KB and 8 s limits, redirects not followed, the Worker can't reach private networks (`global_fetch_strictly_public`) (tested) |
+| U8 | A changed or hijacked metadata document swaps the provider | The daily read never changes the entity ID or the sign-in URL's host; only certificates and same-host URLs (tested). Each change is in the activity |
 
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
 

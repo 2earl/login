@@ -1157,8 +1157,30 @@ and write key (never owners), can sign a managed account out: every session ends
 access is revoked, but the account stays active, for a lost laptop or a shared device. The person
 gets an email; the activity names who did it.
 
-**Not done:** reading the provider's metadata URL to pick up new certificates automatically,
-single logout, warnings by anything but email.
+**Not done:** single logout, warnings by anything but email. Reading the provider's metadata is
+§4.26.
+
+### 4.26 SAML from the provider's metadata (phase 10i)
+
+Entra ID and Okta publish their SAML settings as metadata at a URL. On Domains & SSO an owner can
+give that URL instead of the entity ID, sign-in URL and certificate; `src/saml-metadata.ts`.
+
+- **On save** login reads it (https, no credentials, 8 s, 512 KB, redirects not followed) and
+  takes, from the one `EntityDescriptor` with an `IDPSSODescriptor`: its `entityID`, the
+  HTTP-Redirect `SingleSignOnService`, and the `KeyDescriptor`s for signing (or without `use`):
+  at most two certificates, the two that last longest. A document with a DTD is refused, so no
+  entity is expanded. Anything it can't use is said in words and nothing is saved.
+- **Daily** (with the cron of §4.25, before the expiry warnings) it reads every stored URL again.
+  New certificates and a moved sign-in URL at the same host are taken, the expiry warnings start
+  over, and the activity says so. A different entity ID, or a sign-in URL at another host, is
+  not taken: that is another provider or someone else's document, and the owner must save it
+  again on purpose. Why a read failed or wasn't applied is shown next to the URL.
+- Settings entered by hand are never touched. Saving by hand clears the URL.
+
+Whoever controls the metadata URL controls who can sign in at the organization, exactly like
+whoever pastes the certificate; owners choose it, with a recent proof, as for every SSO setting.
+
+
 
 ## 5. Protocol surface
 
@@ -1284,7 +1306,8 @@ org_audit_streams org_id PK FK, url, secret_enc (AES-GCM), enabled, cursor_at, c
                  updated_at                                          (§4.23)
 org_saml         org_id PK FK, idp_entity_id, sso_url, certificate (public),
                  certificate_next, certificate_expires_at, certificate_next_expires_at,
-                 expiry_notice, enabled, created_at, updated_at      (§4.17, §4.25)
+                 expiry_notice, metadata_url, metadata_checked_at, metadata_error,
+                 enabled, created_at, updated_at                     (§4.17, §4.25, §4.26)
 org_oidc         org_id PK FK, issuer, client_id, client_secret_enc (AES-GCM),
                  secret_expires_at, expiry_notice, enabled, created_at,
                  updated_at                                          (§4.20, §4.25)
@@ -1512,6 +1535,7 @@ Resolved:
 | 10f | **The organization's audit log**: download and stream (§4.23) |
 | 10g | **The organization API**: keys, members, domains, audit log (§4.24) |
 | 10h | **Single sign-on that keeps working** (§4.25): dashboard sign-in link, certificate rollover, expiry warnings, SSO first, sign out everywhere |
+| 10i | **SAML from the provider's metadata URL**, read again daily (§4.26) |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 

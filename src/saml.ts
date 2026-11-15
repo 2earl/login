@@ -27,6 +27,10 @@ export interface OrgSaml {
   /** When each expires, from the certificate; null for a bare public key. */
   certificateExpiresAt: number | null;
   certificateNextExpiresAt: number | null;
+  /** Where the settings come from, read again daily (§4.26); null when entered by hand. */
+  metadataUrl: string | null;
+  metadataCheckedAt: number | null;
+  metadataError: string | null;
   enabled: boolean;
 }
 
@@ -37,7 +41,8 @@ export async function samlConfig(db: D1Database, orgId: string): Promise<OrgSaml
   const row = await db
     .prepare(
       `SELECT s.org_id, s.idp_entity_id, s.sso_url, s.certificate, s.certificate_next,
-              s.certificate_expires_at, s.certificate_next_expires_at, s.enabled
+              s.certificate_expires_at, s.certificate_next_expires_at, s.metadata_url,
+              s.metadata_checked_at, s.metadata_error, s.enabled
        FROM org_saml s JOIN organizations o ON o.id = s.org_id AND o.status = 'active'
        WHERE s.org_id = ?`,
     )
@@ -50,6 +55,9 @@ export async function samlConfig(db: D1Database, orgId: string): Promise<OrgSaml
       certificate_next: string | null;
       certificate_expires_at: number | null;
       certificate_next_expires_at: number | null;
+      metadata_url: string | null;
+      metadata_checked_at: number | null;
+      metadata_error: string | null;
       enabled: number;
     }>();
   return row
@@ -61,6 +69,9 @@ export async function samlConfig(db: D1Database, orgId: string): Promise<OrgSaml
         certificateNext: row.certificate_next,
         certificateExpiresAt: row.certificate_expires_at,
         certificateNextExpiresAt: row.certificate_next_expires_at,
+        metadataUrl: row.metadata_url,
+        metadataCheckedAt: row.metadata_checked_at,
+        metadataError: row.metadata_error,
         enabled: row.enabled === 1,
       }
     : null;

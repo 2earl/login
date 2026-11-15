@@ -448,6 +448,8 @@ const ACTIVITY: Record<string, (e: ActivityEntry) => string> = {
   'org.account_deactivated': (e) => `deactivated ${e.target ?? 'an account'}`,
   'org.account_reactivated': (e) => `reactivated ${e.target ?? 'an account'}`,
   'org.account_signed_out': (e) => `signed ${e.target ?? 'an account'} out everywhere`,
+  'org.saml_metadata_refreshed': () =>
+    'took new signing certificates from the identity provider’s metadata',
   'org.sso_expiry_warned': (e) =>
     `told the owners that single sign-on’s ${e.detail.protocol === 'oidc' ? 'client secret' : 'certificate'} ${e.detail.days === 0 ? 'has expired' : `expires in ${String(e.detail.days)} ${e.detail.days === 1 ? 'day' : 'days'}`}`,
   'org.account_deleted': () => 'deleted a managed account',
@@ -495,7 +497,7 @@ export function orgActivityPage(params: {
       const what = ACTIVITY[e.event]?.(e) ?? e.event;
       const who = e.event.startsWith('scim.')
         ? 'Directory sync'
-        : e.event === 'org.sso_expiry_warned'
+        : e.event === 'org.sso_expiry_warned' || e.event === 'org.saml_metadata_refreshed'
           ? '2earl'
           : (e.actor ?? 'Someone');
       return (
@@ -1058,6 +1060,9 @@ export interface SamlView {
   certificateNext: string | null;
   certificateExpiresAt: number | null;
   certificateNextExpiresAt: number | null;
+  metadataUrl: string | null;
+  metadataCheckedAt: number | null;
+  metadataError: string | null;
   enabled: boolean;
 }
 
@@ -1066,6 +1071,18 @@ export interface OidcView {
   clientId: string;
   secretExpiresAt: number | null;
   enabled: boolean;
+}
+
+/** When the metadata was last read, and why it failed if it did. */
+function metadataStatus(saml: SamlView | null, now: number): string {
+  if (!saml?.metadataUrl || saml.metadataCheckedAt === null) return '';
+  const when =
+    now - saml.metadataCheckedAt < 86_400 * 2
+      ? 'recently'
+      : `on ${escapeHtml(formatDate(saml.metadataCheckedAt))}`;
+  return saml.metadataError
+    ? `</span><span class="field-error">Last read ${when}: ${escapeHtml(saml.metadataError)}`
+    : ` <span class="tag tag-muted">Last read ${when}</span>`;
 }
 
 /** "Expires 19 December 2027", flagged when it's within 30 days or past. */
@@ -1128,12 +1145,15 @@ function samlSection(
       : '') +
     '</dl>' +
     `<form method="post" action="${base}/saml" class="stack-form">` +
+    '<label class="field"><span>Metadata URL (recommended)</span>' +
+    `<input name="metadata_url" type="url" maxlength="1000" autocomplete="off" spellcheck="false" placeholder="https://" value="${escapeHtml(saml?.metadataUrl ?? '')}">` +
+    `<span class="hint">Entra ID: “App Federation Metadata Url”. Okta: “Metadata URL” on the Sign On tab. 2earl reads the fields below from it, and again every day, so new signing certificates arrive by themselves. Leave it empty to enter them by hand.${metadataStatus(saml, now)}</span></label>` +
     '<label class="field"><span>Identity provider entity ID (issuer)</span>' +
-    `<input name="idp_entity_id" type="text" required maxlength="500" autocomplete="off" spellcheck="false" value="${escapeHtml(saml?.idpEntityId ?? '')}"></label>` +
+    `<input name="idp_entity_id" type="text" maxlength="500" autocomplete="off" spellcheck="false" value="${escapeHtml(saml?.idpEntityId ?? '')}"></label>` +
     '<label class="field"><span>Sign-in URL (HTTP-Redirect)</span>' +
-    `<input name="sso_url" type="url" required maxlength="1000" autocomplete="off" spellcheck="false" value="${escapeHtml(saml?.ssoUrl ?? '')}"></label>` +
+    `<input name="sso_url" type="url" maxlength="1000" autocomplete="off" spellcheck="false" value="${escapeHtml(saml?.ssoUrl ?? '')}"></label>` +
     `<label class="field"><span>Signing certificate (PEM or base64) ${expiryText(saml?.certificateExpiresAt ?? null, now)}</span>` +
-    `<textarea name="certificate" rows="6" required spellcheck="false">${escapeHtml(saml?.certificate ?? '')}</textarea></label>` +
+    `<textarea name="certificate" rows="6" spellcheck="false">${escapeHtml(saml?.certificate ?? '')}</textarea></label>` +
     `<label class="field"><span>Next signing certificate (optional) ${expiryText(saml?.certificateNextExpiresAt ?? null, now)}</span>` +
     `<textarea name="certificate_next" rows="4" spellcheck="false">${escapeHtml(saml?.certificateNext ?? '')}</textarea>` +
     '<span class="hint">When your provider announces a new certificate, paste it here: both are accepted, so sign-in keeps working when it switches. Owners get an email 30, 7 and 1 days before the certificates expire.</span></label>' +
