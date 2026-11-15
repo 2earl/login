@@ -3,3 +3,4 @@ worker-configuration.d.ts
 dist/
 .wrangler/
 *.md
+src/api-docs.generated.ts

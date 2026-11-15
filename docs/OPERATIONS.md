@@ -129,7 +129,42 @@ be tried before production, so this is the plan when the owner decides on it:
 | Yearly | Rotate `SESSION_PEPPER`, `CONSENT_REMEMBER_SECRET`, the Google client secret and infrastructure tokens; review DATA_PROTECTION.md, THREAT_MODEL.md and 2earl.com/security |
 | Before the first enterprise customer | An outside penetration test of login and the gateway; fix findings; keep the summary to share |
 
-## 8. What enterprise buyers check, and where it stands
+## 8. Private repositories: what the GitHub plan decides
+
+Since 2026-11-14 the code is proprietary (LICENSE) and the repositories are to be private. What
+GitHub enforces on a **private** repository depends on the organization's plan; on a public one
+it was free. Check this **before** switching visibility, or the protections below stop silently.
+
+| Protection | Free | Team | Enterprise Cloud |
+|---|---|---|---|
+| Rulesets `protect-main`, `protect-release-tags` (PRs, checks, linear history, tags) | **Not enforced** | Enforced | Enforced |
+| Environment `production` and its secrets, deploys from `main` only | **Not available**: the deploy job loses its secrets | Available | Available |
+| Required reviewer on `production` (the owner approves each deploy) | **Not available** | **Not available** | Available |
+| CodeQL code scanning (default setup) | Needs the Code Security add-on | Needs the add-on | Needs the add-on |
+| Secret scanning push protection | Needs the Secret Protection add-on | Needs the add-on | Needs the add-on |
+| Dependabot alerts and updates | Yes | Yes | Yes |
+| Actions minutes for private repositories | 2,000 a month | 3,000 a month | 50,000 a month |
+
+Today's use is a few hundred minutes a month across the repositories, without CodeQL's runs.
+
+**Without Enterprise, the deploy approval needs a replacement.** On Team, keep the environment
+(secrets, `main` only) and start deploys by hand: `workflow_dispatch` only, the job refusing any
+actor but the owner (a repository variable `DEPLOY_APPROVERS`). Merging stays the review; the
+dispatch is the approval.
+
+**Without the add-ons**, CI's `pnpm audit` (all services) and Dependabot stay; CodeQL's licence
+allows it only on open-source code, so it can't simply run in a workflow instead.
+
+**The order:**
+1. Merge the licence and wording changes (all five repositories), so nothing public promises
+   open source or links to a private repository.
+2. Choose the plan; on Team, merge the deploy change above first.
+3. Switch each repository to private (Settings → General → Danger zone). Pull request links from
+   outside, and `npx github:2earl/cli`, stop working for people without access.
+4. Check: a pull request's checks still required, a deploy still needs the owner, the
+   `production` environment's secrets still there.
+
+## 9. What enterprise buyers check, and where it stands
 
 | Item | Status |
 |---|---|

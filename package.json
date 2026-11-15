@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Identity service and OAuth 2.1 authorization server for 2earl.com",
-  "license": "AGPL-3.0-only",
+  "license": "UNLICENSED",
   "type": "module",
   "packageManager": "pnpm@10.28.0",
   "engines": {
@@ -13,7 +13,7 @@
     "dev": "wrangler dev",
     "build": "wrangler deploy --dry-run --outdir dist",
     "cf-typegen": "wrangler types",
-    "typecheck": "node scripts/asset-versions.mjs --check && wrangler types --check && tsc --noEmit && tsc --noEmit -p e2e && tsc --noEmit -p e2e/worker",
+    "typecheck": "node scripts/asset-versions.mjs --check && node scripts/api-docs.mjs --check && wrangler types --check && tsc --noEmit && tsc --noEmit -p e2e && tsc --noEmit -p e2e/worker",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "test": "vitest run",

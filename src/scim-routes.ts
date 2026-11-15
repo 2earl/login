@@ -321,7 +321,7 @@ export function registerScimRoutes(app: Hono<AppEnv>, deps: Deps): void {
   app.get('/scim/v2/ServiceProviderConfig', (c) =>
     scimJson({
       schemas: ['urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig'],
-      documentationUri: 'https://github.com/2earl/login/blob/main/docs/DESIGN.md',
+      documentationUri: `${c.env.ISSUER}/docs/api#directory-sync-scim-2-0`,
       patch: { supported: true },
       bulk: { supported: false, maxOperations: 0, maxPayloadSize: 0 },
       filter: { supported: true, maxResults: MAX_COUNT },

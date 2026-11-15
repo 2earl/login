@@ -36,7 +36,7 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
 
 | # | Decision | Source |
 |---|---|---|
-| D1 | Public repo `2earl/login`, AGPL-3.0 | Owner |
+| D1 | Private repo `2earl/login`, proprietary (public under AGPL-3.0 until 2026-11-14) | Owner |
 | D2 | Cloudflare Workers + D1 + KV; domain `2earl.com` already on Cloudflare | Owner |
 | D3 | Build on `@cloudflare/workers-oauth-provider` **1.2.x** (`OAuthAuthorizationServer` / `OAuthResourceServer`), not a hand-written OAuth implementation | Agreed |
 | D4 | Google is the only login method in v1. **Superseded** 2026-11-10: Google or a one-time code by email (§4.9) | Owner |
@@ -1438,7 +1438,7 @@ fine-grained limits are in the Worker (§8).
 | Workflow | Trigger | Does |
 |---|---|---|
 | `ci.yml` | PR, push to `main` | job `verify`: install (frozen lockfile), typecheck (including `wrangler types --check`), lint + format, tests on the Workers runtime, browser tests (Playwright Chromium against `wrangler dev` with `e2e/worker/index.ts`: the real app with Google's token endpoint and keys replaced; the whole owner journey including a virtual passkey), bundle (dry-run deploy), `pnpm audit`. **Required check** on `main`. |
-| CodeQL | PR, push, weekly | GitHub default setup (no workflow file) |
+| CodeQL | PR, push, weekly | GitHub default setup (no workflow file). On private repositories only with the Code Security add-on (OPERATIONS §8) |
 | `deploy.yml` | push to `main` (except `docs/`, `infra/`, Markdown), manual | environment `production` (**owner approval**) → tests → `wrangler d1 migrations apply DB --remote` → `wrangler deploy` → smoke test of `/healthz` (the metadata endpoint once it exists). Migrations must stay compatible with the code already live. |
 | Dependabot | weekly | npm and GitHub Actions updates, grouped, 1-day cooldown (matches pnpm `minimumReleaseAge`) |
 
