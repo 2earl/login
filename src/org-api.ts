@@ -2,8 +2,10 @@ import type { Hono } from 'hono';
 import type { Deps } from './app';
 import { audit } from './audit';
 import { randomToken, sha256Hex } from './crypto';
-import { clientIp, type AppContext, type AppEnv } from './http';
+import { clientIp, workerCtx, type AppContext, type AppEnv } from './http';
+import { noticeContext } from './sign-in';
 import { API_DOCS_HTML } from './api-docs.generated';
+import { alertFor, alertOwners } from './org-alerts';
 import { page } from './pages';
 import { deactivate, isManagedBy, reactivate, signOutEverywhere } from './managed';
 import { authorizationServer } from './oauth';
@@ -127,11 +129,17 @@ export function registerOrgApiRoutes(app: Hono<AppEnv>, deps: Deps): void {
       event: Parameters<typeof audit>[2],
       detail: Record<string, unknown>,
     ) =>
-    (c: AppContext) =>
-      audit(c.env.DB, deps.now(), event, {
-        ipPrefix: clientIp(c),
-        detail: { org: orgId, via: 'api', key: keyId, ...detail },
-      });
+    async (c: AppContext) => {
+      const now = deps.now();
+      const full = { org: orgId, via: 'api', key: keyId, ...detail };
+      await audit(c.env.DB, now, event, { ipPrefix: clientIp(c), detail: full });
+      // Owners hear of a key granting rights too (DESIGN §4.27).
+      if (alertFor(event, full)) {
+        workerCtx(c).waitUntil(
+          alertOwners(c.env, orgId, event, full, { apiKey: keyId }, noticeContext(c, now)),
+        );
+      }
+    };
 
   app.get('/api/v1/members', async (c) => {
     const auth = await authenticate(c, 'read');
@@ -227,7 +235,11 @@ export function registerOrgApiRoutes(app: Hono<AppEnv>, deps: Deps): void {
       return problem(409, 'directory', 'The directory decides this member’s role.');
     }
     if (await setRole(c.env.DB, auth.orgId, member.userId, role)) {
-      await record(auth.orgId, auth.keyId, 'org.role_changed', { target: member.userId, role })(c);
+      await record(auth.orgId, auth.keyId, 'org.role_changed', {
+        target: member.userId,
+        role,
+        from: member.role,
+      })(c);
     }
     return json({ id: member.userId, role });
   });

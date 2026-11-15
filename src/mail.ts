@@ -290,6 +290,7 @@ export type Notice =
   | { kind: 'account_deactivated'; org: string }
   | { kind: 'account_reactivated'; org: string }
   | { kind: 'account_signed_out'; org: string }
+  | { kind: 'org_security_change'; org: string; orgId: string; who: string; what: string }
   | {
       kind: 'sso_expiring';
       org: string;
@@ -444,6 +445,23 @@ export function noticeMail(notice: Notice, context?: NoticeContext): Mail {
         ],
         action: { label: 'Sign in', url: `${ISSUER}/login` },
         ...(context ? { facts: [['When', when(context.at)]] as [string, string][] } : {}),
+      };
+    case 'org_security_change':
+      return {
+        subject: `Security change in “${notice.org}”`,
+        preview: `${notice.who} ${notice.what}.`,
+        heading: 'A security setting changed',
+        alert: true,
+        body: [
+          `${notice.who} ${notice.what} in “${notice.org}”.`,
+          'If you or another owner expected this, there’s nothing to do. If not, check the organization’s activity, undo the change, and sign out the account that made it; an owner’s account can be secured from its own Security page.',
+          'Every owner gets these emails, including the one who made the change.',
+        ],
+        action: {
+          label: 'Open the activity',
+          url: `${ISSUER}/orgs/${encodeURIComponent(notice.orgId)}/activity`,
+        },
+        facts: facts(context),
       };
     case 'account_signed_out':
       return {

@@ -1180,6 +1180,28 @@ give that URL instead of the entity ID, sign-in URL and certificate; `src/saml-m
 Whoever controls the metadata URL controls who can sign in at the organization, exactly like
 whoever pastes the certificate; owners choose it, with a recent proof, as for every SSO setting.
 
+### 4.27 Security alerts for owners (phase 10j)
+
+An organization's owners are emailed at once when someone changes what decides who can get in,
+or what would hide it; `src/org-alerts.ts`. Every owner, the one who made the change too: if
+that account is the one being misused, its real owner learns of it. The email says who (a
+person's name and address, "The API key “…”", or "2earl"), what, when, and from which device and
+network, and links to the activity.
+
+| Change | Alerted when |
+|---|---|
+| SAML or OpenID Connect settings saved | always (turned off, or changed) |
+| New SAML certificates from the metadata URL | always (from "2earl") |
+| Require single sign-on | turned off |
+| A member's role | made owner or admin, or an owner or admin changed to less |
+| A directory group's role | made admin |
+| API key, directory token | created |
+| Managed domain | no longer managed, or removed |
+| Security rules, activity log stream | changed or removed |
+
+Everyday changes (invitations, renaming, members joining, apps allowed) are only in the activity.
+There is no setting to turn the alerts off: they are what notices an owner account taken over.
+
 
 
 ## 5. Protocol surface
@@ -1554,6 +1576,7 @@ Resolved:
 | 10g | **The organization API**: keys, members, domains, audit log (§4.24) |
 | 10h | **Single sign-on that keeps working** (§4.25): dashboard sign-in link, certificate rollover, expiry warnings, SSO first, sign out everywhere |
 | 10i | **SAML from the provider's metadata URL**, read again daily (§4.26) |
+| 10j | **Security alerts for owners** (§4.27) |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 
