@@ -1454,6 +1454,23 @@ fine-grained limits are in the Worker (§8).
 | `MFA_ENCRYPTION_KEY` | secret | owner, generated locally (encrypts TOTP secrets; phase 5) |
 | `MFA_REQUIRED` | var | `wrangler.jsonc`, default `"false"` (§4.7) |
 
+### 9.4 Logs, error pages and the uptime check
+
+- **Workers Logs** on (`observability` in `wrangler.jsonc`), 7 days. Cloudflare's per-request
+  invocation logs stay **off**: they record full URLs, with authorization codes and state.
+- The Worker writes its own JSON lines (`src/request-log.ts`): every response 400 and above
+  except 404, and every exception, with the **route pattern** (`/orgs/:org/saml`, never the path
+  or query), method, status, duration, Ray ID, Cloudflare colo and country, and the /24 or /48
+  network prefix. Exceptions add the error's name and its message with addresses and long tokens
+  removed.
+- An exception gives browsers a page ("Something went wrong on our side") with the Ray ID as
+  reference, and API clients `{"error":"server_error","reference":…}`. One that escapes the app
+  is caught in the Worker's `fetch` the same way, instead of Cloudflare's error 1101.
+- `/healthz` reads D1 and KV: `503` with which one failed.
+- **Uptime** (`.github/workflows/uptime.yml`): every 10 minutes from GitHub's runners,
+  `/healthz`, `/login` and the OpenID configuration, with one retry. A failed run is the alert
+  (GitHub emails whoever last changed the schedule); its summary has the status and Ray ID.
+
 ---
 
 ## 10. CI/CD
@@ -1463,6 +1480,7 @@ fine-grained limits are in the Worker (§8).
 | `ci.yml` | PR, push to `main` | job `verify`: install (frozen lockfile), typecheck (including `wrangler types --check`), lint + format, tests on the Workers runtime, browser tests (Playwright Chromium against `wrangler dev` with `e2e/worker/index.ts`: the real app with Google's token endpoint and keys replaced; the whole owner journey including a virtual passkey), bundle (dry-run deploy), `pnpm audit`. **Required check** on `main`. |
 | CodeQL | PR, push, weekly | GitHub default setup (no workflow file). On private repositories only with the Code Security add-on (OPERATIONS §8) |
 | `deploy.yml` | push to `main` (except `docs/`, `infra/`, Markdown), manual | environment `production` (**owner approval**) → tests → `wrangler d1 migrations apply DB --remote` → `wrangler deploy` → smoke test of `/healthz` (the metadata endpoint once it exists). Migrations must stay compatible with the code already live. |
+| `uptime.yml` | every 10 minutes, manual | checks the live service from outside (§9.4); a failed run is the alert |
 | Dependabot | weekly | npm and GitHub Actions updates, grouped, 1-day cooldown (matches pnpm `minimumReleaseAge`) |
 
 - Default `GITHUB_TOKEN` permissions are read-only; jobs request only what they need.

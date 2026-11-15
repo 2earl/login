@@ -19,7 +19,7 @@ describe('placeholder worker', () => {
   it('answers the health check', async () => {
     const res = await get('/healthz');
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: 'ok' });
+    expect(await res.json()).toEqual({ status: 'ok', d1: true, kv: true });
   });
 
   it('returns a JSON 404 for unknown paths', async () => {

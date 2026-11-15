@@ -18,6 +18,12 @@ Status as of 13 November 2026. **[owner]** marks a step only the owner can take.
 One person runs the service. Until a second person can act (§5), every S1 starts with the
 containment switches in §3: they work from a phone.
 
+**Is it down, or is it me?** The uptime check (`uptime` workflow, every 10 minutes) checks from
+outside; its last runs say whether others see the outage. Someone who sees "Something went wrong
+on our side" has a reference: the Ray ID. Look it up in Cloudflare → Workers & Pages → `login`
+→ Logs, filtered by `ray`. A Cloudflare page (a 1xxx error, a challenge, "Sorry, you have been
+blocked") never reached the Worker: look in Security → Events instead, by the same Ray ID.
+
 ## 2. Incident and breach procedure
 
 1. **Record.** Start a private note: when it was noticed, by whom, what is known. Keep adding

@@ -51,7 +51,7 @@ with German law on telemedia: TDDDG for cookies, DDG for the imprint **[verify]*
 | Verified domains and directory tokens (domain, challenge value, hashed token) | D1 `org_domains`, `scim_tokens` | Organization owners | Prove control of a domain; authenticate the directory. No personal data |
 | Pushed authorization requests (the app's request parameters, which may include an address the app suggests in `login_hint`) | D1 `pushed_requests` | The app | Start a sign-in the app prepared; at most 10 minutes, deleted daily |
 | DPoP proofs seen (a hash of the app's key and the proof's ID) | D1 `dpop_proofs` | The app | Refuse a replayed proof; 2 minutes, no personal data |
-| Request logs | Cloudflare (Workers logs, if enabled) | Request | Operations; configured without tokens or full query strings |
+| Error log (refused and failed requests: route pattern, status, Ray ID, Cloudflare colo and country, network prefix; for exceptions the error with addresses and tokens removed) | Cloudflare Workers Logs, 7 days | Request | Keep the service working; never paths, queries, tokens or form fields (DESIGN §9.4) |
 
 IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 

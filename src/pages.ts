@@ -1218,6 +1218,21 @@ export const MESSAGES = {
   },
 } satisfies Record<string, Message>;
 
+/**
+ * When something failed on our side (a database or network hiccup): a page, not a bare error,
+ * with the reference that finds it in the logs.
+ */
+export function serverErrorPage(reference: string | null): string {
+  return page(
+    'Something went wrong',
+    `<p class="status">${ALERT_ICON}<span>Error on our side</span></p>` +
+      '<h1>Something went wrong on our side</h1>' +
+      '<p class="lede">Nothing you did caused this. Try again in a moment; if it keeps happening, write to us with the reference below.</p>' +
+      '<a class="button primary" href="/account">Try again</a>' +
+      (reference ? `<p class="fine">Reference: <code>${escapeHtml(reference)}</code></p>` : ''),
+  );
+}
+
 export function notFoundPage(): string {
   return page(
     'Page not found',

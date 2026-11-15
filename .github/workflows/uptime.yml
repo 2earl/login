@@ -1,0 +1,53 @@
+name: uptime
+
+# Checks login.2earl.com from outside every 10 minutes, the way a browser would see it. A failed
+# run is the alert: GitHub emails whoever last changed this schedule. The run's summary says what
+# answered, with the Cloudflare Ray ID to look up in Workers Logs (OPERATIONS §1).
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check login.2earl.com
+        shell: bash
+        run: |
+          set -u
+          failed=0
+          check() {
+            local path="$1" expect="$2" code body ray
+            for attempt in 1 2; do
+              body=$(mktemp)
+              code=$(curl -sS -o "$body" -D headers.txt -w '%{http_code}' --max-time 15 \
+                -H 'Accept: text/html,application/json' -A 'login-uptime-check (github.com/2earl/login)' \
+                "https://login.2earl.com$path" || echo 000)
+              ray=$(grep -i '^cf-ray:' headers.txt | tr -d '\r' | cut -d' ' -f2 || true)
+              if [ "$code" = 200 ] && grep -q "$expect" "$body"; then
+                echo "| \`$path\` | $code | ok | ${ray:-} |" >> "$GITHUB_STEP_SUMMARY"
+                return 0
+              fi
+              # One retry after a pause: a single slow answer isn't an outage.
+              [ "$attempt" = 1 ] && sleep 20
+            done
+            echo "| \`$path\` | $code | **failed**: $(head -c 200 "$body" | tr '\n|' '  ') | ${ray:-} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::$path answered $code (ray ${ray:-none})"
+            failed=1
+          }
+          echo "| Path | Status | Result | Ray ID |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          check /healthz '"status":"ok"'
+          check /login 'Sign in'
+          check /.well-known/openid-configuration '"issuer"'
+          exit $failed
