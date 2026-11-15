@@ -296,7 +296,7 @@ export function registerOrgApiRoutes(app: Hono<AppEnv>, deps: Deps): void {
     return json({ id: member.userId, removed: true });
   });
 
-  // The reference, for customers: the repository is private (scripts/api-docs.mjs).
+  // The reference, for customers, from docs/API.md (scripts/api-docs.mjs).
   app.get('/docs/api', (c) =>
     c.html(
       page('API reference', `<article class="docs">${API_DOCS_HTML}</article>`, {

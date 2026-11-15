@@ -132,7 +132,7 @@ function api(key: string, path: string, body?: unknown) {
 }
 
 describe('the published reference', () => {
-  it('is served by login itself, for everyone, since the repository is private', async () => {
+  it('is served by login itself, for everyone', async () => {
     const response = await call(app, '/docs/api');
     expect(response.status).toBe(200);
     const page = await response.text();
