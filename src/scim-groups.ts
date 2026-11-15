@@ -16,7 +16,7 @@ export interface ScimGroupRow {
   org_id: string;
   display_name: string;
   external_id: string | null;
-  role: 'admin' | null;
+  role: 'admin' | 'auditor' | null;
   created_at: number;
   updated_at: number;
 }
@@ -178,34 +178,37 @@ export async function removeMembers(
 /** Whether the directory decides roles in this organization: some group has a role. */
 export async function directoryDecidesRoles(db: D1Database, orgId: string): Promise<boolean> {
   const row = await db
-    .prepare("SELECT 1 AS ok FROM scim_groups WHERE org_id = ? AND role = 'admin' LIMIT 1")
+    .prepare('SELECT 1 AS ok FROM scim_groups WHERE org_id = ? AND role IS NOT NULL LIMIT 1')
     .bind(orgId)
     .first<{ ok: number }>();
   return row !== null;
 }
 
 /**
- * Makes roles follow the groups: admin for members of a group with the admin role, member for
- * everyone else the directory provisioned. Owners, and accounts the directory didn't provision,
- * keep their roles. Nothing happens while no group has a role.
+ * Makes roles follow the groups: admin for members of a group with the admin role, auditor for
+ * members of one with the auditor role (admin wins), member for everyone else the directory
+ * provisioned. Owners, and accounts the directory didn't provision, keep their roles. Nothing
+ * happens while no group has a role.
  */
 export async function syncRoles(db: D1Database, now: number, orgId: string): Promise<number> {
+  const target = `CASE
+             WHEN EXISTS (SELECT 1 FROM scim_users su
+               JOIN scim_group_members gm ON gm.scim_user_id = su.id
+               JOIN scim_groups g ON g.id = gm.group_id AND g.role = 'admin'
+               WHERE su.org_id = ?1 AND su.user_id = m.user_id AND su.active = 1) THEN 'admin'
+             WHEN EXISTS (SELECT 1 FROM scim_users su
+               JOIN scim_group_members gm ON gm.scim_user_id = su.id
+               JOIN scim_groups g ON g.id = gm.group_id AND g.role = 'auditor'
+               WHERE su.org_id = ?1 AND su.user_id = m.user_id AND su.active = 1) THEN 'auditor'
+             ELSE 'member' END`;
   const { results } = await db
     .prepare(
       `UPDATE org_members AS m
-       SET role = CASE WHEN EXISTS (
-             SELECT 1 FROM scim_users su
-             JOIN scim_group_members gm ON gm.scim_user_id = su.id
-             JOIN scim_groups g ON g.id = gm.group_id AND g.role = 'admin'
-             WHERE su.org_id = ?1 AND su.user_id = m.user_id AND su.active = 1) THEN 'admin' ELSE 'member' END
+       SET role = ${target}
        WHERE m.org_id = ?1 AND m.role != 'owner'
-         AND EXISTS (SELECT 1 FROM scim_groups WHERE org_id = ?1 AND role = 'admin')
+         AND EXISTS (SELECT 1 FROM scim_groups WHERE org_id = ?1 AND role IS NOT NULL)
          AND EXISTS (SELECT 1 FROM scim_users WHERE org_id = ?1 AND user_id = m.user_id)
-         AND m.role != CASE WHEN EXISTS (
-             SELECT 1 FROM scim_users su
-             JOIN scim_group_members gm ON gm.scim_user_id = su.id
-             JOIN scim_groups g ON g.id = gm.group_id AND g.role = 'admin'
-             WHERE su.org_id = ?1 AND su.user_id = m.user_id AND su.active = 1) THEN 'admin' ELSE 'member' END
+         AND m.role != ${target}
        RETURNING user_id, role`,
     )
     .bind(orgId)
@@ -224,7 +227,7 @@ export async function setGroupRole(
   now: number,
   orgId: string,
   groupId: string,
-  role: 'admin' | null,
+  role: 'admin' | 'auditor' | null,
 ): Promise<boolean> {
   const result = await db
     .prepare('UPDATE scim_groups SET role = ?, updated_at = ? WHERE id = ? AND org_id = ?')
@@ -239,7 +242,7 @@ export interface GroupSummary {
   id: string;
   name: string;
   members: number;
-  role: 'admin' | null;
+  role: 'admin' | 'auditor' | null;
 }
 
 export async function listGroups(db: D1Database, orgId: string): Promise<GroupSummary[]> {
@@ -250,6 +253,6 @@ export async function listGroups(db: D1Database, orgId: string): Promise<GroupSu
        FROM scim_groups g WHERE g.org_id = ? ORDER BY g.display_name COLLATE NOCASE LIMIT ?`,
     )
     .bind(orgId, MAX_GROUPS)
-    .all<{ id: string; display_name: string; role: 'admin' | null; members: number }>();
+    .all<{ id: string; display_name: string; role: 'admin' | 'auditor' | null; members: number }>();
   return results.map((r) => ({ id: r.id, name: r.display_name, members: r.members, role: r.role }));
 }

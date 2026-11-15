@@ -549,11 +549,16 @@ export async function notify(
 export function invitationMail(params: {
   org: string;
   inviter: string | null;
-  role: 'admin' | 'member';
+  role: 'admin' | 'auditor' | 'member';
   link: string;
 }): Mail {
   const who = params.inviter ?? 'Someone';
-  const role = params.role === 'admin' ? 'an admin' : 'a member';
+  const role =
+    params.role === 'admin'
+      ? 'an admin'
+      : params.role === 'auditor'
+        ? 'an auditor (read-only)'
+        : 'a member';
   return {
     subject: `Join “${params.org}” on 2earl`,
     preview: `${who} invited you to join as ${role}.`,

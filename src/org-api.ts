@@ -228,8 +228,8 @@ export function registerOrgApiRoutes(app: Hono<AppEnv>, deps: Deps): void {
     if (member instanceof Response) return member;
     const body = (await c.req.json().catch(() => null)) as { role?: unknown } | null;
     const role = body?.role;
-    if (role !== 'admin' && role !== 'member') {
-      return problem(400, 'invalid_role', 'role must be "admin" or "member".');
+    if (role !== 'admin' && role !== 'auditor' && role !== 'member') {
+      return problem(400, 'invalid_role', 'role must be "admin", "auditor" or "member".');
     }
     if (member.roleFromDirectory) {
       return problem(409, 'directory', 'The directory decides this member’s role.');
