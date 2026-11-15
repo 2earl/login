@@ -1,5 +1,6 @@
 import { DOMParser, type XmlElement } from '@xmldom/xmldom/lib/dom-parser.js';
 import { audit } from './audit';
+import { alertOwners } from './org-alerts';
 import { certificateExpiry, signingKeyPem, ssoUrl } from './saml';
 
 /**
@@ -191,6 +192,7 @@ export async function refreshSamlMetadata(
         await audit(env.DB, now, 'org.saml_metadata_refreshed', {
           detail: { org: row.org_id, certificates: metadata.certificates.length },
         });
+        await alertOwners(env, row.org_id, 'org.saml_metadata_refreshed', {}, { system: true });
         changed += 1;
       }
     } catch (cause) {

@@ -77,6 +77,7 @@ import { addDomain, listDomains, normaliseDomain, removeDomain, verifyDomain } f
 import { createScimToken, listScimTokens, revokeScimToken } from './scim';
 import { certificateExpiry, samlConfig, signingKeyPem, ssoUrl } from './saml';
 import { MetadataError, certificateColumns, fetchMetadata, metadataUrl } from './saml-metadata';
+import { alertFor, alertOwners } from './org-alerts';
 import { dateField } from './sso-upkeep';
 import {
   MAX_INVITATIONS_PER_DAY,
@@ -134,17 +135,32 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     return c.redirect(`/login?return_to=${encodeURIComponent(url.pathname + url.search)}`, 303);
   };
 
-  const record = (
+  const record = async (
     c: AppContext,
     session: Session,
     event: AuditEvent,
     detail: Record<string, string | number | boolean | null>,
-  ) =>
-    audit(c.env.DB, deps.now(), event, {
+  ) => {
+    const now = deps.now();
+    await audit(c.env.DB, now, event, {
       actorUserId: session.user.id,
       ipPrefix: clientIp(c),
       detail,
     });
+    // The changes that matter for who can get in are emailed to every owner (DESIGN §4.27).
+    if (typeof detail.org === 'string' && alertFor(event, detail)) {
+      workerCtx(c).waitUntil(
+        alertOwners(
+          c.env,
+          detail.org,
+          event,
+          detail,
+          { userId: session.user.id },
+          noticeContext(c, now),
+        ),
+      );
+    }
+  };
 
   /** The organization page, with a message, for a change that didn't go through. */
   async function showOrg(
@@ -676,6 +692,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       org: ctx.orgId,
       target: who.userId,
       role: next,
+      from: who.role,
     });
     return c.redirect(back(ctx.orgId, 'role'), 303);
   });
