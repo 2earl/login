@@ -27,7 +27,7 @@
     "@node-saml/node-saml": "5.2.0",
     "@simplewebauthn/server": "14.1.0",
     "@xmldom/xmldom": "0.8.15",
-    "hono": "4.13.17",
+    "hono": "4.13.20",
     "jose": "6.2.15",
     "uqr": "0.1.3"
   },
