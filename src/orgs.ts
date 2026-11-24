@@ -9,11 +9,14 @@ import { SERVICES } from './services';
  * checks it in SQL, so two requests at once can't both succeed.
  */
 
-export type OrgRole = 'owner' | 'admin' | 'member';
-export const ORG_ROLES: readonly OrgRole[] = ['owner', 'admin', 'member'];
+export type OrgRole = 'owner' | 'admin' | 'auditor' | 'member';
+/** The roles an invitation or a directory group can give: not owner. */
+export type InvitedRole = 'admin' | 'auditor' | 'member';
+export const ORG_ROLES: readonly OrgRole[] = ['owner', 'admin', 'auditor', 'member'];
 export const ROLE_LABEL: Record<OrgRole, string> = {
   owner: 'Owner',
   admin: 'Admin',
+  auditor: 'Auditor',
   member: 'Member',
 };
 
@@ -35,7 +38,10 @@ export function isOrgRole(value: unknown): value is OrgRole {
 // ---- Who may do what ----------------------------------------------------------------------------
 
 /** Invite people and withdraw invitations. */
-export const canInvite = (actor: OrgRole): boolean => actor !== 'member';
+export const canInvite = (actor: OrgRole): boolean => actor === 'owner' || actor === 'admin';
+
+/** See the organization's activity and download it (DESIGN §4.28): everyone but members. */
+export const canSeeActivity = (actor: OrgRole): boolean => actor !== 'member';
 
 /** Change `target`'s role to `next`. Only owners make or unmake owners. */
 export function canSetRole(actor: OrgRole, target: OrgRole, next: OrgRole): boolean {
@@ -156,12 +162,12 @@ export async function listMembers(db: D1Database, orgId: string): Promise<Member
               u.managed_by IS m.org_id AS managed,
               (u.managed_by IS m.org_id AND u.deactivated_at IS NOT NULL) AS deactivated,
               (m.role != 'owner'
-               AND EXISTS (SELECT 1 FROM scim_groups g WHERE g.org_id = m.org_id AND g.role = 'admin')
+               AND EXISTS (SELECT 1 FROM scim_groups g WHERE g.org_id = m.org_id AND g.role IS NOT NULL)
                AND EXISTS (SELECT 1 FROM scim_users su WHERE su.org_id = m.org_id AND su.user_id = m.user_id)
               ) AS role_from_directory
        FROM org_members m JOIN users u ON u.id = m.user_id
        WHERE m.org_id = ?
-       ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, m.joined_at, m.user_id
+       ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'auditor' THEN 2 ELSE 3 END, m.joined_at, m.user_id
        LIMIT ?`,
     )
     .bind(orgId, MAX_SEATS)
@@ -212,7 +218,7 @@ export async function listInvitations(
     .all<{
       id: string;
       email: string;
-      role: 'admin' | 'member';
+      role: InvitedRole;
       invited_by: string | null;
       created_at: number;
       expires_at: number;
@@ -275,7 +281,7 @@ export type InviteResult =
 export async function createInvitation(
   env: Env,
   now: number,
-  params: { orgId: string; email: string; role: 'admin' | 'member'; invitedBy: string },
+  params: { orgId: string; email: string; role: InvitedRole; invitedBy: string },
 ): Promise<InviteResult> {
   const db = env.DB;
   const member = await db
@@ -333,7 +339,7 @@ export interface InvitationView {
   orgName: string;
   orgStatus: 'active' | 'suspended';
   email: string;
-  role: 'admin' | 'member';
+  role: InvitedRole;
   inviter: string | null;
   expiresAt: number;
 }
@@ -358,7 +364,7 @@ export async function invitationByToken(
       name: string;
       status: 'active' | 'suspended';
       email: string;
-      role: 'admin' | 'member';
+      role: InvitedRole;
       expires_at: number;
       display_name: string | null;
       primary_email: string | null;
@@ -401,7 +407,7 @@ export async function accountHasAddress(
 }
 
 export type AcceptResult =
-  | { ok: true; orgId: string; role: 'admin' | 'member' }
+  | { ok: true; orgId: string; role: InvitedRole }
   | { ok: false; reason: 'wrong_address' | 'suspended' | 'too_many' };
 
 /**

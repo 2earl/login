@@ -26,13 +26,15 @@ const ALERTS: Partial<Record<AuditEvent, (detail: Detail) => string | null>> = {
   'org.require_sso_changed': (d) =>
     d.on === false ? 'stopped requiring single sign-on for managed accounts' : null,
   'org.role_changed': (d) =>
-    d.role === 'owner' || d.role === 'admin'
-      ? `made {target} ${d.role === 'owner' ? 'an owner' : 'an admin'}`
+    d.role === 'owner' || d.role === 'admin' || d.role === 'auditor'
+      ? `made {target} ${d.role === 'owner' ? 'an owner' : d.role === 'admin' ? 'an admin' : 'an auditor (reads the activity)'}`
       : d.from === 'owner' || d.from === 'admin'
         ? `changed {target} from ${d.from} to ${String(d.role)}`
         : null,
   'org.group_role_changed': (d) =>
-    d.role === 'admin' ? `made the directory group “${String(d.name)}” admins` : null,
+    d.role === 'admin' || d.role === 'auditor'
+      ? `made the directory group “${String(d.name)}” ${d.role === 'admin' ? 'admins' : 'auditors'}`
+      : null,
   'org.api_key_created': (d) =>
     `created an API key “${String(d.name)}” with ${d.access === 'write' ? 'read and write' : 'read'} access`,
   'org.scim_token_created': () => 'created a directory sync (SCIM) token',

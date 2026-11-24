@@ -4,6 +4,7 @@ import {
   canInvite,
   canManageOrganization,
   canRemove,
+  canSeeActivity,
   canSetRole,
   type Member,
   type OpenInvitation,
@@ -33,6 +34,8 @@ import { dateValue } from './sso-upkeep';
 const ROLE_HELP: Record<OrgRole, string> = {
   owner: 'Owners can do everything, including renaming and deleting the organization.',
   admin: 'Admins can invite people, remove members and admins, and change their roles.',
+  auditor:
+    'Auditors see the members and the activity, and can download it, but can’t change anything.',
   member: 'Members can see who else is in the organization.',
 };
 
@@ -60,7 +63,7 @@ export function orgHeader(org: Organization, role: OrgRole, tab: OrgTab): string
   const base = `/orgs/${escapeHtml(org.id)}`;
   const tabs: [OrgTab, string, string, boolean][] = [
     ['members', 'Members', base, true],
-    ['activity', 'Activity', `${base}/activity`, role !== 'member'],
+    ['activity', 'Activity', `${base}/activity`, canSeeActivity(role)],
     ['directory', 'Domains & SSO', `${base}/directory`, role === 'owner'],
     ['settings', 'Settings', `${base}/settings`, true],
   ];
@@ -142,7 +145,7 @@ function memberRow(
     .filter(Boolean)
     .join(' · ');
   // A role the directory decides can only become owner here (DESIGN §4.21).
-  const roles = (['member', 'admin', 'owner'] as const).filter(
+  const roles = (['member', 'auditor', 'admin', 'owner'] as const).filter(
     (r) =>
       r !== member.role &&
       canSetRole(actor.role, member.role, r) &&
@@ -247,7 +250,7 @@ export function orgPage(params: {
           '<label class="field invite-email"><span>Email address</span>' +
           `<input name="email" type="email" required maxlength="254" autocomplete="off" spellcheck="false" placeholder="name@example.com" value="${escapeHtml(params.email ?? '')}"></label>` +
           '<label class="field invite-role"><span>Role</span><select name="role">' +
-          '<option value="member">Member</option><option value="admin">Admin</option></select></label>' +
+          '<option value="member">Member</option><option value="auditor">Auditor (read-only)</option><option value="admin">Admin</option></select></label>' +
           '<button class="button primary" type="submit">Send invitation</button></form>' +
           '<p class="note">The link works for 7 days, for that address only. Owners are made from members once they’ve joined.</p>' +
           '</section>'
@@ -460,13 +463,15 @@ const ACTIVITY: Record<string, (e: ActivityEntry) => string> = {
   'scim.group_updated': () => 'changed a group',
   'scim.group_deleted': () => 'removed a group',
   'scim.role_changed': (e) =>
-    `made ${e.target ?? 'someone'} ${e.detail.role === 'admin' ? 'an admin' : 'a member'}`,
+    `made ${e.target ?? 'someone'} ${e.detail.role === 'admin' ? 'an admin' : e.detail.role === 'auditor' ? 'an auditor' : 'a member'}`,
   'org.apps_restricted': (e) =>
     e.detail.on ? 'allowed only chosen apps for managed accounts' : 'allowed any app again',
   'org.app_allowed': () => 'allowed an app',
   'org.app_disallowed': () => 'removed an allowed app',
   'org.group_role_changed': (e) =>
-    `${e.detail.role === 'admin' ? 'made' : 'stopped making'} the members of “${str(e.detail.name, 'a group')}” admins`,
+    e.detail.role === 'admin' || e.detail.role === 'auditor'
+      ? `made the members of “${str(e.detail.name, 'a group')}” ${e.detail.role === 'admin' ? 'admins' : 'auditors'}`
+      : `stopped giving the members of “${str(e.detail.name, 'a group')}” a role`,
   'scim.account_deactivated': (e) => `deactivated ${e.target ?? 'an account'}`,
   'scim.account_reactivated': (e) => `reactivated ${e.target ?? 'an account'}`,
   'scim.account_deletion_scheduled': (e) =>
@@ -635,7 +640,7 @@ export function invitationPage(params: {
   return page(
     `Join ${inv.orgName}`,
     `<h1>Join “${escapeHtml(inv.orgName)}”</h1>` +
-      `<p class="lede">${escapeHtml(inv.inviter ?? 'Someone')} invited ${escapeHtml(inv.email)} to join this organization as ${inv.role === 'admin' ? 'an admin' : 'a member'}. ${escapeHtml(ROLE_HELP[inv.role])}</p>` +
+      `<p class="lede">${escapeHtml(inv.inviter ?? 'Someone')} invited ${escapeHtml(inv.email)} to join this organization as ${inv.role === 'admin' ? 'an admin' : inv.role === 'auditor' ? 'an auditor' : 'a member'}. ${escapeHtml(ROLE_HELP[inv.role])}</p>` +
       (params.wrongAddress
         ? `<p class="warning" role="alert">You’re signed in as ${escapeHtml(params.signedInAs ?? 'another account')}, which doesn’t sign in with ${escapeHtml(inv.email)}. Sign in with the account that uses that address, or add the address to this account first.</p>` +
           '<div class="consent-actions">' +
@@ -964,29 +969,47 @@ function appsSection(
   );
 }
 
-/** Groups from the directory, and the role each gives (DESIGN §4.21). */
+/** Groups from the directory, and the role each gives (DESIGN §4.21, §4.28). */
 function groupsBlock(base: string, groups: GroupSummary[]): string {
-  const deciding = groups.some((g) => g.role === 'admin');
+  const deciding = groups.some((g) => g.role !== null);
+  const badge = (role: GroupSummary['role']) =>
+    role
+      ? ` <span class="role-badge role-${role}">${role === 'admin' ? 'Admin' : 'Auditor'}</span>`
+      : '';
   return (
     '<h3 class="subhead">Groups and roles</h3>' +
     (groups.length === 0
-      ? '<p class="note">Groups your directory sends appear here. Give a group the admin role, and your directory decides who is an admin.</p>'
+      ? '<p class="note">Groups your directory sends appear here. Give a group the admin or auditor role, and your directory decides who has it.</p>'
       : '<p class="section-text">' +
         (deciding
-          ? 'Your directory decides roles: members of a group marked admin are admins, everyone else it provisioned is a member. Owners never change.'
-          : 'Mark a group admin, and your directory decides who is an admin. Owners never change.') +
+          ? 'Your directory decides roles: members of a group marked admin are admins, of one marked auditor are auditors (admin wins), and everyone else it provisioned is a member. Owners never change.'
+          : 'Mark a group admin or auditor, and your directory decides who has that role. Owners never change.') +
         '</p>' +
         '<ul class="admin-list">' +
         groups
           .map(
             (g) =>
               '<li class="admin-row"><div class="app-main">' +
-              `<p class="app-name">${escapeHtml(g.name)}${g.role === 'admin' ? ' <span class="role-badge role-admin">Admin</span>' : ''}</p>` +
+              `<p class="app-name">${escapeHtml(g.name)}${badge(g.role)}</p>` +
               `<p class="app-meta">${String(g.members)} ${g.members === 1 ? 'person' : 'people'}</p>` +
               '</div><div class="row-actions">' +
-              `<form method="post" action="${base}/groups/role">` +
-              hidden({ group: g.id, role: g.role === 'admin' ? '' : 'admin' }) +
-              `<button class="button secondary small" type="submit">${g.role === 'admin' ? 'Stop making admins' : 'Make its members admins'}</button></form>` +
+              `<form method="post" action="${base}/groups/role" class="inline-form">` +
+              hidden({ group: g.id }) +
+              `<select name="role" aria-label="Role for ${escapeHtml(g.name)}">` +
+              (
+                [
+                  ['', 'No role'],
+                  ['auditor', 'Auditors'],
+                  ['admin', 'Admins'],
+                ] as const
+              )
+                .map(
+                  ([value, label]) =>
+                    `<option value="${value}"${(g.role ?? '') === value ? ' selected' : ''}>${label}</option>`,
+                )
+                .join('') +
+              '</select>' +
+              '<button class="button secondary small" type="submit">Save</button></form>' +
               '</div></li>',
           )
           .join('') +

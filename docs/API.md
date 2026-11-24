@@ -78,7 +78,7 @@ comes back. Events of the last few seconds appear on the next call.
 
 | Request | Body | Does |
 |---|---|---|
-| `POST /members/{id}/role` | `{ "role": "admin" }` or `"member"` | Changes the role. `409 directory` when the directory decides it (a group marked admin) |
+| `POST /members/{id}/role` | `{ "role": "admin" }`, `"auditor"` or `"member"` | Changes the role. `409 directory` when the directory decides it (a group marked admin or auditor) |
 | `POST /members/{id}/deactivate` | none | A managed account can't sign in; sessions and app access end. `409 not_managed` otherwise |
 | `POST /members/{id}/reactivate` | none | Lifts the organization's deactivation |
 | `POST /members/{id}/sign-out` | none | Signs a managed account out everywhere: sessions and app access end, the account stays active. `409 not_managed` otherwise |
@@ -102,4 +102,4 @@ Owners create a token on **Domains & SSO**, after verifying a domain.
 
 At a domain the organization manages, provisioning creates the 2earl account; `active: false`
 deactivates it; `DELETE` deactivates it at once and deletes it 30 days later unless it is
-reactivated first. Groups can be marked admin on **Domains & SSO**: their members become admins.
+reactivated first. Groups can be marked admins or auditors on **Domains & SSO**: their members get that role.
