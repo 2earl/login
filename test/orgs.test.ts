@@ -503,8 +503,8 @@ describe('pages of an organization', () => {
     now += 60;
     await post(ada, `/orgs/${orgId}/members/role`, { user: bob.id, role: 'admin' });
     const html = await (await get(ada, `/orgs/${orgId}/activity`)).text();
-    expect(html).toContain('Ada Lovelace</strong> made Bob Example admin');
-    expect(html).toContain('Bob Example</strong> joined as member');
+    expect(html).toContain('Ada Lovelace</strong> <span>made Bob Example admin');
+    expect(html).toContain('Bob Example</strong> <span>joined as member');
     expect(html.indexOf('made Bob Example admin')).toBeLessThan(
       html.indexOf('created the organization'),
     );

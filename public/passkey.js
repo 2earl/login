@@ -27,25 +27,43 @@ async function post(url, body) {
     credentials: 'same-origin',
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.message || 'Something went wrong. Try again.');
+  if (!response.ok) throw new Error(data.message || t('Something went wrong. Try again.'));
   return data;
 }
 
+// The page's language (DESIGN §4.31): the server translates the page and its messages; these few
+// sentences are the browser's own, so they are translated here.
+const WORDS = {
+  tr: {
+    'Something went wrong. Try again.': 'Bir şeyler ters gitti. Yeniden deneyin.',
+    'The passkey request was cancelled or timed out.':
+      'Geçiş anahtarı isteği iptal edildi ya da zaman aşımına uğradı.',
+    'This passkey is already on your account.': 'Bu geçiş anahtarı zaten hesabınızda.',
+    'This browser refused the passkey request.': 'Bu tarayıcı geçiş anahtarı isteğini reddetti.',
+    'This browser can’t use a passkey here.': 'Bu tarayıcı burada geçiş anahtarı kullanamıyor.',
+    'The passkey request didn’t work. Try again.':
+      'Geçiş anahtarı isteği çalışmadı. Yeniden deneyin.',
+    'This browser can’t use passkeys.': 'Bu tarayıcı geçiş anahtarlarını kullanamıyor.',
+  },
+};
+const t = (text) => WORDS[document.documentElement.lang]?.[text] ?? text;
+
 function explain(error) {
-  if (error?.name === 'NotAllowedError') return 'The passkey request was cancelled or timed out.';
-  if (error?.name === 'InvalidStateError') return 'This passkey is already on your account.';
-  if (error?.name === 'SecurityError') return 'This browser refused the passkey request.';
-  if (error?.name === 'NotSupportedError') return 'This browser can’t use a passkey here.';
+  if (error?.name === 'NotAllowedError')
+    return t('The passkey request was cancelled or timed out.');
+  if (error?.name === 'InvalidStateError') return t('This passkey is already on your account.');
+  if (error?.name === 'SecurityError') return t('This browser refused the passkey request.');
+  if (error?.name === 'NotSupportedError') return t('This browser can’t use a passkey here.');
   // The browser's own wording is for developers; our server's messages are written for people.
-  if (error instanceof window.DOMException) return 'The passkey request didn’t work. Try again.';
-  return error?.message || 'Something went wrong. Try again.';
+  if (error instanceof window.DOMException) return t('The passkey request didn’t work. Try again.');
+  return error?.message || t('Something went wrong. Try again.');
 }
 
 function wire(button, run) {
   const status = document.getElementById(button.dataset.status);
   if (!supported) {
     button.disabled = true;
-    if (status) status.textContent = 'This browser can’t use passkeys.';
+    if (status) status.textContent = t('This browser can’t use passkeys.');
     return;
   }
   button.hidden = false;

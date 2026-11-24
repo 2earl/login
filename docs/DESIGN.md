@@ -1292,6 +1292,35 @@ them: the person who will run it, usually at a customer.
 
 
 
+### 4.31 Languages (phase 12)
+
+login speaks English and Turkish; adding a language is one catalog file.
+
+- **Which language:** `?lang=` (any page; remembered in the `__Host-lang` cookie for a year),
+  then OpenID Connect's `ui_locales`, then the cookie, then the account's saved language, then
+  the browser's `Accept-Language`, then English (`pickLocale`, `src/i18n.ts`). Every page's
+  footer links to the same page in each language, each named in its own language.
+- **How:** pages and emails are written in English. For another language the middleware
+  translates the finished HTML, sentence by sentence, from `src/locales/<code>.ts`: a run of text
+  and inline elements is one sentence, with the elements as numbered markers (`<0>…</0>`, so a
+  translation can move a link), `{0}` placeholders for names, numbers and dates (a captured part
+  is translated too when the catalog has it), month names by rule, and `placeholder`,
+  `aria-label`, `title` and `alt`. Code, `svg` and anything marked `translate="no"` (people's
+  names, the language switcher) are kept. Links to 2earl.com go to the same page in the language.
+  A sentence the catalog lacks stays English: a page never breaks for a missing translation.
+  JSON `message`s for our own pages (passkeys) are translated the same way; `passkey.js`
+  translates the browser's own errors.
+- **Emails** go in the recipient's language: notices in the account's saved language
+  (`users.locale`, saved when the person chooses one, or the first time a signed-in request
+  shows one), codes and invitations in the language of the request that sends them.
+- **Search engines:** login is not for them: `X-Robots-Tag: noindex, nofollow` on every answer
+  and `/robots.txt` disallows everything. 2earl.com is the only indexed site (website repo).
+- **Coverage:** `test/i18n.test.ts` fails when a sentence of the pages people use most has no
+  Turkish. Running the suite with Turkish forced lists every missing sentence.
+
+Adding a language: its code in `LOCALES` and `LOCALE_NAMES`, `src/locales/<code>.ts` (from
+`tr.ts`), registered in `CATALOGS`, and `months`. No migration: `users.locale` has no CHECK.
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -1385,6 +1414,7 @@ recovery_codes   id PK, user_id FK, code_hash, used_at NULL
 mfa_pending      (session_hash FK sessions, purpose) PK, value, expires_at
                  purpose: webauthn_register | webauthn_authenticate | totp_enrol | recovery_codes
 users            + mfa_failed_attempts, mfa_locked_until (migration 0004)
+users            + locale: the account's language, NULL until known (migration 0028, §4.31)
 allowlist        id PK, kind ('google_sub'|'email'), value, added_by, created_at
 trusted_clients  client_id PK, note, created_at
 email_codes      id_hash PK (HMAC of the cookie), email, code_hash, link_hash, purpose
@@ -1671,6 +1701,7 @@ Resolved:
 | 10j | **Security alerts for owners** (§4.27) |
 | 10k | **The auditor role** (§4.28) |
 | 11 | **2earl staff roles** (§4.29) and **organizations set up by invitation** (§4.30) |
+| 12 | **Languages**: Turkish, and a catalog per language (§4.31) |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 

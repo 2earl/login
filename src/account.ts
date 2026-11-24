@@ -132,7 +132,7 @@ export async function exportAccount(
     db
       .prepare(
         `SELECT id, status, display_name, primary_email, created_at, updated_at,
-                managed_by, managed_since, deactivated_at, delete_after
+                managed_by, managed_since, deactivated_at, delete_after, locale
          FROM users WHERE id = ?`,
       )
       .bind(userId),
@@ -234,6 +234,7 @@ export async function exportAccount(
           status: account.status,
           name: account.display_name,
           email: account.primary_email,
+          language: account.locale ?? null,
           createdAt: iso(account.created_at as number),
           updatedAt: iso(account.updated_at as number),
         }

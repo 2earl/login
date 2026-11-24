@@ -55,6 +55,9 @@ export const BASE_HEADERS: Readonly<Record<string, string>> = {
   'Cross-Origin-Resource-Policy': 'same-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
   'Cache-Control': 'no-store',
+  // Only 2earl.com is for search engines (DESIGN §4.31): account pages, codes and consent
+  // screens stay out of search results.
+  'X-Robots-Tag': 'noindex, nofollow',
 };
 
 /**

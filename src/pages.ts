@@ -9,6 +9,7 @@ import type { SignupMode } from './settings';
 import type { DeviceSession } from './sessions';
 import type { Identity } from './users';
 import { NAV, isShellPath, navFor, shellContext, type ShellContext } from './shell';
+import { languageSwitcher } from './i18n';
 import { organizationsSection, type SetupOffer } from './org-pages';
 import type { OrgSummary, OwnershipPlan } from './orgs';
 
@@ -21,11 +22,13 @@ export function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-const LEGAL_LINKS =
+/** Legal links and the language switcher (DESIGN §4.31), under every page. */
+const legalLinks = () =>
   '<footer class="legal">' +
   '<a href="https://2earl.com/privacy">Privacy</a>' +
   '<a href="https://2earl.com/terms">Terms</a>' +
   '<a href="https://2earl.com/imprint">Imprint</a>' +
+  languageSwitcher() +
   '</footer>';
 
 /** Google's "G" mark, as required next to "Continue with Google" by its branding guidelines. */
@@ -90,7 +93,7 @@ export function page(
       '<div class="hero-main">' +
       `<header class="site"><a class="brand" href="/">${MARK}<span class="brand-name">2earl</span><span class="brand-sub">${escapeHtml(options.section ?? 'Account')}</span></a></header>` +
       `<main class="main">${main}</main>` +
-      LEGAL_LINKS +
+      legalLinks() +
       '</div></div></body></html>'
     );
   }
@@ -99,7 +102,7 @@ export function page(
     `<body><div class="page${options.wide ? ' page-wide' : ''}">` +
     `<header class="site"><a class="brand" href="/">${MARK}<span class="brand-name">2earl</span><span class="brand-sub">${escapeHtml(options.section ?? 'Account')}</span></a></header>` +
     `<main class="main${options.wide ? ' main-wide' : ''}">${main}</main>` +
-    LEGAL_LINKS +
+    legalLinks() +
     '</div></body></html>'
   );
 }
@@ -120,9 +123,9 @@ function appShell(shell: ShellContext, main: string): string {
     '<header class="topbar">' +
     `<a class="brand" href="/account">${MARK}<span class="brand-name">2earl</span><span class="brand-sub">Account</span></a>` +
     '<details class="account-menu">' +
-    `<summary><span class="avatar" aria-hidden="true">${escapeHtml(initial(viewer.name, viewer.email))}</span><span class="account-menu-name">${escapeHtml(who)}</span></summary>` +
+    `<summary><span class="avatar" aria-hidden="true">${escapeHtml(initial(viewer.name, viewer.email))}</span><span class="account-menu-name"${(viewer.name ?? viewer.email) ? ' translate="no"' : ''}>${escapeHtml(who)}</span></summary>` +
     '<div class="account-menu-panel">' +
-    `<p class="account-menu-who"><strong>${escapeHtml(who)}</strong>${viewer.email && viewer.name ? `<span>${escapeHtml(viewer.email)}</span>` : ''}</p>` +
+    `<p class="account-menu-who"><strong${(viewer.name ?? viewer.email) ? ' translate="no"' : ''}>${escapeHtml(who)}</strong>${viewer.email && viewer.name ? `<span translate="no">${escapeHtml(viewer.email)}</span>` : ''}</p>` +
     '<form method="post" action="/logout"><button type="submit">Sign out</button></form>' +
     '</div></details>' +
     '</header>' +
@@ -132,7 +135,7 @@ function appShell(shell: ShellContext, main: string): string {
     `<nav class="nav-mobile-links" aria-label="Account">${links}</nav></details>` +
     `<main class="app-main" id="main">${main}</main>` +
     '</div>' +
-    LEGAL_LINKS +
+    legalLinks() +
     '</div></body>'
   );
 }
@@ -393,7 +396,7 @@ function connectedApps(apps: ConnectedApp[]): string {
           '<li class="app">' +
           '<div class="app-main">' +
           `<p class="app-name">${escapeHtml(app.name)}</p>` +
-          `<p class="app-meta">${app.domain ? `${escapeHtml(app.domain)} · ` : ''}Allowed ${formatDate(app.allowedAt)}</p>` +
+          `<p class="app-meta">${app.domain ? `${escapeHtml(app.domain)} · ` : ''}Allowed on ${formatDate(app.allowedAt)}</p>` +
           (app.scopes.length > 0
             ? `<ul class="app-scopes">${app.scopes.map((s) => `<li>${escapeHtml(s)}</li>`).join('')}</ul>`
             : '') +
@@ -910,7 +913,7 @@ function recentActivity(events: SecurityEvent[]): string {
       return (
         '<li class="activity-row">' +
         `<time datetime="${new Date(e.at * 1000).toISOString()}">${escapeHtml(formatDateTime(e.at))}</time>` +
-        `<p>${escapeHtml(what)}<span class="activity-where">${escapeHtml(where)}</span></p>` +
+        `<p><span>${escapeHtml(what)}</span><span class="activity-where">${escapeHtml(where)}</span></p>` +
         '</li>'
       );
     })

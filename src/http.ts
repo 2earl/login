@@ -1,10 +1,14 @@
+import type { Locale } from './i18n';
 import type { Context } from 'hono';
 import { ipPrefix } from './net';
 import type { Session } from './sessions';
 
 /** Request plumbing shared by the route modules. */
 
-export type AppEnv = { Bindings: Env; Variables: { session: Session | null } };
+export type AppEnv = {
+  Bindings: Env;
+  Variables: { session: Session | null; locale: Locale };
+};
 export type AppContext = Context<AppEnv>;
 
 export const SESSION_COOKIE = '__Host-session';

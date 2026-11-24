@@ -24,6 +24,16 @@ import { LOGIN_TX_TTL_SECONDS, consumeLoginTx, createLoginTx } from './login-tx'
 import { isStepUpFresh, listFactors, listPasskeys, mfaGate, type MfaGate } from './mfa';
 import { mfaHtml, registerMfaRoutes } from './mfa-routes';
 import { registerAdminRoutes } from './admin';
+import {
+  DEFAULT_LOCALE,
+  LOCALE_COOKIE,
+  LOCALE_COOKIE_MAX_AGE,
+  isLocale,
+  localizeHtml,
+  pickLocale,
+  translate,
+  withLocale,
+} from './i18n';
 import { isOwnerUser, staffCan, staffRoleOf } from './staff';
 import { setupInvitationsFor } from './org-setup';
 import { ACR_AAL2, authorizationServer, type GrantProps } from './oauth';
@@ -322,6 +332,63 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     await next();
   });
 
+  // Language (DESIGN §4.31): chosen with ?lang= (or OpenID Connect's ui_locales), remembered in
+  // a cookie and on the account; otherwise the browser's. Pages are written in English and
+  // translated here, after the route rendered them.
+  app.use('*', async (c, next) => {
+    const session = c.get('session');
+    const chosen = c.req.query('lang');
+    const locale = pickLocale({
+      query: chosen,
+      uiLocales: c.req.query('ui_locales'),
+      cookie: readCookie(c.req.header('Cookie'), LOCALE_COOKIE),
+      account: session?.user.locale,
+      acceptLanguage: c.req.header('Accept-Language'),
+    });
+    c.set('locale', locale);
+    // Emails go in the account's language: saved when chosen, or the first time it's known.
+    if (
+      session &&
+      (session.user.locale === null || (isLocale(chosen) && chosen !== session.user.locale))
+    ) {
+      await c.env.DB.prepare('UPDATE users SET locale = ? WHERE id = ?')
+        .bind(locale, session.user.id)
+        .run();
+      session.user.locale = locale;
+    }
+    await withLocale({ locale, url: new URL(c.req.url) }, () => next());
+    // After the route: a cookie set before it can be lost when the route builds its own response.
+    if (isLocale(chosen) && c.req.method === 'GET') {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- Hono types a '*' middleware's context as any
+      setCookie(c, LOCALE_COOKIE, chosen, LOCALE_COOKIE_MAX_AGE);
+    }
+    c.header('Content-Language', locale);
+    c.header('Vary', 'Accept-Language, Cookie', { append: true });
+    if (locale === DEFAULT_LOCALE) return;
+    const type = c.res.headers.get('Content-Type') ?? '';
+    // Messages written for people in JSON answers to our own pages (passkeys).
+    if (type.startsWith('application/json') && !c.req.path.startsWith('/oauth/')) {
+      const text = await c.res.clone().text();
+      if (text.length > 4096 || !text.includes('"message"')) return;
+      try {
+        const data = JSON.parse(text) as Record<string, unknown>;
+        if (typeof data.message !== 'string') return;
+        data.message = translate(data.message, locale);
+        const headers = new Headers(c.res.headers);
+        headers.delete('Content-Length');
+        c.res = new Response(JSON.stringify(data), { status: c.res.status, headers });
+      } catch {
+        // Not JSON after all: leave it.
+      }
+      return;
+    }
+    if (!type.startsWith('text/html')) return;
+    const html = await c.res.text();
+    const headers = new Headers(c.res.headers);
+    headers.delete('Content-Length');
+    c.res = new Response(localizeHtml(html, locale), { status: c.res.status, headers });
+  });
+
   // Second factor: a session that must pass a challenge, or enrol first, can do nothing else.
   app.use('*', async (c, next) => {
     const session = c.get('session');
@@ -366,6 +433,11 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     };
     await withShell({ viewer, path: c.req.path }, () => next());
   });
+
+  // Search engines: nothing here to index (DESIGN §4.31); 2earl.com is the public site.
+  app.get('/robots.txt', (c) =>
+    c.text('User-agent: *\nDisallow: /\n', 200, { 'Cache-Control': 'public, max-age=86400' }),
+  );
 
   app.get('/', async (c) =>
     c.get('session')
