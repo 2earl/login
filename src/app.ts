@@ -23,7 +23,9 @@ import { GoogleSignInError, buildGoogleAuthUrl, exchangeCode, verifyGoogleIdToke
 import { LOGIN_TX_TTL_SECONDS, consumeLoginTx, createLoginTx } from './login-tx';
 import { isStepUpFresh, listFactors, listPasskeys, mfaGate, type MfaGate } from './mfa';
 import { mfaHtml, registerMfaRoutes } from './mfa-routes';
-import { isOwnerUser, registerAdminRoutes } from './admin';
+import { registerAdminRoutes } from './admin';
+import { isOwnerUser, staffCan, staffRoleOf } from './staff';
+import { setupInvitationsFor } from './org-setup';
 import { ACR_AAL2, authorizationServer, type GrantProps } from './oauth';
 import { pairwiseSubject, sectorFor } from './oidc';
 import { registerOidcRoutes, withIdToken } from './oidc-routes';
@@ -360,7 +362,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     const viewer = {
       name: session.user.displayName,
       email: session.user.primaryEmail,
-      isOwner: await isOwnerUser(c.env, session.user.id),
+      staff: await staffRoleOf(c.env, session.user.id),
     };
     await withShell({ viewer, path: c.req.path }, () => next());
   });
@@ -663,10 +665,13 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       org_deleted: 'Organization deleted.',
       declined: 'Invitation declined.',
     };
+    const role = await staffRoleOf(c.env, session.user.id);
     return c.html(
       orgsPage({
         orgs: await membershipsOf(c.env.DB, session.user.id),
         notice: notices[c.req.query('saved') ?? ''] ?? null,
+        canCreate: role !== null && staffCan.createOrgs(role),
+        setup: await setupInvitationsFor(c.env.DB, deps.now(), session.user.id),
       }),
     );
   });

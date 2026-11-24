@@ -290,6 +290,8 @@ export type Notice =
   | { kind: 'account_deactivated'; org: string }
   | { kind: 'account_reactivated'; org: string }
   | { kind: 'account_signed_out'; org: string }
+  | { kind: 'staff_role'; role: 'admin' | 'support' | null }
+  | { kind: 'staff_signed_out' }
   | { kind: 'org_security_change'; org: string; orgId: string; who: string; what: string }
   | {
       kind: 'sso_expiring';
@@ -446,6 +448,44 @@ export function noticeMail(notice: Notice, context?: NoticeContext): Mail {
         action: { label: 'Sign in', url: `${ISSUER}/login` },
         ...(context ? { facts: [['When', when(context.at)]] as [string, string][] } : {}),
       };
+    case 'staff_role':
+      return notice.role
+        ? {
+            subject: `You’re now ${notice.role === 'admin' ? 'an admin' : 'support'} at 2earl`,
+            preview: 'Your account can open 2earl’s admin pages.',
+            heading: notice.role === 'admin' ? 'You’re a 2earl admin' : 'You’re 2earl support',
+            alert: true,
+            body: [
+              notice.role === 'admin'
+                ? 'Your 2earl account was made an admin of 2earl: you can manage users, organizations and their setup invitations, and apps.'
+                : 'Your 2earl account was given the support role: you can see users and organizations and help them, but change little.',
+              'Your account needs a second factor to open the admin pages. If you didn’t expect this, tell 2earl at legal@2earl.com.',
+            ],
+            action: { label: 'Open the admin pages', url: `${ISSUER}/admin` },
+            facts: facts(context),
+          }
+        : {
+            subject: 'Your 2earl staff role was removed',
+            preview: 'Your account can no longer open 2earl’s admin pages.',
+            heading: 'Your staff role was removed',
+            body: [
+              'Your 2earl account is no longer staff: it can’t open the admin pages. The account itself is unchanged.',
+            ],
+            action: { label: 'Go to your account', url: `${ISSUER}/account` },
+          };
+    case 'staff_signed_out':
+      return {
+        subject: 'You were signed out of 2earl everywhere',
+        preview: '2earl support signed your account out on every device.',
+        heading: 'You were signed out everywhere',
+        alert: true,
+        body: [
+          '2earl support signed your account out on every device, usually because you asked for help with a lost or shared device. Connected apps lost access too.',
+          'Sign in again as usual; apps you use need to be connected again. If you didn’t ask for this, write to legal@2earl.com.',
+        ],
+        action: { label: 'Sign in', url: `${ISSUER}/login` },
+        facts: facts(context),
+      };
     case 'org_security_change':
       return {
         subject: `Security change in “${notice.org}”`,
@@ -546,6 +586,31 @@ export async function notify(
  * An invitation to join an organization (DESIGN §4.14). The organization's name and the inviter
  * are chosen by users, so the email says plainly who sent it, and its only link is ours.
  */
+/** From 2earl: set up an organization (DESIGN §4.30). The staff member isn't named. */
+export function orgSetupMail(params: {
+  orgName: string | null;
+  link: string;
+  expiresAt: number;
+}): Mail {
+  const what = params.orgName ? `“${params.orgName}”` : 'your organization';
+  const until = new Intl.DateTimeFormat('en-GB', { dateStyle: 'long', timeZone: 'UTC' }).format(
+    new Date(params.expiresAt * 1000),
+  );
+  return {
+    subject: `Set up ${what} on 2earl`,
+    preview: 'You’re invited to set up an organization and manage it.',
+    heading: `Set up ${what}`,
+    body: [
+      `2earl invited you to set up ${what} on 2earl. You’ll be its owner: you add the people who run it with you (admins) and everyone else, and connect your company’s sign-in and directory when you’re ready.`,
+      'Open the invitation, then sign in with this email address, or create your account with it. You choose the organization’s name.',
+    ],
+    action: { label: 'Set up the organization', url: params.link, showAddress: true },
+    after: [
+      `The invitation works until ${until}, and only for this address. If you weren’t expecting it, you can ignore this email.`,
+    ],
+  };
+}
+
 export function invitationMail(params: {
   org: string;
   inviter: string | null;

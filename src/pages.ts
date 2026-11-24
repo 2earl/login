@@ -9,7 +9,7 @@ import type { SignupMode } from './settings';
 import type { DeviceSession } from './sessions';
 import type { Identity } from './users';
 import { NAV, isShellPath, navFor, shellContext, type ShellContext } from './shell';
-import { organizationsSection } from './org-pages';
+import { organizationsSection, type SetupOffer } from './org-pages';
 import type { OrgSummary, OwnershipPlan } from './orgs';
 
 export function escapeHtml(value: string): string {
@@ -108,10 +108,10 @@ export function page(
 function appShell(shell: ShellContext, main: string): string {
   const { viewer, path } = shell;
   const active = navFor(path);
-  const links = NAV.filter((item) => !item.ownerOnly || viewer.isOwner)
+  const links = NAV.filter((item) => !item.staffOnly || viewer.staff !== null)
     .map(
       (item) =>
-        `<a class="nav-link${item.ownerOnly ? ' nav-admin' : ''}" href="${item.href}"${item.key === active ? ' aria-current="page"' : ''}>${escapeHtml(item.label)}</a>`,
+        `<a class="nav-link${item.staffOnly ? ' nav-admin' : ''}" href="${item.href}"${item.key === active ? ' aria-current="page"' : ''}>${escapeHtml(item.label)}</a>`,
     )
     .join('');
   const who = viewer.name ?? viewer.email ?? 'Your account';
@@ -534,7 +534,12 @@ export function appsPage(params: { apps: ConnectedApp[]; notice?: string | null 
 }
 
 /** The organizations the account belongs to. */
-export function orgsPage(params: { orgs: OrgSummary[]; notice?: string | null }): string {
+export function orgsPage(params: {
+  orgs: OrgSummary[];
+  notice?: string | null;
+  canCreate?: boolean;
+  setup?: SetupOffer[];
+}): string {
   return page(
     'Organizations',
     noticeHtml(params.notice) +
@@ -542,7 +547,10 @@ export function orgsPage(params: { orgs: OrgSummary[]; notice?: string | null })
         'Organizations',
         'Teams you belong to. Everyone keeps their own account; an organization shows who belongs to it and with which role.',
       ) +
-      organizationsSection(params.orgs),
+      organizationsSection(params.orgs, {
+        canCreate: params.canCreate ?? false,
+        setup: params.setup ?? [],
+      }),
   );
 }
 

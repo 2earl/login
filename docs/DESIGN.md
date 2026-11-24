@@ -229,7 +229,10 @@ one thing to do there has all the attention.
 
 ### 4.6 Admin
 
-- `/admin` is available only to the user whose Google `sub` equals `OWNER_GOOGLE_SUB` (secret).
+- `/admin` is available only to 2earl staff (§4.29): the owner, whose Google `sub` equals
+  `OWNER_GOOGLE_SUB` (secret), and the admins and support people the owner names. Until phase 11
+  it was the owner alone; the rules below hold for every staff member, and §4.29 says which role
+  sees and does what.
 - It provides:
   - allowlist management;
   - user list, with suspend and delete;
@@ -239,8 +242,9 @@ one thing to do there has all the attention.
 - Every admin action is audited.
 
 **Implementation (phase 5b, `src/admin.ts`):**
-- Access: signed in, Google `sub` = `OWNER_GOOGLE_SUB`, a second factor enrolled and the session at
-  `aal2`. Anyone else gets the ordinary 404 page, so `/admin` doesn't reveal that it exists.
+- Access: signed in as staff (§4.29), a second factor enrolled and the session at `aal2`. Anyone
+  else, and staff asking for what their role can't do, gets the ordinary 404 page, so `/admin`
+  doesn't reveal that it exists.
 - Changes (all POST): same-origin check, the `admin` rate-limit key, and a second-factor proof from
   the last 15 minutes (otherwise `/mfa?step_up=1`).
 - Users: suspend (status `suspended`, sessions deleted, grants revoked; sign-in is refused
@@ -1214,6 +1218,78 @@ addresses and networks. Migration 0026 widens the role checks by rebuilding `org
 `org_invitations`, `scim_groups` and `scim_group_members` (the last copied first, since
 dropping `scim_groups` would cascade into it).
 
+### 4.29 2earl staff: owner, admins, support (phase 11)
+
+2earl is run by more than one person. The owner names **staff** from existing accounts; each
+staff member has one role, and `staffCan` (`src/staff.ts`) is the only place that says what a
+role may do: the routes and pages only ask it.
+
+| | Support | Admin | Owner |
+|---|---|---|---|
+| Open `/admin`: users (with search), organizations, an organization's detail page, the security log | ✓ | ✓ | ✓ |
+| Sign a person out everywhere (sessions ended, app grants revoked; they're emailed) | ✓ | ✓ | ✓ |
+| Send a waiting organization setup invitation again (§4.30) | ✓ | ✓ | ✓ |
+| Suspend, reactivate, reset a second factor, delete users | | ✓ | ✓ |
+| The sign-up switch and sign-up invitations (§4.9) | | ✓ | ✓ |
+| Create organizations, invite someone to set one up, withdraw such invitations | | ✓ | ✓ |
+| Suspend, reactivate, delete organizations | | ✓ | ✓ |
+| Apps: verified clients, registered clients, resource servers | | ✓ | ✓ |
+| Give, change and take staff roles (`/admin/team`) | | | ✓ |
+| Act on another staff member's account | | | ✓ (never on the owner) |
+
+- **The owner** is not a row: it is the account whose Google identity is `OWNER_GOOGLE_SUB`, so
+  the owner can't be demoted from the admin pages or by the database alone.
+- **Admin** is an admin but not an owner: it runs 2earl and can't give or take roles, or act on
+  other staff (a compromised admin can't lock the owner out or promote an accomplice).
+- **Support** helps people and organizations, and changes almost nothing: what it can do ends a
+  session or resends an email, nothing that loses data.
+- Roles go to accounts that exist, are active and are **not managed by an organization**
+  (§4.18): a staff account's sign-in must be 2earl's to decide, not a customer's identity
+  provider's. Given by address on `/admin/team` (the account must sign in with it), or changed
+  in place. The person is emailed when a role is given, changed or taken (`staff_role` notice).
+- Staff need a second factor and `aal2` like the owner, and every change a second factor from
+  the last 15 minutes (§4.6). The app shell shows the Admin link to staff only.
+- **Organizations see staff only as "2earl".** Opening an organization's detail page is recorded
+  as `admin.org_viewed` (at most once an hour per staff member and organization) and shows in its
+  activity as "2earl staff opened the organization to help"; suspending and reactivating show
+  too. The organization's activity, download and stream never carry the staff member's ID,
+  address or network for `admin.*` events (`orgAuditEvents`).
+- Audit events: `admin.staff_granted`, `admin.staff_revoked`, `admin.user_signed_out`,
+  `admin.org_viewed`, `admin.org_setup_invited`, `admin.org_setup_resent`,
+  `admin.org_setup_withdrawn`.
+- Table `staff` (migration 0027): `user_id` PK, `role` (`admin` | `support`), `granted_by`,
+  `granted_at`. Deleting the account deletes the row.
+
+### 4.30 Organizations are set up by invitation (phase 11)
+
+Only the owner and admins create organizations. Everyone else gets one because 2earl invited
+them: the person who will run it, usually at a customer.
+
+1. An admin enters an address and, optionally, a suggested name on `/admin/orgs`. login emails
+   the address a link to `/orgs/setup/<id>` ("Set up … on 2earl"; the staff member isn't
+   named). The address also goes on the sign-up invitations (`added_by = 'org_setup'`), so it
+   can create an account while sign-up is invite-only.
+2. The person signs in, or creates an account, **with that address**: the page works only for an
+   account that signs in with it (`accountHasAddress`). Anyone else sees which address it is for
+   and how to sign in with it; the link alone gives nothing, so it carries no secret.
+3. They name the organization and become its **owner**: its top admin, who adds the admins that
+   help run it (and auditors and members, §4.14, §4.28), verifies domains, connects SSO and the
+   directory. The audit event is `org.created` with `via: 'invitation'`.
+
+- One waiting invitation per address; at most 200 waiting in all. An invitation works for 14
+  days, once: the claim and the creation are one step, so two tabs can't make two
+  organizations; if creation fails (the account is already in 50 organizations) the claim is
+  undone.
+- Support can send a waiting invitation again (at most every 10 minutes; it works 14 days from
+  then); admins can withdraw it, which also removes the sign-up invitation it added.
+- `/account/orgs` shows the account's waiting invitations ("Waiting for you"), and the Create
+  button only to staff who may create. `/orgs/new` and `POST /orgs` answer 403 to everyone else,
+  with a page that explains how organizations come to be.
+- `/admin/orgs` lists the invitations: waiting, set up (linking the organization) or expired.
+- Table `org_setup_invitations` (migration 0027): `id` (`osi_…`), `email`, `org_name`,
+  `invited_by`, `created_at`, `sent_at`, `expires_at`, `used_at`, `org_id`.
+
+
 
 
 ## 5. Protocol surface
@@ -1353,6 +1429,10 @@ saml_cache       key PK (org, sign-in, request or assertion ID), value, expires_
 pushed_requests  id_hash PK (HMAC of the request_uri's random part), client_id, params,
                  created_at, expires_at                              (§4.15; ≤ 10 minutes)
 dpop_proofs      id_hash PK (SHA-256 of key thumbprint and jti), expires_at  (§4.15; 2 minutes)
+staff            user_id PK FK, role (admin | support), granted_by, granted_at  (§4.29)
+org_setup_invitations
+                 id PK (osi_…), email, org_name, invited_by, created_at, sent_at, expires_at,
+                 used_at, org_id FK                                  (§4.30; 14 days)
 ```
 
 - `identities` is what allows email/phone and other social logins to be added later. Each is
@@ -1590,6 +1670,7 @@ Resolved:
 | 10i | **SAML from the provider's metadata URL**, read again daily (§4.26) |
 | 10j | **Security alerts for owners** (§4.27) |
 | 10k | **The auditor role** (§4.28) |
+| 11 | **2earl staff roles** (§4.29) and **organizations set up by invitation** (§4.30) |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 

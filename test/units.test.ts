@@ -66,6 +66,7 @@ describe('security log cells', () => {
   it('shows an app by its host and detail as key: value', async () => {
     const { adminLogPage } = await import('../src/admin-pages');
     const html = adminLogPage({
+      role: 'owner',
       events: [
         {
           at: 1,

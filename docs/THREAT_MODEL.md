@@ -13,7 +13,7 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | A1 | Access and refresh tokens | Act as the user on the MCP gateway |
 | A2 | Authorization codes | One step from A1 |
 | A3 | User sessions (`__Host-session`) | Approve consent as the user |
-| A4 | Owner/admin session | Full control of users, allowlist and trusted clients |
+| A4 | Owner/admin session | Full control of users, allowlist and trusted clients; the owner also names staff (DESIGN §4.29) |
 | A5 | Google client secret | Impersonate login.2earl.com to Google |
 | A6 | Cloudflare API token | Change DNS, WAF, Workers and data for 2earl.com |
 | A7 | HCP Terraform workspace and state | State can contain resource IDs and secrets |
@@ -316,6 +316,20 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | U9 | An owner's or admin's account (or an API key) is misused to open a way in: a new SSO certificate, a new owner, a key, rules turned off | Every owner is emailed at once, naming who, what, device and network (DESIGN §4.27, tested); the misused account's owner too. The email carries no secret and no link that acts |
 | U10 | The auditor role used to change something, or handed out quietly | Every change route asks the `can*` functions, which give auditors nothing (tested); making someone an auditor is alerted to the owners (§4.27) |
 | U8 | A changed or hijacked metadata document swaps the provider | The daily read never changes the entity ID or the sign-in URL's host; only certificates and same-host URLs (tested). Each change is in the activity |
+
+### S — 2earl staff and organization setup (DESIGN §4.29–§4.30, phase 11)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| S1 | A staff account is taken over and used to run 2earl | Second factor and `aal2` for every staff page, a fresh one for every change; same-origin and rate limit; every action audited (tested) |
+| S2 | An admin promotes an accomplice or locks the owner out | Only the owner gives or takes roles; admins can't act on staff, nobody acts on the owner; the owner isn't a row (tested) |
+| S3 | Support does damage | Support can only end sessions (the person is emailed) and resend a waiting invitation; every other change answers 404 (tested) |
+| S4 | A customer's identity provider decides who is 2earl staff | Roles can't go to managed accounts (tested) |
+| S5 | A forwarded or guessed setup link makes someone else an organization owner | The link works only for an account that signs in with the invited address (tested); no secret in it to steal |
+| S6 | One invitation makes two organizations | Claim and creation in one step; used once (tested) |
+| S7 | Setup invitations used to send spam | Admins only; one waiting per address, 200 in all; resending at most every 10 minutes (tested); fixed text from 2earl, no staff name |
+| S8 | Organizations can't tell when 2earl looked at them | Opening an organization's detail page is in its activity as "2earl" (tested) |
+| S9 | Staff identities and networks leak to customers | `admin.*` events reach the organization without actor or network (tested) |
 
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
 

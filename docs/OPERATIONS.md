@@ -59,6 +59,7 @@ the level it deserves.
 | Situation | Switch | Effect |
 |---|---|---|
 | Sign-up abuse | `/admin/invitations` → sign-up **invite only** | New accounts only by invitation; existing ones unaffected |
+| Someone lost a device or fears a session was taken | `/admin/users` → **Sign out everywhere** (support can) | Sessions end, app grants revoked, they're emailed; they can sign in again at once |
 | One account misused | `/admin/users` → **Suspend** | Sessions end, every app grant revoked, no sign-in. 2earl's suspension can't be lifted by an organization |
 | One organization misused | `/admin/orgs` → **Suspend** | Its SCIM tokens stop, services stop seeing it, members can't change it |
 | An organization's SSO or directory compromised | Ask its owner to turn SSO off or revoke the token; or suspend the organization | SSO off also lifts required SSO; revoked tokens stop at once |
@@ -105,7 +106,7 @@ Record the date and how long it took.
 | Cloudflare account | The owner | **[owner]** A second member with emergency access, a hardware key, used only when the owner can't act |
 | GitHub organization `2earl` | The owner and a second owner | Write down when the second owner may act (S1 while the owner is unreachable) |
 | HCP Terraform | The owner | Add the second person read-only |
-| `/admin` on login | The owner's Google account (`OWNER_GOOGLE_SUB`), always with a second factor | A second admin needs a code change (one owner is a design decision, D11); not planned |
+| `/admin` on login | The owner's Google account (`OWNER_GOOGLE_SUB`), always with a second factor; admins and support named by the owner on `/admin/team` (DESIGN §4.29), also with a second factor | The owner stays the only one who names staff; a second owner needs a code change |
 | Recovery codes, domain registrar, Google Cloud project | The owner | **[owner]** Keep recovery codes offline; write down where each lives |
 
 Customers ask about a single operator; 2earl.com/security says so plainly. The plan above is what
