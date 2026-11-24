@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { makeStaff } from './staff-helpers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { normaliseDomain } from '../src/org-domains';
@@ -93,6 +94,7 @@ function scim(token: string | null, path: string, init: { method?: string; body?
 }
 
 async function orgWithDirectory(owner: Person) {
+  await makeStaff(owner.session);
   const created = await post(owner, '/orgs', { name: 'Example Inc' });
   const orgId = /\/orgs\/([^?]+)/.exec(created.headers.get('Location') ?? '')?.[1] ?? '';
   await post(owner, `/orgs/${orgId}/domains`, { domain: 'Example.COM.' });
@@ -142,6 +144,7 @@ beforeEach(async () => {
 describe('verified domains', () => {
   it('are proved with a TXT record, and belong to one organization at a time', async () => {
     const ada = people.ada as Person;
+    await makeStaff(ada.session);
     const created = await post(ada, '/orgs', { name: 'First' });
     const orgId = /\/orgs\/([^?]+)/.exec(created.headers.get('Location') ?? '')?.[1] ?? '';
     await post(ada, `/orgs/${orgId}/domains`, { domain: 'example.com' });
@@ -305,6 +308,7 @@ describe('SCIM 2.0', () => {
 
     // Another organization's token can't see or change this user.
     const other = await person('dan', 'other.org');
+    await makeStaff(other.session);
     const created = await post(other, '/orgs', { name: 'Other' });
     const otherOrg = /\/orgs\/([^?]+)/.exec(created.headers.get('Location') ?? '')?.[1] ?? '';
     await post(other, `/orgs/${otherOrg}/domains`, { domain: 'other.org' });

@@ -703,6 +703,39 @@ h2 .tag {
   color: var(--fg);
 }
 
+/* Which staff role is looking (DESIGN §4.29), at the end of the admin tabs. */
+.tabs .admin-role {
+  align-self: center;
+  margin-left: auto;
+}
+
+/* Organizations 2earl invited the account to set up (DESIGN §4.30). */
+.setup-offers {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  padding: 1rem 1.125rem;
+  border: 1px solid var(--vermilion);
+  border-radius: var(--radius, 0.75rem);
+  background: var(--surface-2);
+}
+
+.setup-offer + .setup-offer {
+  margin-top: 0.75rem;
+}
+
+.setup-offer p {
+  margin: 0;
+}
+
 .admin-list {
   margin: 0 0 1.5rem;
   padding: 0;

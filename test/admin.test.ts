@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { makeStaff } from './staff-helpers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { authorizationServer, setOAuthClock } from '../src/oauth';
 import { totpCode, totpStep } from '../src/totp';
@@ -382,6 +383,7 @@ describe('organizations in /admin (DESIGN §4.14)', () => {
   it('lists them, suspends and reactivates, and deletes', async () => {
     await giveOwnerAFactor();
     const other = await inviteAndSignInOther();
+    await makeStaff(other.session);
     const created = await post('/orgs', { name: 'Other’s team' }, other.session);
     const orgId = /\/orgs\/([^?]+)/.exec(created.headers.get('Location') ?? '')?.[1] ?? '';
 

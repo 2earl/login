@@ -87,7 +87,26 @@ export function orgHeader(org: Organization, role: OrgRole, tab: OrgTab): string
 }
 
 /** The account page's list of the account's organizations. */
-export function organizationsSection(orgs: OrgSummary[]): string {
+/** An organization the account is invited to set up (DESIGN §4.30). */
+export interface SetupOffer {
+  id: string;
+  orgName: string | null;
+  expiresAt: number;
+}
+
+export function organizationsSection(
+  orgs: OrgSummary[],
+  options: { canCreate?: boolean; setup?: SetupOffer[] } = {},
+): string {
+  const setup = (options.setup ?? [])
+    .map(
+      (s) =>
+        '<li class="setup-offer"><div><p class="person-name">' +
+        (s.orgName ? `Set up “${escapeHtml(s.orgName)}”` : 'Set up your organization') +
+        `</p><p class="person-meta">2earl invited you. The invitation works until ${formatDate(s.expiresAt)}.</p></div>` +
+        `<a class="button primary small" href="/orgs/setup/${escapeHtml(s.id)}">Set up</a></li>`,
+    )
+    .join('');
   // Each row is one link, the whole row: name, your role and its size.
   const items = orgs
     .map(
@@ -103,12 +122,69 @@ export function organizationsSection(orgs: OrgSummary[]): string {
     )
     .join('');
   return (
-    '<section class="section section-first" aria-label="Your organizations">' +
+    (setup
+      ? '<section class="section section-first" aria-labelledby="setup-heading">' +
+        '<h2 id="setup-heading">Waiting for you</h2>' +
+        `<ul class="setup-offers">${setup}</ul></section>`
+      : '') +
+    `<section class="section${setup ? '' : ' section-first'}" aria-label="Your organizations">` +
     (orgs.length > 0
       ? `<ul class="people">${items}</ul>`
-      : '<p class="empty">You’re not in an organization yet. Create one, or accept an invitation someone sends you.</p>') +
-    '<div class="data-actions"><a class="button primary" href="/orgs/new">Create an organization</a></div>' +
+      : `<p class="empty">You’re not in an organization yet. ${options.canCreate ? 'Create one, or invite someone to set one up from the admin pages.' : 'Accept an invitation someone sends you. Organizations are set up by invitation from 2earl.'}</p>`) +
+    (options.canCreate
+      ? '<div class="data-actions"><a class="button primary" href="/orgs/new">Create an organization</a></div>'
+      : '') +
     '</section>'
+  );
+}
+
+/** For accounts that may not create organizations (DESIGN §4.30). */
+export function orgCreationClosedPage(): string {
+  return page(
+    'Organizations are set up by invitation',
+    '<p class="crumb"><a href="/account/orgs">Organizations</a></p>' +
+      '<h1>Organizations are set up by invitation</h1>' +
+      '<p class="lede">2earl invites the person who will run an organization. They get an email, sign in with that address and name the organization; they then add the admins and members.</p>' +
+      '<p class="section-text">To set one up for your company, write to us through the contact form on 2earl.com. To join an organization that exists, ask one of its owners or admins to invite you.</p>' +
+      '<div class="consent-actions"><a class="button secondary" href="/account/orgs">Back to your organizations</a></div>',
+  );
+}
+
+/** Setting up an organization from 2earl's invitation (DESIGN §4.30). */
+export function orgSetupPage(params: {
+  id: string;
+  email: string;
+  suggested: string | null;
+  expiresAt: number;
+  signedInAs: string | null;
+  wrongAddress?: boolean;
+  name?: string;
+  error?: string;
+}): string {
+  const action = `/orgs/setup/${escapeHtml(params.id)}`;
+  const value = params.name ?? params.suggested ?? '';
+  return page(
+    'Set up your organization',
+    '<h1>Set up your organization</h1>' +
+      `<p class="lede">2earl invited ${escapeHtml(params.email)} to set up an organization. You’ll be its owner: you add the admins who help you run it, and everyone else, and connect your company’s sign-in and directory when you’re ready.</p>` +
+      (params.wrongAddress
+        ? `<p class="warning" role="alert">You’re signed in as ${escapeHtml(params.signedInAs ?? 'another account')}, which doesn’t sign in with ${escapeHtml(params.email)}. Sign in with the account that uses that address, or add the address to this account first.</p>` +
+          '<div class="consent-actions">' +
+          '<a class="button secondary" href="/account/methods/email">Add an email address</a>' +
+          '<form method="post" action="/logout"><button class="button secondary" type="submit">Sign out</button></form>' +
+          '</div>'
+        : `<form method="post" action="${action}" class="code-form" novalidate>` +
+          '<label class="field"><span>Organization name</span>' +
+          `<input name="name" type="text" required maxlength="${String(ORG_NAME_MAX)}" autocomplete="organization" value="${escapeHtml(value)}"${params.error ? ' aria-invalid="true" aria-describedby="name-error"' : ''}></label>` +
+          (params.error
+            ? `<p class="field-error" id="name-error">${escapeHtml(params.error)}</p>`
+            : '') +
+          '<p class="fine">You can change the name later in the organization’s settings.</p>' +
+          '<div class="consent-actions"><button class="button primary" type="submit">Set up organization</button>' +
+          '<a class="button secondary" href="/account/orgs">Not now</a></div>' +
+          '</form>') +
+      `<p class="fine">This invitation works until ${formatDate(params.expiresAt)}, once.</p>`,
+    { section: 'Organization' },
   );
 }
 
@@ -117,7 +193,7 @@ export function newOrgPage(params: { name?: string; error?: string } = {}): stri
     'Create an organization',
     '<p class="crumb"><a href="/account/orgs">Organizations</a></p>' +
       '<h1>Create an organization</h1>' +
-      '<p class="lede">You become its owner. Then invite people by email; each one joins with their own 2earl account.</p>' +
+      '<p class="lede">You become its owner. Then invite people by email; each one joins with their own 2earl account. To have someone else own it, invite them to set it up from the admin pages instead.</p>' +
       '<form method="post" action="/orgs" class="code-form" novalidate>' +
       '<label class="field"><span>Name</span>' +
       `<input name="name" type="text" required maxlength="${String(ORG_NAME_MAX)}" autocomplete="organization" value="${escapeHtml(params.name ?? '')}"${params.error ? ' aria-invalid="true" aria-describedby="name-error"' : ''}></label>` +
@@ -419,7 +495,13 @@ const ACTIVITY: Record<string, (e: ActivityEntry) => string> = {
   'org.api_key_revoked': () => 'revoked an API key',
   'org.audit_stream_changed': (e) =>
     e.detail.removed ? 'removed the audit stream' : 'changed the audit stream',
-  'org.created': () => 'created the organization',
+  'org.created': (e) =>
+    e.detail.via === 'invitation'
+      ? 'set up the organization from 2earl’s invitation'
+      : 'created the organization',
+  'admin.org_viewed': () => 'staff opened the organization to help (members, domains, activity)',
+  'admin.org_suspended': () => 'suspended the organization',
+  'admin.org_reactivated': () => 'reactivated the organization',
   'org.renamed': () => 'renamed the organization',
   'org.invited': (e) => `invited someone as ${str(e.detail.role, 'member')}`,
   'org.invitation_revoked': () => 'withdrew an invitation',
@@ -502,7 +584,9 @@ export function orgActivityPage(params: {
       const what = ACTIVITY[e.event]?.(e) ?? e.event;
       const who = e.event.startsWith('scim.')
         ? 'Directory sync'
-        : e.event === 'org.sso_expiry_warned' || e.event === 'org.saml_metadata_refreshed'
+        : e.event === 'org.sso_expiry_warned' ||
+            e.event === 'org.saml_metadata_refreshed' ||
+            e.event.startsWith('admin.')
           ? '2earl'
           : (e.actor ?? 'Someone');
       return (

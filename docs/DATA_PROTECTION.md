@@ -98,6 +98,8 @@ IP addresses are stored only truncated (/24 IPv4, /48 IPv6).
 | An organization's identity provider (SAML) | The organization's own processor, not ours | Tells us, when someone signs in through it, their work address. We send it only the sign-in request |
 | An organization's directory provider (e.g. Okta, Microsoft) | The organization's own processor, not ours | Sends us the records above; we send it only SCIM responses about the records it sent |
 | Other members of an organization | Not processors; members of the same team | See each member's name, email address and role. Owners and admins also see the organization's activity: who joined, left, was removed or changed role, and when. An invitee sees the inviter's name and address in the email |
+| 2earl staff (admins and support named by the owner) | People acting for the controller, not recipients | See accounts (name, addresses, sign-in methods, last sign-in), organizations (members, invitations, domains, recent activity) and the security log, to run the service and help people. Bound by the owner's instructions; every action is in the security log, and opening an organization is in its activity |
+| A person invited to set up an organization | Recipient of one email | Receives a setup link from 2earl at the address an admin entered, and an optional suggested name |
 | Sites using "Sign in with 2earl" (OpenID Connect) | Separate controllers | Receive, when the user approves: that site's own ID for the user, how and when they signed in, and the name and address only if the user left those ticked. Their own privacy terms apply to what they do with it |
 
 ## 6. Data subject rights — how the system supports them
