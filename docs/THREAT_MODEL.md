@@ -314,6 +314,7 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | U6 | An admin signs an owner out | Admins can't act on owners, and the API never does (tested) |
 | U7 | Metadata XML used to attack the parser (entity expansion, huge documents) | DTDs refused, 512 KB and 8 s limits, redirects not followed, the Worker can't reach private networks (`global_fetch_strictly_public`) (tested) |
 | U9 | An owner's or admin's account (or an API key) is misused to open a way in: a new SSO certificate, a new owner, a key, rules turned off | Every owner is emailed at once, naming who, what, device and network (DESIGN §4.27, tested); the misused account's owner too. The email carries no secret and no link that acts |
+| U10 | The auditor role used to change something, or handed out quietly | Every change route asks the `can*` functions, which give auditors nothing (tested); making someone an auditor is alerted to the owners (§4.27) |
 | U8 | A changed or hijacked metadata document swaps the provider | The daily read never changes the entity ID or the sign-in URL's host; only certificates and same-host URLs (tested). Each change is in the activity |
 
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
