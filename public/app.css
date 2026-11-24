@@ -1560,6 +1560,10 @@ code {
   background: color-mix(in srgb, var(--amber) 24%, transparent);
 }
 
+.role-badge.role-auditor {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
 .count {
   margin-left: 0.25rem;
   color: var(--muted);

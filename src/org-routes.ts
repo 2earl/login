@@ -86,6 +86,7 @@ import {
   canInvite,
   canManageOrganization,
   canRemove,
+  canSeeActivity,
   canSetRole,
   createInvitation,
   createOrganization,
@@ -329,7 +330,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     status: 200 | 400 | 409 = 200,
   ) {
     const found = await membership(c.env.DB, orgId, session.user.id);
-    if (!found || found.role === 'member') return c.html(notFoundPage(), 404);
+    if (!found || !canSeeActivity(found.role)) return c.html(notFoundPage(), 404);
     const now = deps.now();
     // Newest first: the latest 200 of the last 90 days.
     const records = await orgAuditEvents(c.env.DB, found.org.id, {
@@ -372,7 +373,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const session = c.get('session');
     if (!session) return signIn(c);
     const found = await membership(c.env.DB, c.req.param('org'), session.user.id);
-    if (!found || found.role === 'member') return c.html(notFoundPage(), 404);
+    if (!found || !canSeeActivity(found.role)) return c.html(notFoundPage(), 404);
     const days = [7, 30, 90].includes(Number(c.req.query('days')))
       ? Number(c.req.query('days'))
       : 30;
@@ -548,7 +549,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         { error: 'Enter one email address.', email: typeof rawEmail === 'string' ? rawEmail : '' },
         400,
       );
-    if (role !== 'member' && role !== 'admin')
+    if (role !== 'member' && role !== 'admin' && role !== 'auditor')
       return showOrg(c, session, orgId, { error: 'Choose a role.', email }, 400);
 
     // How many invitation emails this account sent in the last day, across organizations.
@@ -1311,7 +1312,8 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     const redirect = changeCheck(ctx.session, now, `/orgs/${ctx.orgId}/directory`);
     if (redirect) return c.redirect(redirect, 303);
     const groupId = ctx.form.get('group');
-    const role = ctx.form.get('role') === 'admin' ? 'admin' : null;
+    const raw = ctx.form.get('role');
+    const role = raw === 'admin' || raw === 'auditor' ? raw : null;
     if (typeof groupId !== 'string')
       return c.redirect(`/orgs/${encodeURIComponent(ctx.orgId)}/directory`, 303);
     const group = await findGroup(c.env.DB, ctx.orgId, groupId);
