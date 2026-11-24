@@ -208,11 +208,63 @@ function lookup(c: Compiled, key: string): string | null {
   }
   // Lists joined with " · " (meta lines): each part on its own.
   if (key.includes(' · ')) {
-    const parts = key.split(' · ');
-    const translated = parts.map((part) => lookup(c, part));
+    const parts = splitList(key);
+    const translated = parts.map((part) => lookupPart(c, part));
     if (translated.some((t) => t !== null)) {
       return parts.map((part, i) => translated[i] ?? (keep(part) ? part : miss(part))).join(' · ');
     }
+  }
+  return null;
+}
+
+/** Splits "a · b · <0>c · d</0>" at the dots outside elements. */
+function splitList(key: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < key.length; i++) {
+    const marker = /^<(\/?)\d+(\/?)>/.exec(key.slice(i));
+    if (marker) {
+      if (!marker[2]) depth += marker[1] ? -1 : 1;
+      i += marker[0].length - 1;
+    } else if (depth === 0 && key.startsWith(' · ', i)) {
+      parts.push(key.slice(start, i));
+      start = i + 3;
+      i += 2;
+    }
+  }
+  parts.push(key.slice(start));
+  return parts;
+}
+
+/**
+ * One part of a list: its markers are numbered from 0 for the lookup ("changed <1>…</1>" is
+ * "changed <0>…</0>" in the catalog), and an element around the whole part stays outside it.
+ */
+function lookupPart(c: Compiled, part: string): string | null {
+  const order: string[] = [];
+  const renumbered = part.replace(
+    /<(\/?)(\d+)(\/?)>/g,
+    (_, open: string, n: string, self: string) => {
+      let i = order.indexOf(n);
+      if (i < 0) {
+        order.push(n);
+        i = order.length - 1;
+      }
+      return `<${open}${String(i)}${self}>`;
+    },
+  );
+  const back = (text: string) =>
+    text.replace(
+      /<(\/?)(\d+)(\/?)>/g,
+      (_, open: string, n: string, self: string) => `<${open}${order[Number(n)] ?? n}${self}>`,
+    );
+  const direct = lookup(c, renumbered);
+  if (direct !== null) return back(direct);
+  const wrapped = /^<0>([\s\S]*)<\/0>$/.exec(renumbered);
+  if (wrapped?.[1] !== undefined && !/<\/?0\/?>/.test(wrapped[1])) {
+    const inner = lookup(c, wrapped[1]);
+    if (inner !== null) return back(`<0>${inner}</0>`);
   }
   return null;
 }
@@ -476,17 +528,21 @@ function translateRun(run: Token[], c: Compiled, locale: Locale): string {
     // and a role. The text between them stays as it is (names), unless the catalog has it.
     const parts = topLevel(run, true);
     if (parts?.some((p) => Array.isArray(p))) {
-      return parts
+      const lacks = { sentence: false };
+      const out = parts
         .map((part) => {
           if (Array.isArray(part)) return translateRun(part, c, locale);
           const text = part.text.replace(/\s+/g, ' ').trim();
           if (!text) return part.text;
           const hit = lookup(c, text);
           if (hit !== null) return part.text.replace(text, hit);
-          if (text.split(' ').length > 3 && !keep(text)) miss(text);
+          // More than a name: the whole sentence is what the catalog lacks.
+          if (text.split(' ').length > 3 && !keep(text)) lacks.sentence = true;
           return part.text;
         })
         .join('');
+      if (lacks.sentence) miss(core);
+      return out;
     }
   }
   const sentence = found ?? (keep(core) ? core : miss(core));
