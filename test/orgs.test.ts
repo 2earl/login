@@ -1,4 +1,5 @@
 import { env, exports } from 'cloudflare:workers';
+import { makeStaff } from './staff-helpers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { deleteAccount } from '../src/account';
 import { deliverDeletionNotices } from '../src/deletion-notices';
@@ -87,6 +88,7 @@ async function get(who: Person | null, path: string) {
 }
 
 async function createOrg(owner: Person, name = 'Acme Research'): Promise<string> {
+  await makeStaff(owner.session);
   const response = await post(owner, '/orgs', { name });
   expect(response.status).toBe(303);
   const location = response.headers.get('Location') ?? '';
@@ -178,6 +180,7 @@ describe('organizations', () => {
     ]) {
       expect(orgName(bad)).toBeNull();
     }
+    await makeStaff((people.ada as Person).session);
     const response = await post(people.ada as Person, '/orgs', { name: 'paypal.com support' });
     expect(response.status).toBe(400);
     expect(await count('organizations')).toBe(0);

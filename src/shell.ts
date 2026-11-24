@@ -10,7 +10,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 export interface Viewer {
   name: string | null;
   email: string | null;
-  isOwner: boolean;
+  /** 2earl staff role (DESIGN §4.29), for the Admin link. */
+  staff: 'owner' | 'admin' | 'support' | null;
 }
 
 export interface ShellContext {
@@ -41,14 +42,14 @@ export function isShellPath(path: string): boolean {
 
 export type NavKey = 'overview' | 'security' | 'devices' | 'apps' | 'orgs' | 'data' | 'admin';
 
-export const NAV: { key: NavKey; label: string; href: string; ownerOnly?: boolean }[] = [
+export const NAV: { key: NavKey; label: string; href: string; staffOnly?: boolean }[] = [
   { key: 'overview', label: 'Overview', href: '/account' },
   { key: 'security', label: 'Sign-in & security', href: '/account/security' },
   { key: 'devices', label: 'Devices', href: '/account/sessions' },
   { key: 'apps', label: 'Connected apps', href: '/account/apps' },
   { key: 'orgs', label: 'Organizations', href: '/account/orgs' },
   { key: 'data', label: 'Your data', href: '/account/data' },
-  { key: 'admin', label: 'Admin', href: '/admin', ownerOnly: true },
+  { key: 'admin', label: 'Admin', href: '/admin', staffOnly: true },
 ];
 
 /** Which navigation entry a path belongs to. */

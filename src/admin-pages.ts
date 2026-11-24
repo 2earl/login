@@ -1,32 +1,43 @@
 import type { AuditEvent } from './audit';
 import type { PendingNotices } from './deletion-notices';
 import type { ResourceServer } from './introspection';
+import type { SetupInvitation } from './org-setup';
 import { escapeHtml, formatDate, page } from './pages';
+import { STAFF_LABEL, staffCan, type StaffMember, type StaffRole } from './staff';
 
-/** Server-rendered pages for /admin (DESIGN §4.6). Owner-only; every value is escaped. */
+/**
+ * Server-rendered pages for /admin (DESIGN §4.6, §4.29). For 2earl staff; each page and action
+ * shows only what the viewer's role may do (`staffCan`). Every value is escaped.
+ */
 
-export type AdminTab = 'users' | 'invitations' | 'orgs' | 'apps' | 'log';
+export type AdminTab = 'users' | 'invitations' | 'orgs' | 'apps' | 'log' | 'team';
 
-const TABS: [AdminTab, string, string][] = [
-  ['users', 'Users', '/admin/users'],
-  ['invitations', 'Invitations', '/admin/invitations'],
-  ['orgs', 'Organizations', '/admin/orgs'],
-  ['apps', 'Apps', '/admin/apps'],
-  ['log', 'Security log', '/admin/log'],
+const TABS: [AdminTab, string, string, (role: StaffRole) => boolean][] = [
+  ['users', 'Users', '/admin/users', staffCan.view],
+  ['orgs', 'Organizations', '/admin/orgs', staffCan.view],
+  ['invitations', 'Sign-up', '/admin/invitations', staffCan.manageSignUp],
+  ['apps', 'Apps', '/admin/apps', staffCan.manageApps],
+  ['log', 'Security log', '/admin/log', staffCan.view],
+  ['team', 'Staff', '/admin/team', staffCan.manageStaff],
 ];
 
-function adminPage(
-  tab: AdminTab,
-  title: string,
-  body: string,
-  flash: { notice?: string | undefined; error?: string | undefined } = {},
-): string {
+/** Who is looking, and the flash message. */
+export interface AdminView {
+  role: StaffRole;
+  notice?: string | undefined;
+  error?: string | undefined;
+}
+
+function adminPage(tab: AdminTab, title: string, body: string, flash: AdminView): string {
   const nav =
     '<nav class="tabs" aria-label="Admin">' +
-    TABS.map(
-      ([key, label, href]) =>
-        `<a href="${href}"${key === tab ? ' aria-current="page"' : ''}>${label}</a>`,
-    ).join('') +
+    TABS.filter(([, , , allowed]) => allowed(flash.role))
+      .map(
+        ([key, label, href]) =>
+          `<a href="${href}"${key === tab ? ' aria-current="page"' : ''}>${label}</a>`,
+      )
+      .join('') +
+    `<span class="tag tag-muted admin-role">${STAFF_LABEL[flash.role]}</span>` +
     '</nav>';
   return page(
     `${title} · Admin`,
@@ -75,13 +86,14 @@ export interface AdminUser {
   factors: number;
   /** 'email', 'google': how the account signs in. */
   methods: string[];
-  isOwner: boolean;
+  /** 2earl staff: 'owner', 'admin', 'support', or null (§4.29). */
+  staff: StaffRole | null;
   /** The organization that manages the account (DESIGN §4.18), and whether it deactivated it. */
   managedBy: string | null;
   deactivatedByOrg: boolean;
 }
 
-function userRow(user: AdminUser): string {
+function userRow(user: AdminUser, viewer: StaffRole): string {
   const who = escapeHtml(user.email ?? user.id);
   const meta = [
     user.name ? escapeHtml(user.name) : null,
@@ -96,7 +108,7 @@ function userRow(user: AdminUser): string {
     .filter(Boolean)
     .join(' · ');
   const badges =
-    (user.isOwner ? '<span class="tag">Owner</span>' : '') +
+    (user.staff ? `<span class="tag">${STAFF_LABEL[user.staff]}</span>` : '') +
     (user.status === 'suspended'
       ? user.deactivatedByOrg
         ? '<span class="tag tag-alert">Deactivated by its organization</span>'
@@ -104,22 +116,41 @@ function userRow(user: AdminUser): string {
       : '') +
     (user.managedBy ? '<span class="tag tag-muted">Managed</span>' : '');
 
-  const actions = user.isOwner
-    ? '<p class="row-note">Manage your own account on the account page.</p>'
-    : '<div class="row-actions">' +
-      (user.status === 'suspended'
-        ? actionForm('/admin/users', { action: 'reactivate', user: user.id }, 'Reactivate')
-        : actionForm('/admin/users', { action: 'suspend', user: user.id }, 'Suspend')) +
-      (user.factors > 0
-        ? actionForm('/admin/users', { action: 'reset_mfa', user: user.id }, 'Reset second factor')
+  let actions: string;
+  if (user.staff === 'owner') {
+    actions =
+      viewer === 'owner'
+        ? '<p class="row-note">Manage your own account on the account page.</p>'
+        : '<p class="row-note">Only the owner changes the owner’s account.</p>';
+  } else if (!staffCan.actOn(viewer, user.staff)) {
+    actions = '<p class="row-note">Staff accounts are managed by the owner.</p>';
+  } else {
+    const manage = staffCan.manageUsers(viewer);
+    actions =
+      '<div class="row-actions">' +
+      (user.status === 'active'
+        ? actionForm('/admin/users', { action: 'sign_out', user: user.id }, 'Sign out everywhere')
         : '') +
-      '<details class="confirm-delete"><summary>Delete…</summary>' +
-      '<form method="post" action="/admin/users">' +
-      '<input type="hidden" name="action" value="delete">' +
-      `<input type="hidden" name="user" value="${escapeHtml(user.id)}">` +
-      `<label class="confirm"><input type="checkbox" name="confirm" value="on" required><span>Delete ${who} and disconnect their apps. This can’t be undone.</span></label>` +
-      '<button class="button danger small" type="submit">Delete account</button></form></details>' +
+      (manage
+        ? (user.status === 'suspended'
+            ? actionForm('/admin/users', { action: 'reactivate', user: user.id }, 'Reactivate')
+            : actionForm('/admin/users', { action: 'suspend', user: user.id }, 'Suspend')) +
+          (user.factors > 0
+            ? actionForm(
+                '/admin/users',
+                { action: 'reset_mfa', user: user.id },
+                'Reset second factor',
+              )
+            : '') +
+          '<details class="confirm-delete"><summary>Delete…</summary>' +
+          '<form method="post" action="/admin/users">' +
+          '<input type="hidden" name="action" value="delete">' +
+          `<input type="hidden" name="user" value="${escapeHtml(user.id)}">` +
+          `<label class="confirm"><input type="checkbox" name="confirm" value="on" required><span>Delete ${who} and disconnect their apps. This can’t be undone.</span></label>` +
+          '<button class="button danger small" type="submit">Delete account</button></form></details>'
+        : '') +
       '</div>';
+  }
 
   return (
     '<li class="admin-row">' +
@@ -130,17 +161,27 @@ function userRow(user: AdminUser): string {
   );
 }
 
-export function adminUsersPage(params: {
-  users: AdminUser[];
-  pending: PendingNotices[];
-  notice?: string | undefined;
-  error?: string | undefined;
-}): string {
+export function adminUsersPage(
+  params: AdminView & { users: AdminUser[]; pending: PendingNotices[]; query?: string },
+): string {
+  const query = params.query ?? '';
   return adminPage(
     'users',
     'Users',
-    `<p class="section-text">${String(params.users.length)} ${params.users.length === 1 ? 'account' : 'accounts'}. Suspending signs the user out everywhere and disconnects their apps; reactivating lets them sign in again.</p>` +
-      `<ul class="admin-list">${params.users.map(userRow).join('')}</ul>` +
+    '<form method="get" action="/admin/users" class="inline-form" role="search">' +
+      '<label class="field"><span>Find by email address or name</span>' +
+      `<input name="q" type="search" maxlength="254" autocomplete="off" spellcheck="false" value="${escapeHtml(query)}"></label>` +
+      '<button class="button secondary" type="submit">Find</button>' +
+      (query ? '<a class="button secondary" href="/admin/users">Show all</a>' : '') +
+      '</form>' +
+      `<p class="section-text">${String(params.users.length)} ${params.users.length === 1 ? 'account' : 'accounts'}${query ? ' found' : ''}. ` +
+      (staffCan.manageUsers(params.role)
+        ? 'Suspending signs the user out everywhere and disconnects their apps; reactivating lets them sign in again.'
+        : 'Signing someone out everywhere ends every session and disconnects their apps; they can sign in again at once. Ask an admin to suspend or delete an account.') +
+      '</p>' +
+      (params.users.length > 0
+        ? `<ul class="admin-list">${params.users.map((u) => userRow(u, params.role)).join('')}</ul>`
+        : '<p class="empty">No account matches.</p>') +
       pendingSection(params.pending),
     params,
   );
@@ -185,12 +226,9 @@ export interface AdminInvitation {
   isOwner: boolean;
 }
 
-export function adminInvitationsPage(params: {
-  invitations: AdminInvitation[];
-  locked: boolean;
-  notice?: string | undefined;
-  error?: string | undefined;
-}): string {
+export function adminInvitationsPage(
+  params: AdminView & { invitations: AdminInvitation[]; locked: boolean },
+): string {
   const rows = params.invitations
     .map((inv) => {
       const label =
@@ -210,7 +248,7 @@ export function adminInvitationsPage(params: {
     .join('');
   return adminPage(
     'invitations',
-    'Invitations',
+    'Sign-up',
     '<section class="section" aria-labelledby="signup-heading">' +
       '<h2 id="signup-heading">Sign-up</h2>' +
       `<p class="section-text">${
@@ -256,7 +294,7 @@ export interface AdminOrg {
   rules: boolean;
 }
 
-function orgRow(org: AdminOrg): string {
+function orgRow(org: AdminOrg, viewer: StaffRole): string {
   const meta = [
     `${String(org.members)} ${org.members === 1 ? 'member' : 'members'}`,
     org.invitations > 0 ? `${String(org.invitations)} open invitations` : null,
@@ -279,35 +317,223 @@ function orgRow(org: AdminOrg): string {
     .join(' · ');
   return (
     '<li class="admin-row">' +
-    `<div class="app-main"><p class="app-name">${escapeHtml(org.name)}` +
+    `<div class="app-main"><p class="app-name"><a href="/admin/orgs/${escapeHtml(org.id)}">${escapeHtml(org.name)}</a>` +
     (org.status === 'suspended' ? '<span class="tag tag-alert">Suspended</span>' : '') +
     `</p><p class="app-meta">${meta}</p><p class="app-meta">${company}</p></div>` +
-    '<div class="row-actions">' +
-    (org.status === 'suspended'
-      ? actionForm('/admin/orgs', { action: 'reactivate', org: org.id }, 'Reactivate')
-      : actionForm('/admin/orgs', { action: 'suspend', org: org.id }, 'Suspend')) +
-    '<details class="confirm-delete"><summary>Delete…</summary>' +
-    '<form method="post" action="/admin/orgs">' +
-    '<input type="hidden" name="action" value="delete">' +
-    `<input type="hidden" name="org" value="${escapeHtml(org.id)}">` +
-    `<label class="confirm"><input type="checkbox" name="confirm" value="on" required><span>Delete ${escapeHtml(org.name)}, its memberships and invitations. Members keep their accounts. This can’t be undone.</span></label>` +
-    '<button class="button danger small" type="submit">Delete organization</button></form></details>' +
-    '</div></li>'
+    (staffCan.manageOrgs(viewer)
+      ? '<div class="row-actions">' +
+        (org.status === 'suspended'
+          ? actionForm('/admin/orgs', { action: 'reactivate', org: org.id }, 'Reactivate')
+          : actionForm('/admin/orgs', { action: 'suspend', org: org.id }, 'Suspend')) +
+        '<details class="confirm-delete"><summary>Delete…</summary>' +
+        '<form method="post" action="/admin/orgs">' +
+        '<input type="hidden" name="action" value="delete">' +
+        `<input type="hidden" name="org" value="${escapeHtml(org.id)}">` +
+        `<label class="confirm"><input type="checkbox" name="confirm" value="on" required><span>Delete ${escapeHtml(org.name)}, its memberships and invitations. Members keep their accounts. This can’t be undone.</span></label>` +
+        '<button class="button danger small" type="submit">Delete organization</button></form></details>' +
+        '</div>'
+      : '') +
+    '</li>'
   );
 }
 
-export function adminOrgsPage(params: {
-  orgs: AdminOrg[];
-  notice?: string | undefined;
-  error?: string | undefined;
-}): string {
+function setupRow(inv: SetupInvitation, viewer: StaffRole, now: number): string {
+  const open = inv.usedAt === null && inv.expiresAt > now;
+  const state = inv.usedAt
+    ? inv.orgId
+      ? `<span class="tag">Set up</span> as <a href="/admin/orgs/${escapeHtml(inv.orgId)}">${escapeHtml(inv.orgNow ?? 'an organization')}</a> on ${formatDate(inv.usedAt)}`
+      : `<span class="tag tag-muted">Set up</span> on ${formatDate(inv.usedAt)} (organization since deleted)`
+    : open
+      ? `<span class="tag tag-muted">Waiting</span> until ${formatDate(inv.expiresAt)}`
+      : `<span class="tag tag-alert">Expired</span> ${formatDate(inv.expiresAt)}`;
+  const meta = [
+    inv.orgName ? `suggested name “${escapeHtml(inv.orgName)}”` : null,
+    `invited ${formatDate(inv.createdAt)}${inv.invitedBy ? ` by ${escapeHtml(inv.invitedBy)}` : ''}`,
+    inv.sentAt > inv.createdAt ? `sent again ${dateTime(inv.sentAt)} UTC` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    '<li class="admin-row">' +
+    `<div class="app-main"><p class="app-name">${escapeHtml(inv.email)}</p>` +
+    `<p class="app-meta">${state}</p><p class="app-meta">${meta}</p></div>` +
+    (open
+      ? '<div class="row-actions">' +
+        (staffCan.resendOrgInvitations(viewer)
+          ? actionForm('/admin/orgs', { action: 'setup_resend', invitation: inv.id }, 'Send again')
+          : '') +
+        (staffCan.createOrgs(viewer)
+          ? actionForm(
+              '/admin/orgs',
+              { action: 'setup_withdraw', invitation: inv.id },
+              'Withdraw',
+              'danger',
+            )
+          : '') +
+        '</div>'
+      : '') +
+    '</li>'
+  );
+}
+
+export function adminOrgsPage(
+  params: AdminView & {
+    orgs: AdminOrg[];
+    setup: SetupInvitation[];
+    now: number;
+    form?: { email: string; name: string };
+  },
+): string {
+  const canCreate = staffCan.createOrgs(params.role);
   return adminPage(
     'orgs',
     'Organizations',
-    `<p class="section-text">${String(params.orgs.length)} ${params.orgs.length === 1 ? 'organization' : 'organizations'}. Suspending one freezes it: members can only leave, and 2earl services stop seeing it.</p>` +
+    '<section class="section section-first" aria-labelledby="setup-heading">' +
+      '<h2 id="setup-heading">Invite an organization</h2>' +
+      (canCreate
+        ? '<p class="section-text">Organizations are set up by invitation. The person you invite signs in with the address (or creates an account with it), names the organization and becomes its owner: its top admin, who adds the other admins and members.</p>' +
+          '<form method="post" action="/admin/orgs" class="stack-form">' +
+          '<input type="hidden" name="action" value="setup_invite">' +
+          '<label class="field"><span>Email address</span>' +
+          `<input name="email" type="email" required maxlength="254" autocomplete="off" spellcheck="false" value="${escapeHtml(params.form?.email ?? '')}"></label>` +
+          '<label class="field"><span>Organization name (optional; they can change it)</span>' +
+          `<input name="name" type="text" maxlength="60" autocomplete="off" value="${escapeHtml(params.form?.name ?? '')}"></label>` +
+          '<div class="consent-actions"><button class="button primary" type="submit">Send invitation</button>' +
+          '<a class="button secondary" href="/orgs/new">Create one yourself</a></div></form>'
+        : '<p class="section-text">Owners and admins of 2earl invite organizations. You can send an invitation that is still waiting again.</p>') +
+      (params.setup.length > 0
+        ? `<ul class="admin-list">${params.setup.map((i) => setupRow(i, params.role, params.now)).join('')}</ul>`
+        : '<p class="empty">No invitations yet.</p>') +
+      '</section>' +
+      '<section class="section" aria-labelledby="orgs-heading">' +
+      '<h2 id="orgs-heading">Organizations</h2>' +
+      `<p class="section-text">${String(params.orgs.length)} ${params.orgs.length === 1 ? 'organization' : 'organizations'}. Open one to see its members and setup. Suspending one freezes it: members can only leave, and 2earl services stop seeing it.</p>` +
       (params.orgs.length > 0
-        ? `<ul class="admin-list">${params.orgs.map(orgRow).join('')}</ul>`
-        : '<p class="empty">No organizations yet.</p>'),
+        ? `<ul class="admin-list">${params.orgs.map((o) => orgRow(o, params.role)).join('')}</ul>`
+        : '<p class="empty">No organizations yet.</p>') +
+      '</section>',
+    params,
+  );
+}
+
+export interface AdminOrgDetail {
+  org: AdminOrg;
+  members: {
+    userId: string;
+    email: string | null;
+    name: string | null;
+    role: string;
+    joinedAt: number;
+    managed: boolean;
+  }[];
+  invitations: { email: string; role: string; expiresAt: number }[];
+  domains: { domain: string; verified: boolean; managed: boolean }[];
+  activity: { at: number; event: string; actor: string | null }[];
+}
+
+/** One organization, for helping it (§4.29). Opening it is in the organization's own activity. */
+export function adminOrgPage(params: AdminView & { detail: AdminOrgDetail }): string {
+  const d = params.detail;
+  const members = d.members
+    .map(
+      (m) =>
+        '<li class="admin-row"><div class="app-main">' +
+        `<p class="app-name">${escapeHtml(m.email ?? m.userId)}<span class="tag">${escapeHtml(m.role)}</span>${m.managed ? '<span class="tag tag-muted">Managed</span>' : ''}</p>` +
+        `<p class="app-meta">${m.name ? `${escapeHtml(m.name)} · ` : ''}joined ${formatDate(m.joinedAt)}</p>` +
+        '</div></li>',
+    )
+    .join('');
+  const rows = d.activity
+    .map(
+      (e) =>
+        '<tr>' +
+        `<td class="nowrap">${dateTime(e.at)}</td>` +
+        `<td>${eventCell(e.event)}</td>` +
+        `<td>${escapeHtml(e.actor ?? '–')}</td>` +
+        '</tr>',
+    )
+    .join('');
+  return adminPage(
+    'orgs',
+    d.org.name,
+    '<p class="crumb"><a href="/admin/orgs">Organizations</a></p>' +
+      `<ul class="admin-list">${orgRow(d.org, params.role)}</ul>` +
+      '<p class="note">The organization sees in its activity that 2earl staff opened this page (not who).</p>' +
+      '<section class="section" aria-labelledby="members-heading">' +
+      `<h2 id="members-heading">Members <span class="count">${String(d.members.length)}</span></h2>` +
+      (members ? `<ul class="admin-list">${members}</ul>` : '<p class="empty">No members.</p>') +
+      (d.invitations.length > 0
+        ? '<h3 class="subhead">Open invitations</h3><ul class="admin-list">' +
+          d.invitations
+            .map(
+              (i) =>
+                `<li class="admin-row"><div class="app-main"><p class="app-name">${escapeHtml(i.email)}<span class="tag tag-muted">${escapeHtml(i.role)}</span></p><p class="app-meta">until ${formatDate(i.expiresAt)}</p></div></li>`,
+            )
+            .join('') +
+          '</ul>'
+        : '') +
+      '</section>' +
+      '<section class="section" aria-labelledby="domains-heading">' +
+      '<h2 id="domains-heading">Domains</h2>' +
+      (d.domains.length > 0
+        ? '<ul class="admin-list">' +
+          d.domains
+            .map(
+              (x) =>
+                `<li class="admin-row"><div class="app-main"><p class="app-name">${escapeHtml(x.domain)}${x.verified ? '<span class="tag">Verified</span>' : '<span class="tag tag-muted">Not verified</span>'}${x.managed ? '<span class="tag">Managed</span>' : ''}</p></div></li>`,
+            )
+            .join('') +
+          '</ul>'
+        : '<p class="empty">No domains.</p>') +
+      '</section>' +
+      '<section class="section" aria-labelledby="activity-heading">' +
+      '<h2 id="activity-heading">Recent activity</h2>' +
+      (rows
+        ? '<div class="table-wrap"><table class="log"><thead><tr><th scope="col">Time (UTC)</th><th scope="col">Event</th><th scope="col">By</th></tr></thead>' +
+          `<tbody>${rows}</tbody></table></div>`
+        : '<p class="empty">No activity.</p>') +
+      '</section>',
+    params,
+  );
+}
+
+// ---- Staff (DESIGN §4.29) -------------------------------------------------------------------
+
+export function adminTeamPage(
+  params: AdminView & { staff: StaffMember[]; form?: { email: string } },
+): string {
+  const rows = params.staff
+    .map(
+      (m) =>
+        '<li class="admin-row"><div class="app-main">' +
+        `<p class="app-name">${escapeHtml(m.email ?? m.userId)}<span class="tag">${STAFF_LABEL[m.role]}</span></p>` +
+        `<p class="app-meta">${m.name ? `${escapeHtml(m.name)} · ` : ''}since ${formatDate(m.grantedAt)}${m.grantedBy ? ` · given by ${escapeHtml(m.grantedBy)}` : ''}</p>` +
+        '</div><div class="row-actions">' +
+        actionForm(
+          '/admin/team',
+          { action: 'grant_user', user: m.userId, role: m.role === 'admin' ? 'support' : 'admin' },
+          m.role === 'admin' ? 'Make support' : 'Make admin',
+        ) +
+        actionForm(
+          '/admin/team',
+          { action: 'revoke', user: m.userId },
+          'Remove from staff',
+          'danger',
+        ) +
+        '</div></li>',
+    )
+    .join('');
+  return adminPage(
+    'team',
+    'Staff',
+    '<p class="section-text"><strong>Admins</strong> run 2earl: users, sign-up, organizations and their invitations, apps. They can’t give or take staff roles or act on other staff. <strong>Support</strong> helps people and organizations: sees users, organizations and the security log, signs a person out everywhere, sends a waiting organization invitation again. Only you, the owner, change who is staff. Staff need a second factor.</p>' +
+      '<form method="post" action="/admin/team" class="inline-form">' +
+      '<input type="hidden" name="action" value="grant">' +
+      '<label class="field"><span>Email address of an existing account</span>' +
+      `<input name="email" type="email" required maxlength="254" autocomplete="off" spellcheck="false" value="${escapeHtml(params.form?.email ?? '')}"></label>` +
+      '<label class="field"><span>Role</span><select name="role"><option value="support">Support</option><option value="admin">Admin</option></select></label>' +
+      '<button class="button primary" type="submit">Add to staff</button></form>' +
+      (rows ? `<ul class="admin-list">${rows}</ul>` : '<p class="empty">No staff besides you.</p>'),
     params,
   );
 }
@@ -327,17 +553,19 @@ export interface AdminRegisteredApp {
   createdAt: number | null;
 }
 
-export function adminAppsPage(params: {
-  trusted: AdminTrustedApp[];
-  registered: AdminRegisteredApp[];
-  resourceServers?: ResourceServer[];
-  /** Resources a resource server can be created for. */
-  resources?: { resource: string; label: string }[];
-  /** Just-created credentials: the only time the secret is shown. */
-  created?: { id: string; secret: string } | undefined;
-  notice?: string | undefined;
-  error?: string | undefined;
-}): string {
+export function adminAppsPage(
+  params: AdminView & {
+    trusted: AdminTrustedApp[];
+    registered: AdminRegisteredApp[];
+    resourceServers?: ResourceServer[];
+    /** Resources a resource server can be created for. */
+    resources?: { resource: string; label: string }[];
+    /** Just-created credentials: the only time the secret is shown. */
+    created?: { id: string; secret: string } | undefined;
+    notice?: string | undefined;
+    error?: string | undefined;
+  },
+): string {
   const servers = params.resourceServers ?? [];
   const resourceServers =
     (params.created
@@ -512,6 +740,13 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'admin.org_suspended': 'Organization suspended',
   'admin.org_reactivated': 'Organization reactivated',
   'admin.org_deleted': 'Organization deleted by admin',
+  'admin.org_viewed': 'Organization opened by staff',
+  'admin.org_setup_invited': 'Invited someone to set up an organization',
+  'admin.org_setup_resent': 'Organization setup invitation sent again',
+  'admin.org_setup_withdrawn': 'Organization setup invitation withdrawn',
+  'admin.user_signed_out': 'User signed out everywhere by staff',
+  'admin.staff_granted': 'Staff role given',
+  'admin.staff_revoked': 'Staff role removed',
   'org.created': 'Organization created',
   'org.renamed': 'Organization renamed',
   'org.deleted': 'Organization deleted',
@@ -570,7 +805,7 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
 
 /** Events worth a second look when scanning the log. */
 const ALERT_EVENTS =
-  /\.(failed|denied|locked|refused|code_refused|code_failed)$|^admin\.(user_deleted|mfa_reset|signup_changed)$/;
+  /\.(failed|denied|locked|refused|code_refused|code_failed)$|^admin\.(user_deleted|mfa_reset|signup_changed|staff_granted|staff_revoked)$/;
 
 function eventCell(event: string): string {
   const label = (EVENT_LABEL as Record<string, string | undefined>)[event] ?? event;
@@ -608,11 +843,9 @@ function detailCell(detail: string | null): string {
   return `<code>${escapeHtml(detail)}</code>`;
 }
 
-export function adminLogPage(params: {
-  events: AdminLogEvent[];
-  filter: string;
-  limit: number;
-}): string {
+export function adminLogPage(
+  params: AdminView & { events: AdminLogEvent[]; filter: string; limit: number },
+): string {
   const options = LOG_FILTERS.map(
     ([value, label]) =>
       `<option value="${value}"${value === params.filter ? ' selected' : ''}>${label}</option>`,
@@ -643,6 +876,7 @@ export function adminLogPage(params: {
           '<th scope="col">Time</th><th scope="col">Event</th><th scope="col">Account</th>' +
           '<th scope="col">App</th><th scope="col">Network</th><th scope="col">Detail</th>' +
           `</tr></thead><tbody>${rows}</tbody></table></div>`),
+    params,
   );
 }
 

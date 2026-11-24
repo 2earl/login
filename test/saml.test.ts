@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { makeStaff } from './staff-helpers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SignedXml } from 'xml-crypto';
 import { createApp } from '../src/app';
@@ -212,6 +213,7 @@ beforeEach(async () => {
   app = createApp({ fetch: fetcher, googleJwks: testJwks, now: () => NOW });
   idp = await newIdpKey();
   ada = await person('ada');
+  await makeStaff(ada.session);
   const created = await post(ada.session, '/orgs', { name: 'Example Inc' });
   orgId = /\/orgs\/([^?]+)/.exec(created.headers.get('Location') ?? '')?.[1] ?? '';
   await post(ada.session, `/orgs/${orgId}/domains`, { domain: 'example.com' });

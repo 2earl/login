@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { makeStaff } from './staff-helpers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { setRequireSso } from '../src/managed';
@@ -119,6 +120,7 @@ beforeEach(async () => {
   app = createApp({ fetch: fetcher, googleJwks: testJwks, now: () => now });
   ada = await person('ada');
   bob = await person('bob');
+  await makeStaff(ada.session);
   const created = await post(ada, '/orgs', { name: 'Example Inc' });
   orgId = /\/orgs\/([^?]+)/.exec(created.headers.get('Location') ?? '')?.[1] ?? '';
   await post(ada, `/orgs/${orgId}/domains`, { domain: 'example.com' });
