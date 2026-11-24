@@ -71,13 +71,17 @@ export function parseMetadata(xml: string): IdpMetadata {
   // Metadata never needs a DTD; refusing one rules out entity expansion.
   if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new MetadataError('The metadata has a DTD.');
   const errors: string[] = [];
-  const doc = new DOMParser({
-    errorHandler: {
-      warning: () => undefined,
-      error: (message: string) => errors.push(message),
-      fatalError: (message: string) => errors.push(message),
-    },
-  }).parseFromString(xml, 'text/xml');
+  let doc;
+  try {
+    doc = new DOMParser({
+      onError: (level, message) => {
+        if (level !== 'warning') errors.push(message);
+      },
+    }).parseFromString(xml, 'text/xml');
+  } catch {
+    // xmldom 0.9 throws on fatal errors whatever onError does.
+    throw new MetadataError('The metadata isn’t valid XML.');
+  }
   if (errors.length > 0 || !doc.documentElement) {
     throw new MetadataError('The metadata isn’t valid XML.');
   }

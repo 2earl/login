@@ -48,6 +48,7 @@ interface DpopKey {
 async function dpopKey(): Promise<DpopKey> {
   const { privateKey, publicKey } = await generateKeyPair('ES256', { extractable: true });
   const jwk = await exportJWK(publicKey);
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-class-instance-assignment -- a Web Crypto key from jose, typed as jose's own interface
   return { privateKey, jwk, jkt: await calculateJwkThumbprint(jwk) };
 }
 

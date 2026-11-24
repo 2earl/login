@@ -14,11 +14,7 @@ declare module '@xmldom/xmldom/lib/dom-parser.js' {
   }
   export class DOMParser {
     constructor(options?: {
-      errorHandler?: {
-        warning?: (message: string) => void;
-        error?: (message: string) => void;
-        fatalError?: (message: string) => void;
-      };
+      onError?: (level: 'warning' | 'error' | 'fatalError', message: string) => void;
     });
     parseFromString(source: string, mimeType: string): XmlDocument;
   }

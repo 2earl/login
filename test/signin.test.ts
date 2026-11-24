@@ -195,6 +195,7 @@ describe('GET /callback/google', () => {
   it('rejects an ID token signed by an unknown key', async () => {
     const ip = freshIp();
     const login = await startLogin(app, ip);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-class-instance-assignment -- a Web Crypto key from jose, typed as jose's own interface
     google.nextIdToken = await signIdToken({ nonce: login.nonce }, { key: foreignKey });
     const response = await call(
       app,
