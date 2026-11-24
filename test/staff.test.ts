@@ -423,7 +423,7 @@ describe('the organization’s view of staff', () => {
     expect(await count('audit_events', "event = 'admin.org_viewed'")).toBe(1);
 
     const activity = await (await get(ada, `/orgs/${orgId ?? ''}/activity`)).text();
-    expect(activity).toContain('<strong>2earl</strong> staff opened the organization');
+    expect(activity).toContain('<strong>2earl</strong> <span>staff opened the organization');
     const exported = await get(ada, `/orgs/${orgId ?? ''}/activity/export?days=7&format=json`);
     const { events: records } = await exported.json<{
       events: {

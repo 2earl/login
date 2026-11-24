@@ -9,6 +9,8 @@
  * Replies reach a person. Sending never throws; a failure is logged by its code only.
  */
 
+import { DEFAULT_LOCALE, currentLocale, isLocale, translate, type Locale } from './i18n';
+
 const SENDER = { email: 'noreply@2earl.com', name: '2earl' };
 const REPLY_TO = 'legal@2earl.com';
 const ISSUER = 'https://login.2earl.com';
@@ -83,7 +85,28 @@ function isOwnUrl(url: string): boolean {
 
 // ---- Text -------------------------------------------------------------------------------------
 
-export function mailText(mail: Mail): string {
+/** The mail in a language (DESIGN §4.31): every sentence through the catalog. */
+export function localizeMail(mail: Mail, locale: Locale): Mail {
+  if (locale === DEFAULT_LOCALE) return mail;
+  const t = (text: string) => translate(text, locale);
+  return {
+    ...mail,
+    subject: t(mail.subject),
+    preview: t(mail.preview),
+    heading: t(mail.heading),
+    body: mail.body.map(t),
+    ...(mail.action ? { action: { ...mail.action, label: t(mail.action.label) } } : {}),
+    ...(mail.facts ? { facts: mail.facts.map(([label, value]) => [t(label), t(value)]) } : {}),
+    ...(mail.after ? { after: mail.after.map(t) } : {}),
+  };
+}
+
+/** 2earl.com's page in the language. */
+const sitePage = (path: string, locale: Locale) =>
+  `https://2earl.com${locale === DEFAULT_LOCALE ? '' : `/${locale}`}${path}`;
+
+export function mailText(mail: Mail, locale: Locale = DEFAULT_LOCALE): string {
+  const t = (text: string) => translate(text, locale);
   const lines: string[] = [mail.heading, ''];
   for (const p of mail.body) lines.push(p, '');
   // The code on its own indented line, so it is easy to find and copy.
@@ -95,7 +118,7 @@ export function mailText(mail: Mail): string {
   }
   for (const p of mail.after ?? []) lines.push(p, '');
   lines.push('—', '2earl · https://2earl.com');
-  if (mail.accountLink !== false) lines.push(`Your account: ${ISSUER}/account`);
+  if (mail.accountLink !== false) lines.push(`${t('Your account')}: ${ISSUER}/account`);
   return lines.join('\n');
 }
 
@@ -112,11 +135,11 @@ function band(): string {
 }
 
 /** The wordmark, as on the web pages' header; the band below carries the mark's colours. */
-function wordmark(): string {
+function wordmark(locale: Locale): string {
   return (
     '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
     `<td valign="middle" class="fg" style="font:700 22px/1 ${FONT};color:${C.fg};letter-spacing:-0.02em">2earl</td>` +
-    `<td valign="middle" class="muted" style="padding:2px 0 0 10px;font:400 14px/1 ${FONT};color:${C.muted}">Account</td>` +
+    `<td valign="middle" class="muted" style="padding:2px 0 0 10px;font:400 14px/1 ${FONT};color:${C.muted}">${escapeHtml(translate('Account', locale))}</td>` +
     '</tr></table>'
   );
 }
@@ -134,7 +157,7 @@ function codeBlock(code: string): string {
 }
 
 /** A button that works in Outlook too: the cell carries the colour, the link the click. */
-function button(label: string, url: string, showAddress: boolean): string {
+function button(label: string, url: string, showAddress: boolean, locale: Locale): string {
   if (!isOwnUrl(url)) return paragraph(`${label}: ${url}`);
   const href = escapeHtml(url);
   return (
@@ -143,7 +166,7 @@ function button(label: string, url: string, showAddress: boolean): string {
     `<a href="${href}" style="display:inline-block;padding:13px 22px;font:600 15px/1 ${FONT};color:${C.fg};text-decoration:none;border-radius:10px">${escapeHtml(label)}</a>` +
     '</td></tr></table>' +
     (showAddress
-      ? `<p class="muted" style="margin:0 0 24px;font:400 13px/1.5 ${FONT};color:${C.muted};word-break:break-all">Or paste this address into your browser: <a href="${href}" class="link" style="color:${C.link}">${href}</a></p>`
+      ? `<p class="muted" style="margin:0 0 24px;font:400 13px/1.5 ${FONT};color:${C.muted};word-break:break-all">${escapeHtml(translate('Or paste this address into your browser:', locale))} <a href="${href}" class="link" style="color:${C.link}">${href}</a></p>`
       : '<div style="height:12px;line-height:12px;font-size:0">&nbsp;</div>')
   );
 }
@@ -159,14 +182,15 @@ function factsTable(facts: [string, string][]): string {
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="facts" style="margin:4px 0 24px;border-collapse:collapse;border-top:1px solid ${C.rule};border-bottom:1px solid ${C.rule}">${rows}</table>`;
 }
 
-export function mailHtml(mail: Mail): string {
+export function mailHtml(mail: Mail, locale: Locale = DEFAULT_LOCALE): string {
+  const t = (text: string) => escapeHtml(translate(text, locale));
   const accountLink = mail.accountLink !== false;
   const footerLinks = [
     accountLink
-      ? `<a href="${ISSUER}/account" class="muted" style="color:${C.muted}">Your account</a>`
+      ? `<a href="${ISSUER}/account" class="muted" style="color:${C.muted}">${t('Your account')}</a>`
       : null,
-    `<a href="https://2earl.com/privacy" class="muted" style="color:${C.muted}">Privacy</a>`,
-    `<a href="https://2earl.com/imprint" class="muted" style="color:${C.muted}">Imprint</a>`,
+    `<a href="${sitePage('/privacy', locale)}" class="muted" style="color:${C.muted}">${t('Privacy')}</a>`,
+    `<a href="${sitePage('/imprint', locale)}" class="muted" style="color:${C.muted}">${t('Imprint')}</a>`,
   ]
     .filter(Boolean)
     .join(' &nbsp;·&nbsp; ');
@@ -175,12 +199,12 @@ export function mailHtml(mail: Mail): string {
     mail.body.map((p) => paragraph(p)).join('') +
     (mail.code ? codeBlock(mail.code) : '') +
     (mail.action
-      ? button(mail.action.label, mail.action.url, mail.action.showAddress === true)
+      ? button(mail.action.label, mail.action.url, mail.action.showAddress === true, locale)
       : '') +
     (mail.facts?.length ? factsTable(mail.facts) : '') +
     (mail.after ?? []).map((p) => paragraph(p, true)).join('');
   return (
-    '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+    `<!doctype html><html lang="${locale}"><head><meta charset="utf-8">` +
     '<meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark">' +
     `<title>${escapeHtml(mail.subject)}</title>` +
@@ -198,13 +222,13 @@ export function mailHtml(mail: Mail): string {
     `<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all">${escapeHtml(mail.preview)}${'&#8199;&#847;'.repeat(40)}</div>` +
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg" style="background:${C.bg}"><tr><td align="center" style="padding:28px 12px 32px">` +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px">' +
-    `<tr><td style="padding:0 4px 18px">${wordmark()}</td></tr>` +
+    `<tr><td style="padding:0 4px 18px">${wordmark(locale)}</td></tr>` +
     `<tr><td class="card" style="background:${C.surface};border:1px solid ${C.rule};border-radius:12px;overflow:hidden;padding:0">` +
     band() +
     `<div class="card card-body" style="padding:32px 32px 20px;background:${C.surface}">${content}</div>` +
     '</td></tr>' +
     `<tr><td style="padding:20px 4px 0;font:400 13px/1.6 ${FONT};color:${C.muted}" class="muted">` +
-    `<p style="margin:0 0 6px">You got this email because of your 2earl account, or because someone used this address with 2earl. 2earl never asks for a password or a code by email or phone.</p>` +
+    `<p style="margin:0 0 6px">${t('You got this email because of your 2earl account, or because someone used this address with 2earl. 2earl never asks for a password or a code by email or phone.')}</p>` +
     `<p style="margin:0">${footerLinks}</p>` +
     '</td></tr></table></td></tr></table></body></html>'
   );
@@ -212,15 +236,25 @@ export function mailHtml(mail: Mail): string {
 
 // ---- Sending ------------------------------------------------------------------------------------
 
-export async function sendMail(env: Env, to: string, mail: Mail): Promise<boolean> {
+/**
+ * Sends `mail` in `locale`: by default the language of the request it is sent from (the person
+ * at the browser); notices to an account use the account's language (`notify`).
+ */
+export async function sendMail(
+  env: Env,
+  to: string,
+  mail: Mail,
+  locale: Locale = currentLocale(),
+): Promise<boolean> {
+  const localized = localizeMail(mail, locale);
   try {
     await env.MAILER.send({
       to,
       from: SENDER,
       replyTo: REPLY_TO,
-      subject: mail.subject,
-      text: mailText(mail),
-      html: mailHtml(mail),
+      subject: localized.subject,
+      text: mailText(localized, locale),
+      html: mailHtml(localized, locale),
     });
     return true;
   } catch (error) {
@@ -575,11 +609,16 @@ export async function notify(
   notice: Notice,
   context?: NoticeContext,
 ): Promise<void> {
-  const row = await env.DB.prepare('SELECT primary_email FROM users WHERE id = ?')
+  const row = await env.DB.prepare('SELECT primary_email, locale FROM users WHERE id = ?')
     .bind(userId)
-    .first<{ primary_email: string | null }>();
+    .first<{ primary_email: string | null; locale: string | null }>();
   if (!row?.primary_email) return;
-  await sendMail(env, row.primary_email, noticeMail(notice, context));
+  await sendMail(
+    env,
+    row.primary_email,
+    noticeMail(notice, context),
+    isLocale(row.locale) ? row.locale : currentLocale(),
+  );
 }
 
 /**

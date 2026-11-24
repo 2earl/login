@@ -592,7 +592,7 @@ export function orgActivityPage(params: {
       return (
         '<li class="activity-row">' +
         `<time datetime="${new Date(e.at * 1000).toISOString()}">${escapeHtml(formatDateTime(e.at))}</time>` +
-        `<p><strong>${escapeHtml(who)}</strong> ${escapeHtml(what)}</p>` +
+        `<p><strong>${escapeHtml(who)}</strong> <span>${escapeHtml(what)}</span></p>` +
         '</li>'
       );
     })

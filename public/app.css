@@ -174,6 +174,27 @@ body::before {
   color: var(--muted);
 }
 
+/* The language switcher (DESIGN §4.31), at the end of the footer: each language in its own
+   name, the current one plain. */
+.legal .languages {
+  display: flex;
+  gap: 0.75rem;
+  margin-left: auto;
+}
+
+.legal .languages a {
+  text-decoration: none;
+}
+
+.legal .languages a:hover {
+  text-decoration: underline;
+}
+
+.legal .languages a[aria-current='true'] {
+  color: var(--fg);
+  font-weight: 600;
+}
+
 /* ---- Type --------------------------------------------------------------------------------- */
 
 h1 {

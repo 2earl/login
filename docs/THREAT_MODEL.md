@@ -331,6 +331,15 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | S8 | Organizations can't tell when 2earl looked at them | Opening an organization's detail page is in its activity as "2earl" (tested) |
 | S9 | Staff identities and networks leak to customers | `admin.*` events reach the organization without actor or network (tested) |
 
+### L — Languages (DESIGN §4.31, phase 12)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| L1 | Translation injects markup | Translations are fixed strings in the repository; placeholders put back text that was already escaped, and markers put back the page's own elements (tested) |
+| L2 | A translation changes what a security page says | Sentences are matched exactly; a missing one stays English; the catalog is reviewed like code |
+| L3 | `?lang=` used to set cookies for others | The cookie only selects one of the known languages; anything else is ignored |
+| L4 | Account pages or codes indexed by search engines | `X-Robots-Tag: noindex, nofollow` everywhere and `robots.txt` disallows all |
+
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
 
 | # | Threat | Mitigation |

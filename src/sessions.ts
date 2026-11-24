@@ -22,6 +22,8 @@ export interface SessionUser {
   mustChoose: boolean;
   /** The managing organization's security rules (DESIGN §4.19), if it set any. */
   policy: SessionPolicy | null;
+  /** The language the account last chose or used (DESIGN §4.31), for emails. */
+  locale: string | null;
 }
 
 export interface Session {
@@ -108,6 +110,7 @@ export async function getSession(
     .prepare(
       `SELECT s.aal, s.aal2_at, s.method, s.created_at, s.last_seen_at, s.expires_at,
               u.id AS user_id, u.status, u.display_name, u.primary_email, u.created_at AS user_created_at,
+              u.locale,
               u.managed_by,
               EXISTS (SELECT 1 FROM mfa_factors f WHERE f.user_id = u.id) AS has_factor,
               EXISTS (SELECT 1 FROM mfa_factors f WHERE f.user_id = u.id AND f.kind = 'webauthn') AS has_passkey,
@@ -154,6 +157,7 @@ export async function getSession(
       managed_by: string | null;
       sso_violation: number;
       must_choose: number;
+      locale: string | null;
     }>();
   if (!row) return null;
 
@@ -211,6 +215,7 @@ export async function getSession(
       managedBy: row.managed_by,
       mustChoose: row.must_choose === 1,
       policy,
+      locale: row.locale,
     },
   };
 }

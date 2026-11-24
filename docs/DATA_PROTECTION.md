@@ -41,6 +41,7 @@ with German law on telemedia: TDDDG for cookies, DDG for the imprint **[verify]*
 | Login transaction (`state`, `nonce`, PKCE verifier) | D1 `login_tx` | Generated | Secure the sign-in, ≤ 10 min |
 | OAuth grants and tokens (hashed, encrypted props `{uid, authTime}`) | KV | Generated | Authorise apps the user approved |
 | Consent decisions | Signed cookie + grants | User | Remember approvals |
+| Chosen language (`en`, `tr`) | Cookie `__Host-lang` (1 year) and D1 `users.locale` | User or browser | Show pages and send emails in the person's language. Strictly necessary: it carries out their choice. Deleted with the account |
 | Audit events (event, time, IP prefix, client ID, user ID) | D1 `audit_events` | Generated | Security and accountability |
 | Second-factor data (passkey public keys, IDs, names and counters; encrypted TOTP secret; hashed recovery codes; wrong-attempt counter and lock time) | D1 `mfa_factors`, `recovery_codes`, `users` | User (enrolment) | Protect the account. Deleted with the factor or the account; included in the export without secrets |
 | Second-factor steps in progress (passkey challenge, TOTP secret being set up, new recovery codes before they are shown) | D1 `mfa_pending` | System | ≤ 10 minutes, deleted with the session |
