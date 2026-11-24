@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { makeStaff } from './staff-helpers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { DELETE_AFTER_SECONDS, dueDeletions, setRequireSso } from '../src/managed';
@@ -116,6 +117,7 @@ async function userRow(id: string) {
 
 /** An organization owned by `owner` with example.com verified and a SCIM token. */
 async function organization(owner: Person) {
+  await makeStaff(owner.session);
   const created = await post(owner, '/orgs', { name: 'Example Inc' });
   const orgId = /\/orgs\/([^?]+)/.exec(created.headers.get('Location') ?? '')?.[1] ?? '';
   await post(owner, `/orgs/${orgId}/domains`, { domain: 'example.com' });

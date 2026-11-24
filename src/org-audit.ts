@@ -72,6 +72,9 @@ export async function orgAuditEvents(
     .bind(orgId, params.afterAt, params.afterId ?? '', params.until, params.limit)
     .all<Row>();
   return results.map((r) => {
+    // 2earl staff acting on the organization (DESIGN §4.29): the organization sees that 2earl
+    // did it, not which staff member or from where.
+    const staff = r.event.startsWith('admin.');
     let detail: Record<string, unknown>;
     try {
       detail = r.detail ? (JSON.parse(r.detail) as Record<string, unknown>) : {};
@@ -83,10 +86,14 @@ export async function orgAuditEvents(
       time: new Date(r.at * 1000).toISOString(),
       at: r.at,
       event: r.event,
-      actor: r.actor_user_id ? { id: r.actor_user_id, email: r.actor_email } : null,
+      actor: staff
+        ? { id: '2earl', email: null }
+        : r.actor_user_id
+          ? { id: r.actor_user_id, email: r.actor_email }
+          : null,
       target: typeof r.target_id === 'string' ? { id: r.target_id, email: r.target_email } : null,
       clientId: r.client_id,
-      ipPrefix: r.ip_prefix,
+      ipPrefix: staff ? null : r.ip_prefix,
       detail,
     };
   });

@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { makeStaff } from './staff-helpers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { setOAuthClock } from '../src/oauth';
@@ -100,6 +101,7 @@ beforeEach(async () => {
         claims: { sub: 'sub-ada', email: 'ada@example.com', name: 'Ada' },
       })
     ).session ?? '';
+  await makeStaff(session);
   const created = await post('/orgs', { name: 'Example Inc' });
   orgId = /\/orgs\/([^?]+)/.exec(created.headers.get('Location') ?? '')?.[1] ?? '';
   await post(`/orgs/${orgId}/domains`, { domain: 'example.com' });

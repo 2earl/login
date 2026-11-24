@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { makeStaff } from './staff-helpers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { exportJWK, generateKeyPair, SignJWT, type CryptoKey } from 'jose';
@@ -135,6 +136,7 @@ function get(who: Person, path: string) {
 
 /** An organization owned by `owner` with example.com verified. */
 async function organization(owner: Person) {
+  await makeStaff(owner.session);
   const created = await post(owner, '/orgs', { name: 'Example Inc' });
   const id = /\/orgs\/([^?]+)/.exec(created.headers.get('Location') ?? '')?.[1] ?? '';
   await post(owner, `/orgs/${id}/domains`, { domain: 'example.com' });

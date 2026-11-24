@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { makeStaff } from './staff-helpers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { setOAuthClock } from '../src/oauth';
@@ -87,6 +88,7 @@ beforeEach(async () => {
   ada = await person('ada');
   bob = await person('bob');
   carol = await person('carol');
+  await makeStaff(ada.session);
   const created = await send(ada, '/orgs', { name: 'Example Inc' });
   orgId = /\/orgs\/([^?]+)/.exec(created.headers.get('Location') ?? '')?.[1] ?? '';
   await env.DB.batch([

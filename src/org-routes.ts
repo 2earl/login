@@ -69,6 +69,8 @@ import {
   directoryPage,
   invitationPage,
   newOrgPage,
+  orgCreationClosedPage,
+  orgSetupPage,
   orgActivityPage,
   orgPage,
   orgSettingsPage,
@@ -78,6 +80,8 @@ import { createScimToken, listScimTokens, revokeScimToken } from './scim';
 import { certificateExpiry, samlConfig, signingKeyPem, ssoUrl } from './saml';
 import { MetadataError, certificateColumns, fetchMetadata, metadataUrl } from './saml-metadata';
 import { alertFor, alertOwners } from './org-alerts';
+import { isOpen as isSetupOpen, setupInvitation, useSetupInvitation } from './org-setup';
+import { staffCan, staffRoleOf } from './staff';
 import { dateField } from './sso-upkeep';
 import {
   MAX_INVITATIONS_PER_DAY,
@@ -239,7 +243,19 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
 
   // ---- Creating -------------------------------------------------------------------------------
 
-  app.get('/orgs/new', (c) => (c.get('session') ? c.html(newOrgPage()) : signIn(c)));
+  // Only 2earl's owner and admins create organizations; everyone else gets one by invitation
+  // (DESIGN §4.30).
+  const mayCreate = async (c: AppContext, userId: string) => {
+    const role = await staffRoleOf(c.env, userId);
+    return role !== null && staffCan.createOrgs(role);
+  };
+
+  app.get('/orgs/new', async (c) => {
+    const session = c.get('session');
+    if (!session) return signIn(c);
+    if (!(await mayCreate(c, session.user.id))) return c.html(orgCreationClosedPage(), 403);
+    return c.html(newOrgPage());
+  });
 
   app.post('/orgs', async (c) => {
     if (!isSameOrigin(c)) return c.json({ error: 'forbidden' }, 403);
@@ -247,6 +263,7 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       return c.html(messagePage(MESSAGES.tooManyAttempts, 'Nothing changed'), 429);
     const session = c.get('session');
     if (!session) return signIn(c);
+    if (!(await mayCreate(c, session.user.id))) return c.html(orgCreationClosedPage(), 403);
     const form = await c.req.raw.formData();
     const raw = form.get('name');
     const name = orgName(raw);
@@ -268,6 +285,95 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     }
     await record(c, session, 'org.created', { org: id });
     return c.redirect(back(id, 'created'), 303);
+  });
+
+  // ---- Setting one up from 2earl's invitation (DESIGN §4.30) ---------------------------------
+
+  const setupGone = () =>
+    messagePage(
+      {
+        title: 'This invitation no longer works',
+        body: 'It was used, withdrawn or has expired. If you still need an organization, ask 2earl to invite you again.',
+        action: { href: '/account/orgs', label: 'Your organizations' },
+      },
+      'Nothing changed',
+    );
+
+  app.get('/orgs/setup/:id', async (c) => {
+    const session = c.get('session');
+    if (!session) return signIn(c);
+    const now = deps.now();
+    const invitation = await setupInvitation(c.env.DB, c.req.param('id'));
+    if (!invitation) return c.html(setupGone(), 404);
+    if (!isSetupOpen(invitation, now)) {
+      // Used already: the person who set it up lands in their organization.
+      if (invitation.orgId && (await membership(c.env.DB, invitation.orgId, session.user.id))) {
+        return c.redirect(`/orgs/${encodeURIComponent(invitation.orgId)}`, 303);
+      }
+      return c.html(setupGone(), 410);
+    }
+    const mine = await accountHasAddress(c.env.DB, session.user.id, invitation.email);
+    return c.html(
+      orgSetupPage({
+        id: invitation.id,
+        email: invitation.email,
+        suggested: invitation.orgName,
+        expiresAt: invitation.expiresAt,
+        signedInAs: session.user.primaryEmail,
+        wrongAddress: !mine,
+      }),
+      mine ? 200 : 403,
+    );
+  });
+
+  app.post('/orgs/setup/:id', async (c) => {
+    if (!isSameOrigin(c)) return c.json({ error: 'forbidden' }, 403);
+    if (!(await underRateLimit(c, 'orgs')))
+      return c.html(messagePage(MESSAGES.tooManyAttempts, 'Nothing changed'), 429);
+    const session = c.get('session');
+    if (!session) return signIn(c);
+    const now = deps.now();
+    const invitation = await setupInvitation(c.env.DB, c.req.param('id'));
+    if (!invitation || !isSetupOpen(invitation, now)) return c.html(setupGone(), 410);
+    const form = await c.req.raw.formData();
+    const raw = form.get('name');
+    const name = orgName(raw);
+    const view = {
+      id: invitation.id,
+      email: invitation.email,
+      suggested: invitation.orgName,
+      expiresAt: invitation.expiresAt,
+      signedInAs: session.user.primaryEmail,
+    };
+    if (!name) {
+      return c.html(
+        orgSetupPage({ ...view, name: typeof raw === 'string' ? raw : '', error: NAME_ERROR }),
+        400,
+      );
+    }
+    const result = await useSetupInvitation(c.env.DB, now, invitation, session.user.id, name);
+    if (!result.ok) {
+      if (result.reason === 'wrong_address') {
+        return c.html(orgSetupPage({ ...view, wrongAddress: true }), 403);
+      }
+      if (result.reason === 'too_many') {
+        return c.html(
+          orgSetupPage({
+            ...view,
+            name,
+            error: 'You’re in 50 organizations, the most an account can be in. Leave one first.',
+          }),
+          409,
+        );
+      }
+      return c.html(setupGone(), 410);
+    }
+    await record(c, session, 'org.created', {
+      org: result.orgId,
+      via: 'invitation',
+      invitation: invitation.id,
+    });
+    return c.redirect(back(result.orgId, 'created'), 303);
   });
 
   // ---- The organization's page ----------------------------------------------------------------
