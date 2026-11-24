@@ -647,14 +647,15 @@ access. login doesn't hold anything *for* an organization beyond its name.
 
 **Roles** (`src/orgs.ts`, `can*` functions; the routes only ask them):
 
-| | Member | Admin | Owner |
-|---|---|---|---|
-| See members (name, email, role) | ✓ | ✓ | ✓ |
-| Invite, withdraw invitations | | ✓ (as member or admin) | ✓ |
-| Change roles between member and admin; remove members and admins | | ✓ | ✓ |
-| Make or unmake owners; remove owners | | | ✓, with a recent proof it's them (`changeCheck`) |
-| Rename; delete (type the name, recent proof) | | | ✓ |
-| Leave | ✓ | ✓ | ✓, unless the last owner |
+| | Member | Auditor (§4.28) | Admin | Owner |
+|---|---|---|---|---|
+| See members (name, email, role) | ✓ | ✓ | ✓ | ✓ |
+| See and download the activity | | ✓ | ✓ | ✓ |
+| Invite, withdraw invitations | | | ✓ (as member, auditor or admin) | ✓ |
+| Change roles between member, auditor and admin; remove members, auditors and admins | | | ✓ | ✓ |
+| Make or unmake owners; remove owners | | | | ✓, with a recent proof it's them (`changeCheck`) |
+| Rename; delete (type the name, recent proof) | | | | ✓ |
+| Leave | ✓ | ✓ | ✓ | ✓, unless the last owner |
 
 Nobody changes their own role on the page; to step down, an owner makes someone else owner, then
 leaves or is changed by them. **An organization always keeps an owner**: every statement that could
@@ -1202,6 +1203,17 @@ network, and links to the activity.
 Everyday changes (invitations, renaming, members joining, apps allowed) are only in the activity.
 There is no setting to turn the alerts off: they are what notices an owner account taken over.
 
+### 4.28 The auditor role (phase 10k)
+
+For security and compliance teams: auditors see the members, the activity and the settings
+pages, and download the activity, but change nothing (the table in §4.14). Owners and admins
+give the role, by invitation or on the members page; the API takes `"auditor"`; a directory
+group can be marked auditors (§4.21), and admin wins when someone is in both kinds of group.
+Making someone an auditor is alerted to the owners (§4.27): the activity holds members'
+addresses and networks. Migration 0026 widens the role checks by rebuilding `org_members`,
+`org_invitations`, `scim_groups` and `scim_group_members` (the last copied first, since
+dropping `scim_groups` would cascade into it).
+
 
 
 ## 5. Protocol surface
@@ -1577,6 +1589,7 @@ Resolved:
 | 10h | **Single sign-on that keeps working** (§4.25): dashboard sign-in link, certificate rollover, expiry warnings, SSO first, sign out everywhere |
 | 10i | **SAML from the provider's metadata URL**, read again daily (§4.26) |
 | 10j | **Security alerts for owners** (§4.27) |
+| 10k | **The auditor role** (§4.28) |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 
