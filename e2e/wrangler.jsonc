@@ -19,6 +19,10 @@
     "MCP_RESOURCE": "https://mcp.2earl.com/mcp",
     // Prompt share's website (phase P2): the audience of its sign-in tokens.
     "PROMPTSHARE_RESOURCE": "https://promptshare.cc",
+    // Emanet's three apps (src/services.ts).
+    "EMANET_KURUMSAL_RESOURCE": "https://emanet-kurumsal.2earl.com",
+    "EMANET_SAHA_RESOURCE": "https://emanet-saha.2earl.com",
+    "EMANET_MERKEZ_RESOURCE": "https://emanet-merkez.2earl.com",
     "MFA_REQUIRED": "false",
     "OIDC_NEXT_PUBLIC_KEY": "",
   },
