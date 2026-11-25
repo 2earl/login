@@ -361,8 +361,10 @@ describe('deleting', () => {
     expect(await count('organizations')).toBe(0);
     expect(await count('org_members')).toBe(0);
     expect(await count('org_invitations')).toBe(0);
-    // No service keeps data for organizations yet, so there is nobody to tell.
-    expect(await count('org_deletion_notices')).toBe(0);
+    // Emanet keeps data for organizations (its creditors): it is told, once its binding exists
+    // (emanet-core deployed). Until then the notice waits.
+    expect(await count('org_deletion_notices', "service = 'emanet' AND org_id = ?", orgId)).toBe(1);
+    expect(await count('org_deletion_notices', "service != 'emanet'")).toBe(0);
   });
 
   it('an account passes its organizations on: to the longest-standing admin, else deleted', async () => {

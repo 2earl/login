@@ -77,6 +77,33 @@ export const SERVICES: readonly Service[] = [
     },
     deletionBinding: 'PROMPTSHARE_EVENTS',
   },
+  {
+    // Emanet (2earl/emanet-core and its apps). One core keeps the data, so one deletion and one
+    // export; each app is its own resource with its own scope, so a token for one app is useless
+    // at another. Creditors are organizations, so deleting one reaches Emanet too.
+    id: 'emanet',
+    name: 'Emanet Kurumsal',
+    resource: (env) => env.EMANET_KURUMSAL_RESOURCE,
+    scopes: {
+      'emanet:partner': 'Sign in to Emanet Kurumsal for your organization',
+      'emanet:field': 'Sign in to Emanet Saha as a field agent',
+      'emanet:control': 'Sign in to Emanet Merkez as 2earl staff',
+    },
+    deletionBinding: 'EMANET_EVENTS',
+    organizationEvents: true,
+    endpoints: [
+      {
+        name: 'Emanet Saha',
+        resource: (env) => env.EMANET_SAHA_RESOURCE,
+        scopes: ['emanet:field'],
+      },
+      {
+        name: 'Emanet Merkez',
+        resource: (env) => env.EMANET_MERKEZ_RESOURCE,
+        scopes: ['emanet:control'],
+      },
+    ],
+  },
 ];
 
 /**

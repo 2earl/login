@@ -205,6 +205,18 @@ Tokens carry no memberships.
   login's `src/services.ts` and adds `deleteOrganization(orgId)` to its `AccountEvents`. That method
   has the same rules as `deleteUser`: idempotent, and it throws until done.
 
+### 5.1a Staff (DESIGN §4.29)
+
+2earl's own back offices (Emanet Merkez) bind `StaffDirectory` and ask on each request:
+`roleOf(userId)` answers `'owner' | 'admin' | 'support'`, or `null` for everyone else and for a
+suspended account. Read live: taking a staff role away takes effect at the next call. Bind it only
+from staff tools.
+
+```jsonc
+// the staff tool's wrangler.jsonc
+{ "binding": "STAFF", "service": "login", "entrypoint": "StaffDirectory" }
+```
+
 ### 5.2 DPoP-bound tokens (phase 9d, DESIGN §4.15)
 
 Access tokens for the gateway are bearer tokens until the gateway opts in. To accept DPoP:
