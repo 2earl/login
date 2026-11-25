@@ -1222,7 +1222,8 @@ dropping `scim_groups` would cascade into it).
 
 2earl is run by more than one person. The owner names **staff** from existing accounts; each
 staff member has one role, and `staffCan` (`src/staff.ts`) is the only place that says what a
-role may do: the routes and pages only ask it.
+role may do: the routes and pages only ask it. 2earl's other back offices (Emanet Merkez) ask the
+`StaffDirectory` entrypoint for a person's role, live (GATEWAY_INTEGRATION §5.1a).
 
 | | Support | Admin | Owner |
 |---|---|---|---|
@@ -1371,6 +1372,9 @@ There is **no registration endpoint** (`clientRegistrationEndpoint` unset).
 | `mcp:tools.read` | List tools and resources on the gateway | any client |
 | `mcp:<service>.<permission>` | Use one service behind the gateway, e.g. `mcp:promptshare.read`, `.write`, `.state` | any client |
 | `promptshare:account` | Sign in to Prompt share's website (its own resource, `https://promptshare.cc`) | Prompt share's website |
+| `emanet:partner` | Sign in to Emanet Kurumsal for one's organization (`https://emanet-kurumsal.2earl.com`) | Emanet Kurumsal |
+| `emanet:field` | Sign in to Emanet Saha as a field agent (`https://emanet-saha.2earl.com`) | Emanet Saha |
+| `emanet:control` | Sign in to Emanet Merkez as 2earl staff (`https://emanet-merkez.2earl.com`) | Emanet Merkez |
 | `admin` | Administer the identity service | owner's first-party sessions only; never to OAuth clients |
 
 Scopes are opaque strings to `login`; their enforcement lives in the resource server.

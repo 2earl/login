@@ -264,13 +264,18 @@ describe('account-deletion notices', () => {
     const up = fakeService();
     await deliverDeletionNotices(envWith({ MCP_GATEWAY_EVENTS: up.binding }), NOW + 900);
     expect(up.deleted).toEqual([userId]);
-    expect(await count('deletion_notices')).toBe(0);
+    // Only Emanet's notice is left: it has no binding until emanet-core is deployed.
+    expect(await count('deletion_notices', "service != 'emanet'")).toBe(0);
   });
 
   it('delivers over the real binding right after the deletion', async () => {
     await deleteOwnAccount({});
-    expect(await count('deletion_notices')).toBe(0);
-    expect(await count('audit_events', "event = 'user.deletion_delivered'")).toBe(SERVICES.length);
+    // Every service with a binding is told at once; Emanet's waits for emanet-core.
+    expect(await count('deletion_notices', "service != 'emanet'")).toBe(0);
+    expect(await count('deletion_notices', "service = 'emanet'")).toBe(1);
+    expect(await count('audit_events', "event = 'user.deletion_delivered'")).toBe(
+      SERVICES.length - 1,
+    );
   });
 
   it('runs on the minute cron trigger, every 15 minutes', async () => {
