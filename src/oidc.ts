@@ -51,7 +51,8 @@ export function signingKey(env: Env): Promise<SigningKey> {
       const jwk = parseJwk(secret, 'OIDC_SIGNING_KEY');
       if (!jwk.d) throw new Error('OIDC_SIGNING_KEY must be a private key');
       const publicJwk = await publicOf(jwk);
-      const privateKey = (await importJWK({ ...jwk, alg: 'ES256' }, 'ES256')) as CryptoKey;
+      const privateKey = await importJWK({ ...jwk, alg: 'ES256' }, 'ES256');
+      if (!(privateKey instanceof CryptoKey)) throw new Error('OIDC_SIGNING_KEY must be an EC key');
       return { kid: publicJwk.kid ?? '', privateKey, publicJwk };
     })();
     keys.set(secret, key);
