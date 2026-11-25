@@ -1557,6 +1557,12 @@ Library maintenance (`purgeExpiredData()`) runs on a daily Cron Trigger.
   - challenge on high-risk bot score for `/login` only (never on `/oauth/token`, which machines
     call).
 - CIMD fetch limits come from the library: 5 KB, 10 s, HTTPS-only, no private addresses.
+- While a CIMD document's host is down (timeout, network error, 404, 408, 429, 5xx), the last
+  validated copy, kept in `OAUTH_KV` under `cimd:<sha256(url)>`, is validated again and used, for
+  at most 6 hours after the last good fetch (`CIMD_FALLBACK_SECONDS`; the library's default is 24).
+  401, 403, other 4xx and documents that fail validation never fall back. A client owner who
+  withdraws a document should answer 410, which deletes the copy; a 404 leaves it usable for up to
+  6 hours.
 
 ---
 
