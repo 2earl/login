@@ -6,6 +6,7 @@ on:
     paths-ignore:
       - 'docs/**'
       - 'infra/**'
+      - '.github/workflows/infra.yml'
       - '**.md'
   workflow_dispatch:
 
