@@ -25,6 +25,12 @@ export { scopeLabel };
 export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 export const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 export const REFRESH_TOKEN_IDLE_TTL_SECONDS = 7 * 24 * 60 * 60;
+/**
+ * How long the last good copy of a client's metadata document stands in while its host is down.
+ * Outages seen so far lasted about half an hour; a client owner who withdraws a document with 404
+ * stays usable this long, so it is shorter than the library's 24 hours. 410 withdraws at once.
+ */
+export const CIMD_FALLBACK_SECONDS = 6 * 60 * 60;
 export const GRANT_MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
 
 /**
@@ -121,6 +127,7 @@ export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
       // MCP 2026-07-28 client registration. Needs the global_fetch_strictly_public flag
       // (wrangler.jsonc), which keeps metadata fetches off private and same-zone addresses.
       clientIdMetadataDocumentEnabled: true,
+      clientIdMetadataDocumentFallback: { maxAgeSeconds: CIMD_FALLBACK_SECONDS },
       accessTokenTTL: ACCESS_TOKEN_TTL_SECONDS,
       refreshTokenTTL: REFRESH_TOKEN_TTL_SECONDS,
       refreshTokenIdleTTL: REFRESH_TOKEN_IDLE_TTL_SECONDS,
