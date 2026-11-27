@@ -248,11 +248,10 @@ describe('data export', () => {
         status: 'included',
         data: { service: 'Prompt share', securityLog: [], stand_in_for: userId },
       },
-      // No binding until emanet-core is deployed.
       emanet: {
         service: 'Emanet Kurumsal',
-        status: 'not connected',
-        note: 'This service holds no data yet.',
+        status: 'included',
+        data: { service: 'Emanet', securityLog: [], stand_in_for: userId },
       },
     });
 

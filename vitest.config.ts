@@ -15,6 +15,7 @@ function standIn(name: string, service: string) {
       import { WorkerEntrypoint } from 'cloudflare:workers';
       export class AccountEvents extends WorkerEntrypoint {
         async deleteUser(userId) {}
+        async deleteOrganization(orgId) {}
         async exportUser(userId) {
           return { service: ${JSON.stringify(service)}, securityLog: [], stand_in_for: userId };
         }
@@ -49,7 +50,11 @@ export default defineConfig(async () => {
             // switching it (the settings table or a per-call override).
             LOGIN_LOCKED: 'true',
           },
-          workers: [standIn('mcp', '2earl MCP gateway'), standIn('promptshare', 'Prompt share')],
+          workers: [
+            standIn('mcp', '2earl MCP gateway'),
+            standIn('promptshare', 'Prompt share'),
+            standIn('emanet-core', 'Emanet'),
+          ],
         },
       }),
     ],
