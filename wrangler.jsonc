@@ -74,6 +74,7 @@
   "services": [
     { "binding": "MCP_GATEWAY_EVENTS", "service": "mcp", "entrypoint": "AccountEvents" },
     { "binding": "PROMPTSHARE_EVENTS", "service": "promptshare", "entrypoint": "AccountEvents" },
+    { "binding": "EMANET_EVENTS", "service": "emanet-core", "entrypoint": "AccountEvents" },
   ],
 
   // Sign-in codes and security notices (src/mail.ts), from noreply@2earl.com only. Sending to

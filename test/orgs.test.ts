@@ -361,8 +361,8 @@ describe('deleting', () => {
     expect(await count('organizations')).toBe(0);
     expect(await count('org_members')).toBe(0);
     expect(await count('org_invitations')).toBe(0);
-    // Emanet keeps data for organizations (its creditors): it is told, once its binding exists
-    // (emanet-core deployed). Until then the notice waits.
+    // Emanet keeps data for organizations (its creditors): a notice is recorded in the same step,
+    // and the scheduled delivery tells it.
     expect(await count('org_deletion_notices', "service = 'emanet' AND org_id = ?", orgId)).toBe(1);
     expect(await count('org_deletion_notices', "service != 'emanet'")).toBe(0);
   });
