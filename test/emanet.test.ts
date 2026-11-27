@@ -70,3 +70,70 @@ describe('StaffDirectory.roleOf', () => {
     expect(await directory.roleOf('s-admin')).toBeNull();
   });
 });
+
+describe('OrganizationProvisioning', () => {
+  beforeEach(resetDatabase);
+
+  async function user(id: string, email: string, status = 'active') {
+    await env.DB.prepare(
+      'INSERT INTO users (id, status, primary_email, created_at, updated_at) VALUES (?, ?, ?, 0, 0)',
+    )
+      .bind(id, status, email)
+      .run();
+  }
+
+  it('creates the organization for the invited address, from a staff invitation only', async () => {
+    await user('staff-1', 'staff@2earl.example');
+    await env.DB.prepare(
+      "INSERT INTO staff (user_id, role, granted_by, granted_at) VALUES ('staff-1', 'admin', NULL, 0)",
+    ).run();
+    await user('contact', 'Ops@Bank.example');
+    await user('gone', 'gone@bank.example', 'suspended');
+    const provisioning = exports.OrganizationProvisioning;
+    const request = {
+      ownerId: 'contact',
+      email: 'ops@bank.example',
+      name: 'Örnek Bank A.Ş.',
+      invitedBy: 'staff-1',
+      service: 'emanet',
+    };
+    expect(await provisioning.hasAddress('contact', 'ops@bank.example')).toBe(true);
+    expect(await provisioning.hasAddress('contact', 'other@bank.example')).toBe(false);
+    expect(await provisioning.create({ ...request, email: 'other@bank.example' })).toEqual({
+      ok: false,
+      reason: 'wrong_address',
+    });
+    expect(await provisioning.create({ ...request, invitedBy: 'contact' })).toEqual({
+      ok: false,
+      reason: 'not_staff',
+    });
+    expect(
+      await provisioning.create({ ...request, ownerId: 'gone', email: 'gone@bank.example' }),
+    ).toEqual({
+      ok: false,
+      reason: 'no_account',
+    });
+    expect(await provisioning.create({ ...request, name: '  ' })).toEqual({
+      ok: false,
+      reason: 'invalid_name',
+    });
+    const created = await provisioning.create(request);
+    expect(created.ok).toBe(true);
+    const orgId = created.ok ? created.orgId : '';
+    const member = await env.DB.prepare(
+      'SELECT o.name, m.role FROM organizations o JOIN org_members m ON m.org_id = o.id WHERE o.id = ?',
+    )
+      .bind(orgId)
+      .first<{ name: string; role: string }>();
+    expect(member).toEqual({ name: 'Örnek Bank A.Ş.', role: 'owner' });
+    const event = await env.DB.prepare(
+      "SELECT actor_user_id, detail FROM audit_events WHERE event = 'org.created'",
+    ).first<{ actor_user_id: string; detail: string }>();
+    expect(event?.actor_user_id).toBe('contact');
+    expect(JSON.parse(event?.detail ?? '{}')).toMatchObject({
+      org: orgId,
+      via: 'emanet',
+      invited_by: 'staff-1',
+    });
+  });
+});

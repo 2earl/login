@@ -1290,8 +1290,12 @@ them: the person who will run it, usually at a customer.
 - Table `org_setup_invitations` (migration 0027): `id` (`osi_…`), `email`, `org_name`,
   `invited_by`, `created_at`, `sent_at`, `expires_at`, `used_at`, `org_id`.
 
-
-
+**From another 2earl service's invitation.** Emanet invites companies itself (its own email,
+its own onboarding steps), so login offers the same setup to it over a Service Binding: the
+`OrganizationProvisioning` entrypoint (`src/org-provisioning.ts`), bound only by Emanet Kurumsal.
+`create` makes the organization with the signed-in account as owner, under the same checks as a
+setup invitation: the account is active, it signs in with the invited address, and the
+invitation came from a member of staff. `org.created` records the service and the inviter.
 
 ### 4.31 Languages (phase 12)
 

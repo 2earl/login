@@ -18,6 +18,7 @@ import { boundKey, challenge, checkAccessToken } from './token-check';
 export { PromptshareDirectory } from './directory';
 export { OrganizationDirectory } from './org-directory';
 export { StaffDirectory } from './staff-directory';
+export { OrganizationProvisioning } from './org-provisioning';
 
 const app = createApp({
   fetch: (input, init) => fetch(input, init),
