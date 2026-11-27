@@ -1112,6 +1112,10 @@ export const tr: Catalog = {
       'Bir kez giriş yapın. Hangi uygulamaların sizin adınıza işlem yapabileceğine karar verin ve istediğiniz zaman geri alın.',
     'Sign in or create your account': 'Giriş yapın ya da hesabınızı oluşturun',
     'Sign in to Prompt share': 'Prompt share’e giriş yapın',
+    'Sign in to Emanet Kurumsal for your organization':
+      'Kuruluşunuz adına Emanet Kurumsal’a giriş yapın',
+    'Sign in to Emanet Saha as a field agent': 'Emanet Saha’ya saha görevlisi olarak giriş yapın',
+    'Sign in to Emanet Merkez as 2earl staff': 'Emanet Merkez’e 2earl personeli olarak giriş yapın',
     'Sign in with': 'Giriş yöntemi',
     'Sign in with SSO': 'SSO ile giriş yapın',
     'Sign in with a passkey': 'Geçiş anahtarıyla giriş yapın',
