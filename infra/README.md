@@ -12,13 +12,18 @@ Terraform for the Cloudflare resources around the `login` Worker. Ownership spli
 
 ## How changes are applied
 
-1. Open a PR that changes files here. HCP Terraform (workspace `2earl-login-prod`) posts a
-   speculative plan on the PR. HCP does not plan PRs from forks.
-2. Merge. HCP queues a run on `main`.
-3. The owner reviews the plan in HCP and confirms the apply. Apply is never automatic.
+HCP Terraform (workspace `2earl-login-prod`) keeps the state only; Terraform runs in GitHub Actions
+(`.github/workflows/infra.yml`), so a run never depends on HCP fetching the repository.
 
-Credentials: `CLOUDFLARE_API_TOKEN` is a sensitive environment variable in the workspace. Nothing
-in this directory may contain a secret.
+1. Open a PR that changes files here. The `check` job runs `terraform fmt`, `init` and
+   `validate`, without secrets.
+2. Merge. On `main`, the `plan` job waits for the owner's approval (environment `production`),
+   then writes the plan to the run's summary.
+3. If there are changes, the `apply` job waits for a second approval and applies only if a fresh
+   plan is identical to the one reviewed. Apply is never automatic.
+
+Credentials, in the repository's `production` environment: `TF_API_TOKEN` (an HCP Terraform team
+token) and `CLOUDFLARE_INFRA_API_TOKEN`. Nothing in this directory may contain a secret.
 
 ## Not managed here
 
