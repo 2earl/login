@@ -204,6 +204,10 @@ export const SERVICES: readonly Service[] = [
       'kyc:usage.read': 'See your organization’s KYC usage, plan and statements',
     },
     deletionBinding: 'KYC_EVENTS',
+    // Only KYC's console may ask for its sign-in scope (DESIGN §4.32).
+    firstPartyClients: {
+      'kyc:console': (env) => [`${env.KYC_RESOURCE}/console/client.json`],
+    },
   },
 ];
 
