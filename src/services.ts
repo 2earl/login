@@ -1,3 +1,6 @@
+import { LOGIN_AUTHZ } from './authz/login-manifest';
+import type { ServiceAuthz, SystemRole } from './authz/types';
+
 /**
  * The 2earl services that accept tokens from this server (DESIGN §4.8). Each declares its own
  * resource URL, its own permissions and where it receives account-deletion notices.
@@ -40,6 +43,12 @@ export interface Service {
    * (2earl/mcp docs/DESIGN.md §3): a token for one address is useless at another.
    */
   endpoints?: readonly { name: string; resource(env: Env): string; scopes: readonly string[] }[];
+  /**
+   * The service's permissions and system roles (DESIGN §4.32), for services whose data people
+   * share and that ask login what someone may do. Services without one aren't in the
+   * authorization API.
+   */
+  authz?: ServiceAuthz;
 }
 
 export const SERVICES: readonly Service[] = [
@@ -91,6 +100,64 @@ export const SERVICES: readonly Service[] = [
     },
     deletionBinding: 'EMANET_EVENTS',
     organizationEvents: true,
+    // What the two apps' `can` maps decided before phase 13 (emanet-kurumsal and emanet-merkez
+    // src/core.ts): with no assignments, the defaults give exactly that.
+    authz: {
+      permissions: {
+        'emanet:cases.read': 'See the organization’s cases',
+        'emanet:cases.write': 'Add, change, confirm and withdraw cases, and upload files of cases',
+        'emanet:integrations.manage':
+          'Manage API keys and webhooks, which act for the organization',
+        'emanet:control.review': 'Open Emanet Merkez and settle identity reviews',
+        'emanet:control.change':
+          'Change partners, agents and settings, confirm deliveries and move money in Emanet Merkez',
+      },
+      roles: {
+        'emanet:partner_admin': {
+          name: 'Partner admin',
+          assignable: 'org',
+          permissions: ['emanet:cases.read', 'emanet:cases.write', 'emanet:integrations.manage'],
+        },
+        'emanet:case_manager': {
+          name: 'Case manager',
+          assignable: 'org',
+          permissions: ['emanet:cases.read', 'emanet:cases.write'],
+        },
+        'emanet:viewer': {
+          name: 'Viewer',
+          assignable: 'org',
+          permissions: ['emanet:cases.read'],
+        },
+        'emanet:staff_admin': {
+          name: 'Merkez admin',
+          assignable: 'platform',
+          privileged: true,
+          permissions: ['emanet:control.review', 'emanet:control.change'],
+        },
+        'emanet:staff_reviewer': {
+          name: 'Merkez reviewer',
+          assignable: 'platform',
+          permissions: ['emanet:control.review'],
+        },
+      },
+      orgDefaults: {
+        owner: 'emanet:partner_admin',
+        admin: 'emanet:partner_admin',
+        member: 'emanet:case_manager',
+        auditor: 'emanet:viewer',
+      },
+      staffDefaults: {
+        owner: 'emanet:staff_admin',
+        admin: 'emanet:staff_admin',
+        support: 'emanet:staff_reviewer',
+      },
+      scopeGrants: {
+        'emanet:partner': ['emanet:cases.read', 'emanet:cases.write', 'emanet:integrations.manage'],
+        'emanet:control': ['emanet:control.review', 'emanet:control.change'],
+        // Field agents' rights are their status in emanet-core, not roles.
+        'emanet:field': [],
+      },
+    },
     endpoints: [
       {
         name: 'Emanet Saha',
@@ -144,6 +211,8 @@ export const IDENTITY: Service = {
   deletionBinding: '',
   // /userinfo checks proofs (src/token-check.ts).
   dpop: true,
+  // login's own rules for organizations and staff (DESIGN §4.32).
+  authz: LOGIN_AUTHZ,
 };
 
 /** Every scope of every service, with its consent wording. */
@@ -173,6 +242,7 @@ export function serviceForResource(env: Env, resource: string | undefined): Serv
         ),
         deletionBinding: service.deletionBinding,
         ...(service.dpop ? { dpop: true } : {}),
+        ...(service.authz ? { authz: service.authz } : {}),
       };
     }
   }
@@ -202,4 +272,29 @@ export function scopeLabel(scope: string): string {
 /** Only the scopes that belong to `service`: a token for one service never carries another's. */
 export function scopesFor(service: Service, scopes: readonly string[]): string[] {
   return scopes.filter((scope) => Object.hasOwn(service.scopes, scope));
+}
+
+// ---- Authorization (DESIGN §4.32) ---------------------------------------------------------------
+
+/** The services in the authorization API: login itself, and every service with a manifest. */
+export const AUTHZ_SERVICES: readonly (Service & { authz: ServiceAuthz })[] = [
+  IDENTITY,
+  ...SERVICES,
+].filter((s): s is Service & { authz: ServiceAuthz } => s.authz !== undefined);
+
+/** A service's manifest by its ID, or undefined if it has none. */
+export function authzOf(serviceId: string): ServiceAuthz | undefined {
+  return AUTHZ_SERVICES.find((s) => s.id === serviceId)?.authz;
+}
+
+/** A system role by its full ID (`<service>:<name>`). */
+export function systemRole(roleId: string): SystemRole | undefined {
+  const service = roleId.slice(0, Math.max(0, roleId.indexOf(':')));
+  return authzOf(service)?.roles[roleId];
+}
+
+/** Whether a service declares this permission. */
+export function permissionExists(permission: string): boolean {
+  const service = permission.slice(0, Math.max(0, permission.indexOf(':')));
+  return Object.hasOwn(authzOf(service)?.permissions ?? {}, permission);
 }
