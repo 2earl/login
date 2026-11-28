@@ -2061,5 +2061,43 @@ export const tr: Catalog = {
       '“{0}” geçiş anahtarını zorunlu tutuyor. Geçiş anahtarınızı ya da bir kurtarma kodunu kullanın.',
     '“{0}” requires a second factor. Add another one before removing this one.':
       '“{0}” ikinci doğrulama adımını zorunlu tutuyor. Bunu kaldırmadan önce bir tane daha ekleyin.',
+    // Permissions and roles (DESIGN §4.32).
+    'See the organization’s members': 'Kurumun üyelerini görme',
+    'See and download the organization’s activity': 'Kurumun etkinliğini görme ve indirme',
+    'Invite people and withdraw invitations': 'Kişileri davet etme ve davetleri geri çekme',
+    'Change roles of members, auditors and admins, and remove them':
+      'Üyelerin, denetçilerin ve yöneticilerin rollerini değiştirme ve onları çıkarma',
+    'Make, unmake and remove owners': 'Sahip yapma, sahipliği kaldırma ve sahipleri çıkarma',
+    'Rename and delete the organization': 'Kurumu yeniden adlandırma ve silme',
+    'Open the admin area: people, organizations, the security log':
+      'Yönetim alanını açma: kişiler, kurumlar, güvenlik kaydı',
+    'Sign a person out everywhere': 'Bir kişinin her yerdeki oturumunu kapatma',
+    'Send an organization setup invitation again': 'Kurum kurulum davetini yeniden gönderme',
+    'Suspend, reactivate, reset a second factor and delete people':
+      'Kişileri askıya alma, yeniden etkinleştirme, ikinci doğrulama adımını sıfırlama ve silme',
+    'Open and close sign-up, and invite people to sign up':
+      'Kaydı açma ve kapatma, kişileri kayda davet etme',
+    'Create organizations and invite people to set them up':
+      'Kurum oluşturma ve kişileri kurum kurmaya davet etme',
+    'Suspend, reactivate and delete organizations':
+      'Kurumları askıya alma, yeniden etkinleştirme ve silme',
+    'Manage registered apps and resource servers':
+      'Kayıtlı uygulamaları ve kaynak sunucularını yönetme',
+    'Give, change and take staff roles, and act on other staff':
+      'Personel rollerini verme, değiştirme ve geri alma, diğer personel üzerinde işlem yapma',
+    'See the organization’s cases': 'Kurumun dosyalarını görme',
+    'Add, change, confirm and withdraw cases, and upload files of cases':
+      'Dosya ekleme, değiştirme, onaylama ve geri çekme, dosya listesi yükleme',
+    'Manage API keys and webhooks, which act for the organization':
+      'Kurum adına çalışan API anahtarlarını ve webhook’ları yönetme',
+    'Open Emanet Merkez and settle identity reviews':
+      'Emanet Merkez’i açma ve kimlik incelemelerini sonuçlandırma',
+    'Change partners, agents and settings, confirm deliveries and move money in Emanet Merkez':
+      'Emanet Merkez’de iş ortaklarını, görevlileri ve ayarları değiştirme, teslimleri onaylama ve para hareketi yapma',
+    'Partner admin': 'İş ortağı yöneticisi',
+    'Case manager': 'Dosya sorumlusu',
+    Viewer: 'Görüntüleyen',
+    'Merkez admin': 'Merkez yöneticisi',
+    'Merkez reviewer': 'Merkez inceleyicisi',
   },
 };
