@@ -13,6 +13,7 @@ import { audit } from './audit';
 import { dueDeletions } from './managed';
 import { deliverStreams } from './org-audit';
 import { serviceForResource } from './services';
+import { expiredAssignmentsStatement } from './authz/store';
 import { boundKey, challenge, checkAccessToken } from './token-check';
 
 export { PromptshareDirectory } from './directory';
@@ -154,6 +155,8 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
         this.env.DB.prepare('DELETE FROM audit_events WHERE at < ?').bind(
           now - AUDIT_RETENTION_SECONDS,
         ),
+        // Role assignments whose time is up (DESIGN §4.32); the engine already ignores them.
+        expiredAssignmentsStatement(this.env.DB, now),
       ]),
       (async () => {
         const cursor = (await this.env.OAUTH_KV.get(PURGE_CURSOR_KEY)) ?? undefined;
