@@ -217,6 +217,9 @@ from staff tools.
 { "binding": "STAFF", "service": "login", "entrypoint": "StaffDirectory" }
 ```
 
+**What someone may do** (phase 13a): a service whose data people share asks login's
+`Authorization` entrypoint instead of keeping roles of its own. See [AUTHORIZATION.md](AUTHORIZATION.md).
+
 ### 5.2 DPoP-bound tokens (phase 9d, DESIGN §4.15)
 
 Access tokens for the gateway are bearer tokens until the gateway opts in. To accept DPoP:
