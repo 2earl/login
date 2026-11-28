@@ -48,6 +48,7 @@ Companion documents: [THREAT_MODEL.md](THREAT_MODEL.md) · [DATA_PROTECTION.md](
 | D10 | Second factor in our own service, controlled by a feature flag: optional when off, enforced when on (§4.7) | Owner, 2026-11-08 |
 | D11 | `/admin` always requires a second factor, regardless of the flag | Owner, 2026-11-08 |
 | D12 | KV namespace in the EU jurisdiction too (supported by the Cloudflare provider, verified in phase 3) | Phase 3 |
+| D13 | login is the authorization service for 2earl's apps: permissions per service in code, roles and scoped assignments in D1, decisions read live over a Service Binding; no policy language (§4.32) | Owner, 2026-11-28 |
 
 ---
 
@@ -1326,6 +1327,89 @@ login speaks English and Turkish; adding a language is one catalog file.
 Adding a language: its code in `LOCALES` and `LOCALE_NAMES`, `src/locales/<code>.ts` (from
 `tr.ts`), registered in `CATALOGS`, and `months`. No migration: `users.locale` has no CHECK.
 
+### 4.32 Permissions, roles and assignments (phase 13)
+
+Decided by the owner on 2026-11-28: login becomes the authorization service for every 2earl
+app, not only the place people sign in. Until phase 13 each app invented its own roles (Emanet
+Kurumsal and Merkez a `can` map each, KYC its own staff and tenant tables); from phase 13 they ask
+login. The model is role-based access with scoped assignments (D13), not a policy language.
+
+**Vocabulary.**
+
+| Term | Meaning |
+|---|---|
+| Principal | Who acts: an account (`uid`), a service account (`sa_…`, §4.33), or a group as an assignee |
+| Permission | One thing that can be done in one service: `<service>:<object>.<action>`, e.g. `emanet:cases.write`, `login:members.invite` |
+| Role | A named set of permissions of **one** service. *System* roles are in code; *custom* roles are made by an organization |
+| Scope of an assignment | `platform` (2earl staff), one organization, or one resource inside an organization (`<type>:<id>`) |
+| Assignment | principal × role × scope, with an optional expiry |
+| OAuth scope | What a person let an **app** do. A ceiling, never a permission: effective access is the token's scopes ∩ the principal's permissions |
+
+**Where things live.**
+- Permissions and system roles: in code, in each service's `authz` manifest (`src/services.ts`;
+  login's own in `src/authz/login-manifest.ts`). A permission is meaningless without the code
+  that enforces it, so both ship in the same PR. No sync job, nothing to drift.
+- Custom roles and every assignment: D1 (`authz_roles`, `authz_role_permissions`,
+  `authz_assignments`, migration 0029).
+- **Base roles stay.** `org_members.role` (owner, admin, auditor, member, §4.14) and the staff
+  role (§4.29) are each principal's base role. A manifest says which of its system roles each
+  base role implies (`orgDefaults`, `staffDefaults`). With no assignments at all, every app
+  behaves exactly as before phase 13.
+
+**How a decision is made** (`src/authz/engine.ts`): the permissions of a principal in one service
+and organization are
+1. the system role its base role implies there;
+2. plus every unexpired assignment to it, or to a directory group it is an active member of, in
+   that organization or at platform scope, of a role of that service;
+3. nothing at all if the account or the organization isn't active, or an org-scoped assignment's
+   holder is no longer a member.
+
+A permission the manifest doesn't declare throws: a misconfigured app fails loudly, as
+`validateToken` does with an unknown resource. Assignments with a condition are skipped until
+conditions exist (phase 13e): a condition that can't be evaluated never grants.
+
+**Who may grant** (phase 13b, in one function, `mayGrant`): the actor holds `login:access.assign`
+and every permission in the role; roles marked `privileged` need an owner; nobody assigns to
+themselves; owners are made only as today (§4.14), never through an assignment. The last-owner
+rule stays in SQL.
+
+**Limits:** 50 custom roles per organization, 200 permissions per role, 5,000 assignments per
+organization.
+
+**Deletion:** an account's, an organization's or a group's assignments go in the same D1 batch as
+the deletion; organizations' custom roles cascade. A daily sweep removes expired assignments.
+
+**login's own checks.** `canInvite`, `canSetRole`, `canRemove`, `canSeeActivity`,
+`canManageOrganization` and `staffCan` keep their names and signatures and read login's manifest.
+Their inputs are a closed set of roles, so an exhaustive test proves the manifest gives the same
+answers as the code it replaces (`test/authz-parity.test.ts`); no runtime shadow mode is needed.
+
+### 4.33 Service accounts (phase 13c)
+
+Machine identities for organizations' backends (a bank's server calling KYC) and for 2earl's own
+jobs. OAuth 2.0 client credentials (RFC 6749 §4.4) with `client_secret_basic` or
+`private_key_jwt` (RFC 7523). A service account belongs to one organization (or to 2earl, at
+platform scope), holds the scopes the owner allowed it, gets roles like a person, and never has a
+session, consent, an ID token, `openid` or ownership. Access tokens only, 15 minutes, no refresh
+token. Designed in full when phase 13c starts.
+
+### 4.34 The authorization API (phase 13a)
+
+A named entrypoint, `Authorization`, for Service Bindings only, shaped like the OpenID AuthZEN
+Authorization API 1.0 (subject, action, resource, context → decision), so the same questions can
+later be asked over HTTP (phase 13e) without a 2earl SDK:
+- `check({ subject, action, resource?, context? })` → `{ decision }`;
+- `checkMany({ subject, evaluations, context? })`, at most 50;
+- `permissionsOf({ subject, service, orgId?, context? })` → permissions, roles, base role: what a
+  page needs to decide what to draw;
+- `subjectsWith({ action, orgId })` → who holds a permission.
+
+Answers are read live from D1 on every call, like memberships (§4.14): tokens never carry roles
+or permissions, which would be stale for 15 minutes. When `context.scopes` is passed (the token's
+scopes), the answer is already intersected with what those scopes allow (`scopeGrants`). A
+service may only ask about its own permissions. The integration guide is
+[AUTHORIZATION.md](AUTHORIZATION.md).
+
 ## 5. Protocol surface
 
 ### 5.1 Endpoints
@@ -1716,6 +1800,11 @@ Resolved:
 | 10k | **The auditor role** (§4.28) |
 | 11 | **2earl staff roles** (§4.29) and **organizations set up by invitation** (§4.30) |
 | 12 | **Languages**: Turkish, and a catalog per language (§4.31) |
+| 13a | **Permissions, roles and assignments** (§4.32) and the **authorization API** (§4.34) |
+| 13b | Custom roles, groups as assignees, staff roles per service; the organization API for them |
+| 13c | **Service accounts** and client credentials (§4.33); which client may ask for which scope; an organization on a person's token |
+| 13d | The apps move onto it: KYC registered, Emanet Kurumsal and Merkez |
+| 13e | Governance: conditions, time-bound access and requests, support access, AuthZEN over HTTP, access reviews, decision records |
 
 ## 13. Standards roadmap: what login implements, and what it deliberately doesn't
 
@@ -1766,13 +1855,16 @@ updates (Dependabot), and it is on only for organizations that turn it on.
 | Implicit and password grants | Removed in OAuth 2.1 | Never |
 | RFC 9396 Rich Authorization Requests | Scopes per service already cover the permissions in use | A service needs per-object consent (e.g. "this one session") |
 | RFC 7591 Dynamic client registration | Replaced by client metadata documents, which can't be abused to fill the database | Never, unless MCP requires it again |
-| Client credentials grant | Services talk over Service Bindings; organizations' scripts use API keys (§4.24) | A third-party backend needs OAuth access of its own |
+| Client credentials grant | ~~Services talk over Service Bindings~~ **Planned (phase 13c, §4.33):** KYC's tenant API needs customers' backends to hold a token | Condition met 2026-11-28 |
 | RFC 9101 JAR | Signed request objects; PAR (9d) already keeps the request off the browser | A FAPI-grade client |
 | Microsoft, GitHub, Apple and other social sign-in | The owner decided on 2026-11-12: Google, email codes and passkeys are the ways in | The owner decides otherwise |
 | SAML single logout, encrypted assertions, signed AuthnRequests, IdP-initiated sign-in | TLS protects the POST; IdP-initiated responses can't be tied to a request login made. "Require SSO" now exists for managed accounts (§4.18) | An organization needs one of them |
 | SCIM bulk operations | Directories send one change at a time anyway | A directory needs bulk |
 | DPoP server nonces (RFC 9449 §8) and `dpop_jkt` | Proofs already expire in 60 seconds and work once; PKCE binds the code | A client or resource needs them |
 | FedCM | Browser-mediated sign-in for third-party sites; only useful once sites embed "Sign in with 2earl" | A site asks for it |
+| Applications registered by customers (their own APIs and roles in login) | The library's resource list is fixed at start-up | A customer wants login to protect an API that isn't a 2earl service |
+| RFC 8693 Token exchange | Services call each other over Service Bindings | A service must act for a person outside Service Bindings |
+| Relation tuples (Zanzibar style), a policy language (Cedar, Rego) | Scoped roles cover every app; another engine is a second attack surface | Access inherited through folders or hierarchies that per-resource assignments can't express |
 | Shared Signals (CAEP, RISC) | Pushes session and credential events to relying parties; there is one relying party, our own gateway, which already checks every token | Several independent relying parties |
 
 ## References

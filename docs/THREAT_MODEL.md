@@ -340,6 +340,21 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | L3 | `?lang=` used to set cookies for others | The cookie only selects one of the known languages; anything else is ignored |
 | L4 | Account pages or codes indexed by search engines | `X-Robots-Tag: noindex, nofollow` everywhere and `robots.txt` disallows all |
 
+### Z — Permissions, roles and service accounts (DESIGN §4.32–§4.34, phase 13)
+
+| # | Threat | Mitigation |
+|---|---|---|
+| Z1 | An admin gives themselves or an accomplice more than they hold (a custom role with permissions they lack, a privileged role, an assignment to themselves) | `mayGrant`: the actor must hold every permission in the role; privileged roles need an owner; no self-assignment; owners only as in §4.14 (tested) |
+| Z2 | A directory takes over an organization through groups | Groups get service roles only; the directory still never makes or changes owners, and `login:` owner permissions are never assignable (tested) |
+| Z3 | One app asks about, or learns, another app's permissions (confused deputy between services) | The entrypoint answers only for the calling service's own permissions; an unknown permission throws (tested) |
+| Z4 | A decision outlives the access it came from (removed member, suspended account or organization, expired assignment) | Read live on every call, never in tokens; inactive accounts and organizations hold nothing; expiry checked in the query (tested) |
+| Z5 | An app treats an OAuth scope as a permission | Effective access is scopes ∩ permissions when the app passes the token's scopes; AUTHORIZATION.md says to pass them |
+| Z6 | Enumeration through the decision API | Service Binding only; no HTTP surface until phase 13e, which needs resource-server credentials |
+| Z7 | A misconfigured manifest grants everything | Permissions must exist and start with their service's ID; every role permission, default and exclusive pair is checked by a test; an unknown permission throws |
+| Z8 | Login's own rules change by accident when they move onto the manifest | Exhaustive parity test over every role combination against §4.14 and §4.29 |
+| Z9 | A service account's secret or key is stolen | Planned for phase 13c: shown once, kept as a hash, private_key_jwt with single-use `jti`, scopes fixed by the owner, revocable at once, 15-minute tokens without refresh |
+| Z10 | Login is unavailable | Every permission check fails closed (the app answers 503). Wider blast radius than sign-in alone; accepted |
+
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)
 
 | # | Threat | Mitigation |
@@ -411,4 +426,5 @@ Re-run this threat model when any of these are introduced:
 - DCR;
 - native-app private-use redirect schemes;
 - a staging environment;
-- a new person with write access.
+- a new person with write access;
+- a new kind of principal, or a way to grant permissions (DESIGN §4.32).
