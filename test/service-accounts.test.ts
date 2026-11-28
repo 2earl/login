@@ -318,16 +318,18 @@ describe('roles for service accounts', () => {
     const { id } = await createWithSecret(['kyc:sessions.read']);
     const sa = { type: 'service_account' as const, id };
     const permissions = async (org: string | null) =>
-      [...(await effective(env, { subject: sa, service: 'kyc', orgId: org })).permissions].sort();
+      [
+        ...(await effective(env, { subject: sa, service: 'emanet', orgId: org })).permissions,
+      ].sort();
     expect(await permissions(orgId)).toEqual([]);
     const given = await assignRole(env, NOW, {
       orgId,
       principal: { kind: 'service_account', id },
-      role: 'kyc:tenant_developer',
+      role: 'emanet:case_manager',
       grantedBy: userId,
     });
     expect(given.ok).toBe(true);
-    expect(await permissions(orgId)).toEqual(['kyc:tenant.develop', 'kyc:tenant.view']);
+    expect(await permissions(orgId)).toEqual(['emanet:cases.read', 'emanet:cases.write']);
     expect(await permissions(null)).toEqual([]);
     await env.DB.prepare('DELETE FROM service_accounts WHERE id = ?').bind(id).run();
     expect(await count('authz_assignments')).toBe(0);
