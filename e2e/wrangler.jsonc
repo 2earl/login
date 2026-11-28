@@ -23,6 +23,7 @@
     "EMANET_KURUMSAL_RESOURCE": "https://emanet-kurumsal.2earl.com",
     "EMANET_SAHA_RESOURCE": "https://emanet-saha.2earl.com",
     "EMANET_MERKEZ_RESOURCE": "https://emanet-merkez.2earl.com",
+    "KYC_RESOURCE": "https://kyc.2earl.com",
     "MFA_REQUIRED": "false",
     "OIDC_NEXT_PUBLIC_KEY": "",
   },
