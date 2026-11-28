@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { effective } from '../src/authz/engine';
 import { createApp } from '../src/app';
 import { setOAuthClock } from '../src/oauth';
 import { totpCode, totpStep } from '../src/totp';
@@ -278,6 +279,74 @@ describe('staff roles', () => {
     expect(found).toContain(bob.email);
     expect(found).not.toContain(ada.email);
     expect(found).toContain('1 account found');
+  });
+});
+
+describe('app roles for staff (DESIGN §4.32)', () => {
+  it('are given by the owner for one app, and end when the person leaves staff', async () => {
+    await giveFactor(owner);
+    await post(owner, '/admin/team', { action: 'grant', email: ada.email, role: 'support' });
+    const page = await (await get(owner, '/admin/team')).text();
+    expect(page).toContain('Roles in 2earl’s apps');
+    expect(page).toContain('Emanet Kurumsal: Merkez admin');
+
+    const perms = async () =>
+      [
+        ...(
+          await effective(env, {
+            subject: { type: 'user', id: ada.id },
+            service: 'emanet',
+            orgId: null,
+            context: { now },
+          })
+        ).permissions,
+      ].sort();
+    expect(await perms()).toEqual(['emanet:control.review']);
+    const given = await post(owner, '/admin/team', {
+      action: 'platform_grant',
+      user: ada.id,
+      role: 'emanet:staff_admin',
+      days: '30',
+      reason: 'Covers payouts in December',
+    });
+    expect(given.headers.get('Location')).toBe('/admin/team?done=platform_given');
+    expect(await perms()).toEqual(['emanet:control.change', 'emanet:control.review']);
+    // Someone who isn't staff can't be given one.
+    expect(
+      (
+        await post(owner, '/admin/team', {
+          action: 'platform_grant',
+          user: bob.id,
+          role: 'emanet:staff_admin',
+        })
+      ).status,
+    ).toBe(409);
+    // Nor an organization role, nor login's own.
+    for (const role of ['emanet:partner_admin', 'login:staff_owner']) {
+      expect(
+        (await post(owner, '/admin/team', { action: 'platform_grant', user: ada.id, role })).status,
+      ).toBe(400);
+    }
+
+    await post(owner, '/admin/team', { action: 'revoke', user: ada.id });
+    expect(await perms()).toEqual([]);
+    expect(await count('authz_assignments')).toBe(0);
+    expect(await count('audit_events', "event = 'admin.platform_role_given'")).toBe(1);
+  });
+
+  it('can be taken back', async () => {
+    await giveFactor(owner);
+    await post(owner, '/admin/team', { action: 'grant', email: ada.email, role: 'admin' });
+    await post(owner, '/admin/team', {
+      action: 'platform_grant',
+      user: ada.id,
+      role: 'emanet:staff_reviewer',
+    });
+    const id = (await env.DB.prepare('SELECT id FROM authz_assignments').first<{ id: string }>())
+      ?.id;
+    const taken = await post(owner, '/admin/team', { action: 'platform_revoke', id: id ?? '' });
+    expect(taken.headers.get('Location')).toBe('/admin/team?done=platform_taken');
+    expect(await count('authz_assignments')).toBe(0);
   });
 });
 

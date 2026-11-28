@@ -120,7 +120,9 @@ export type AuditEvent =
   | 'authz.assigned'
   | 'authz.unassigned'
   | 'authz.role_created'
-  | 'authz.role_deleted';
+  | 'authz.role_deleted'
+  | 'admin.platform_role_given'
+  | 'admin.platform_role_taken';
 
 export async function audit(
   db: D1Database,

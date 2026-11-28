@@ -499,8 +499,73 @@ export function adminOrgPage(params: AdminView & { detail: AdminOrgDetail }): st
 
 // ---- Staff (DESIGN §4.29) -------------------------------------------------------------------
 
+export interface PlatformRoleView {
+  /** Platform roles staff can be given, by app. */
+  roles: { id: string; name: string; service: string; permissions: string[] }[];
+  /** Who holds which, now. */
+  held: {
+    id: string;
+    person: string;
+    role: string;
+    service: string;
+    expiresAt: number | null;
+    reason: string;
+  }[];
+  /** Staff who can be given one: the owner and everyone on staff. */
+  people: { id: string; label: string }[];
+}
+
+/** Platform roles in 2earl's apps for staff (DESIGN §4.32, phase 13b). */
+function platformRolesSection(view: PlatformRoleView | undefined): string {
+  if (!view || view.roles.length === 0) return '';
+  const held = view.held.length
+    ? `<ul class="admin-list">${view.held
+        .map(
+          (h) =>
+            '<li class="admin-row"><div class="app-main">' +
+            `<p class="app-name">${escapeHtml(h.person)} <span class="tag">${escapeHtml(h.role)}</span></p>` +
+            `<p class="app-meta">${escapeHtml(h.service)}${h.expiresAt ? ` · until ${formatDate(h.expiresAt)}` : ''}${h.reason ? ` · ${escapeHtml(h.reason)}` : ''}</p>` +
+            '</div><div class="row-actions">' +
+            actionForm('/admin/team', { action: 'platform_revoke', id: h.id }, 'Take back') +
+            '</div></li>',
+        )
+        .join('')}</ul>`
+    : '<p class="empty">No app roles given beyond what staff roles give.</p>';
+  return (
+    '<section class="section" aria-labelledby="platform-heading">' +
+    '<h2 id="platform-heading">Roles in 2earl’s apps</h2>' +
+    '<p class="section-text">Admins and support get each app’s default staff role. Give more here, for one app: what it allows is listed with each role. A role ends when it runs out, when you take it back, or when the person leaves staff.</p>' +
+    held +
+    '<form method="post" action="/admin/team" class="stack-form">' +
+    '<input type="hidden" name="action" value="platform_grant">' +
+    `<label class="field"><span>Who</span><select name="user" required>${view.people
+      .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label)}</option>`)
+      .join('')}</select></label>` +
+    `<label class="field"><span>Role</span><select name="role" required>${view.roles
+      .map(
+        (r) =>
+          `<option value="${escapeHtml(r.id)}">${escapeHtml(`${r.service}: ${r.name}`)}</option>`,
+      )
+      .join('')}</select></label>` +
+    '<label class="field"><span>For how many days (empty: until taken back)</span><input name="days" type="number" min="1" max="365" inputmode="numeric"></label>' +
+    '<label class="field"><span>Why (optional, kept with the role)</span><input name="reason" type="text" maxlength="300" autocomplete="off"></label>' +
+    '<button class="button secondary" type="submit">Give role</button></form>' +
+    `<ul class="admin-list">${view.roles
+      .map(
+        (r) =>
+          `<li class="admin-row"><div class="app-main"><p class="app-name">${escapeHtml(`${r.service}: ${r.name}`)}</p><p class="app-meta">${r.permissions.map((p) => escapeHtml(p)).join(' · ')}</p></div></li>`,
+      )
+      .join('')}</ul>` +
+    '</section>'
+  );
+}
+
 export function adminTeamPage(
-  params: AdminView & { staff: StaffMember[]; form?: { email: string } },
+  params: AdminView & {
+    staff: StaffMember[];
+    form?: { email: string };
+    platform?: PlatformRoleView;
+  },
 ): string {
   const rows = params.staff
     .map(
@@ -533,7 +598,10 @@ export function adminTeamPage(
       `<input name="email" type="email" required maxlength="254" autocomplete="off" spellcheck="false" value="${escapeHtml(params.form?.email ?? '')}"></label>` +
       '<label class="field"><span>Role</span><select name="role"><option value="support">Support</option><option value="admin">Admin</option></select></label>' +
       '<button class="button primary" type="submit">Add to staff</button></form>' +
-      (rows ? `<ul class="admin-list">${rows}</ul>` : '<p class="empty">No staff besides you.</p>'),
+      (rows
+        ? `<ul class="admin-list">${rows}</ul>`
+        : '<p class="empty">No staff besides you.</p>') +
+      platformRolesSection(params.platform),
     params,
   );
 }
@@ -766,6 +834,8 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'authz.unassigned': 'Role in an app taken back',
   'authz.role_created': 'Role created',
   'authz.role_deleted': 'Role deleted',
+  'admin.platform_role_given': 'App role given to staff',
+  'admin.platform_role_taken': 'App role taken back from staff',
   'account.exported': 'Data downloaded',
   'account.deletion_started': 'Account deletion started',
   'account.deletion_stopped': 'Account deletion stopped',

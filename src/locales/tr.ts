@@ -2158,5 +2158,11 @@ export const tr: Catalog = {
     'They already have this role.': 'Bu role zaten sahipler.',
     'Service account deleted. Its tokens stop working within a minute.':
       'Hizmet hesabı silindi. Belirteçleri bir dakika içinde çalışmaz hale gelir.',
+    'Roles in 2earl’s apps': '2earl uygulamalarındaki roller',
+    'Admins and support get each app’s default staff role. Give more here, for one app: what it allows is listed with each role. A role ends when it runs out, when you take it back, or when the person leaves staff.':
+      'Yöneticiler ve destek her uygulamanın varsayılan personel rolünü alır. Burada tek bir uygulama için daha fazlasını verin: her rolün neye izin verdiği yanında yazar. Rol, süresi dolduğunda, geri aldığınızda veya kişi personelden ayrıldığında sona erer.',
+    'No app roles given beyond what staff roles give.':
+      'Personel rollerinin verdiklerinin ötesinde uygulama rolü verilmedi.',
+    'Role taken back.': 'Rol geri alındı.',
   },
 };
