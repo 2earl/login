@@ -104,6 +104,25 @@ export const SERVICES: readonly Service[] = [
       },
     ],
   },
+  {
+    // 2earl KYC (2earl/kyc): identity verification sold to companies. Its customers are its own
+    // tenants, not login organizations. People being verified never hold a login account; these
+    // scopes are for the KYC console (staff and customer members) and for customers' API clients.
+    id: 'kyc',
+    name: '2earl KYC',
+    resource: (env) => env.KYC_RESOURCE,
+    scopes: {
+      'kyc:console': 'Sign in to the 2earl KYC console',
+      'kyc:sessions.write': 'Start identity verifications in 2earl KYC for your organization',
+      'kyc:sessions.read': 'See the status of your organization’s identity verifications',
+      'kyc:identity.read': 'See the identity details of people your organization verified',
+      'kyc:evidence.read': 'See the photos taken during your organization’s verifications',
+      'kyc:data.delete': 'Delete verification data your organization holds in 2earl KYC',
+      'kyc:config.write': 'Change your organization’s KYC workflows and webhooks',
+      'kyc:usage.read': 'See your organization’s KYC usage, plan and statements',
+    },
+    deletionBinding: 'KYC_EVENTS',
+  },
 ];
 
 /**
