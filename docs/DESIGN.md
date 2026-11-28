@@ -1397,12 +1397,41 @@ at `/authorize` (`invalid_scope`) and revokes such grants at their next exchange
 
 ### 4.33 Service accounts (phase 13c)
 
-Machine identities for organizations' backends (a bank's server calling KYC) and for 2earl's own
-jobs. OAuth 2.0 client credentials (RFC 6749 §4.4) with `client_secret_basic` or
-`private_key_jwt` (RFC 7523). A service account belongs to one organization (or to 2earl, at
-platform scope), holds the scopes the owner allowed it, gets roles like a person, and never has a
-session, consent, an ID token, `openid` or ownership. Access tokens only, 15 minutes, no refresh
-token. Designed in full when phase 13c starts.
+Machine identities for organizations' backends: a bank's server calling KYC's API. They act for
+the organization, never for a person. `service_accounts` (migration 0030), `src/service-accounts.ts`.
+
+- **Made by owners** on the organization's Settings page, with a recent proof: a name, one
+  service, and the scopes it may use, ticked from that service's own (never login's `openid`,
+  `email` and the like, never an app's first-party sign-in scope). Up to 20 per organization.
+- **Authentication:** a secret (`2earl_sa_…`, shown once, kept as SHA-256), sent as HTTP Basic or
+  as `client_id` and `client_secret` in the form; or, if the owner pasted a public JWK set (1–5
+  ES256, EdDSA or RS256 keys, no private parts), a JWT signed with the account's own key
+  (RFC 7523 `private_key_jwt`): `iss` and `sub` the account's ID, `aud` the issuer or its token
+  endpoint, lifetime at most 5 minutes, `jti` used once (`client_assertion_jti`).
+- **The grant:** `POST /oauth/token` with `grant_type=client_credentials`, optionally `scope`
+  (a subset) and `resource` (the account's). The library has no such grant, so login builds it on
+  the code flow, as for the device grant, and never mints tokens itself: each account has its own
+  public client in the library with redirect URI `${ISSUER}/service-accounts/callback` (no page;
+  `/authorize` refuses that redirect URI); login completes an authorization for the account and
+  exchanges the code at once. The answer is `access_token`, `token_type`, `expires_in`, `scope`:
+  15 minutes, **no refresh token** (`refreshTokenTTL: 0`), no ID token. DPoP proofs bind the token
+  like anyone's.
+- **What resources see:** `validateToken` and introspection as for any token; `userId` is the
+  account (`sa_…`), `props.kind` is `service_account` and `props.org` its organization
+  (introspection: `sub_type`, `organization`). In the authorization API an account holds only
+  roles given to it in its organization: no base role, nothing across 2earl.
+- **Checked at every exchange** (`tokenExchangeCallback`): the account exists, is active, uses its
+  own client, and its organization is active. A suspended organization's accounts get no new
+  tokens; existing ones end within 15 minutes.
+- **Deleting** an account (or its organization) removes the row; a trigger queues
+  `service_account_cleanup`, which revokes every token and deletes the library client right away
+  and, until done, every 15 minutes. Expired grants of an account are revoked as new tokens are
+  issued, so they don't pile up.
+- Audit: `org.service_account_created`, `org.service_account_deleted`, `service_account.used`
+  (at most hourly per account).
+
+Not yet: 2earl's own platform-wide service accounts, `jwks_uri` (keys fetched from a URL),
+rotating a secret in place (create a second account, switch, delete the first).
 
 ### 4.34 The authorization API (phase 13a)
 
@@ -1573,6 +1602,11 @@ authz_assignments id PK ('asg_…'), scope_kind (platform|org), org_id FK NULL, 
                  role, service, condition, expires_at NULL, granted_by, granted_at, reason;
                  triggers remove a principal's rows when the account, group, staff role or
                  membership goes                                     (§4.32)
+service_accounts id PK ('sa_…'), org_id FK, name, status, client_id UNIQUE (library client),
+                 resource, scopes, secret_hash NULL, jwks NULL, created_by, created_at,
+                 last_used_at                                        (§4.33)
+client_assertion_jti id_hash PK, expires_at                          (§4.33; minutes)
+service_account_cleanup id PK, client_id, created_at                 (§4.33; outbox)
 org_setup_invitations
                  id PK (osi_…), email, org_name, invited_by, created_at, sent_at, expires_at,
                  used_at, org_id FK                                  (§4.30; 14 days)

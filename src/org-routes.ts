@@ -1,3 +1,11 @@
+import { serviceForResource } from './services';
+import {
+  createServiceAccount,
+  deleteServiceAccount,
+  listServiceAccounts,
+  serviceAccountResources,
+  serviceAccountScopes,
+} from './service-accounts';
 import type { Hono } from 'hono';
 import type { Deps } from './app';
 import { audit, type AuditEvent } from './audit';
@@ -400,7 +408,12 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
     c: AppContext,
     session: Session,
     orgId: string,
-    flash: { notice?: string; error?: string; newKey?: string } = {},
+    flash: {
+      notice?: string;
+      error?: string;
+      newKey?: string;
+      newSecret?: { id: string; secret: string };
+    } = {},
     status: 200 | 400 | 403 | 409 = 200,
   ) {
     const found = await membership(c.env.DB, orgId, session.user.id);
@@ -414,6 +427,16 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
         managed: session.user.managedBy === orgId,
         issuer: c.env.ISSUER,
         ...(found.role === 'owner' ? { apiKeys: await listApiKeys(c.env.DB, orgId) } : {}),
+        ...(found.role === 'owner'
+          ? {
+              serviceAccounts: await listServiceAccounts(c.env.DB, orgId),
+              serviceAccountResources: serviceAccountResources(c.env).map((resource) => ({
+                resource,
+                label: serviceForResource(c.env, resource)?.name ?? resource,
+                scopes: serviceAccountScopes(c.env, resource),
+              })),
+            }
+          : {}),
         ...flash,
       }),
       status,
@@ -557,6 +580,79 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       access,
     });
     return showSettings(c, ctx.session, ctx.orgId, { newKey: created.key });
+  });
+
+  // The organization's service accounts: owners, with a recent proof (DESIGN §4.33).
+  app.post('/orgs/:org/service-accounts', async (c) => {
+    const ctx = await ownerChange(c);
+    if (ctx instanceof Response) return ctx;
+    const now = deps.now();
+    const redirect = changeCheck(ctx.session, now, `/orgs/${ctx.orgId}/settings`);
+    if (redirect) return c.redirect(redirect, 303);
+    if (ctx.form.get('action') === 'delete') {
+      const id = ctx.form.get('id');
+      const gone = typeof id === 'string' ? await deleteServiceAccount(c.env, ctx.orgId, id) : null;
+      if (gone) {
+        await record(c, ctx.session, 'org.service_account_deleted', {
+          org: ctx.orgId,
+          service_account: gone.id,
+        });
+      }
+      return showSettings(c, ctx.session, ctx.orgId, {
+        notice: 'Service account deleted. Its tokens stop working within a minute.',
+      });
+    }
+    const nameRaw = ctx.form.get('name');
+    const jwksRaw = ctx.form.get('jwks');
+    // Each ticked box is "<resource> <scope>"; all must be for one resource.
+    const ticked = ctx.form
+      .getAll('scope')
+      .filter((v): v is string => typeof v === 'string')
+      .map((v) => v.split(' '));
+    const resources = [...new Set(ticked.map(([r]) => r ?? ''))];
+    const result =
+      resources.length === 1
+        ? await createServiceAccount(c.env, now, {
+            orgId: ctx.orgId,
+            name: typeof nameRaw === 'string' ? nameRaw : '',
+            resource: resources[0] ?? '',
+            scopes: ticked.map(([, scope]) => scope ?? ''),
+            jwks: typeof jwksRaw === 'string' && jwksRaw.trim() ? jwksRaw.trim() : null,
+            createdBy: ctx.session.user.id,
+          })
+        : ({ ok: false, reason: 'invalid_scopes' } as const);
+    if (!result.ok) {
+      const error = {
+        invalid_name: 'Give the service account a name.',
+        invalid_resource: 'Choose a service.',
+        invalid_scopes: 'Tick at least one permission, all for one service.',
+        invalid_keys:
+          'The keys must be a JWK set of 1 to 5 public signing keys (ES256, EdDSA or RS256).',
+        too_many: 'An organization can have up to 20 service accounts. Delete one first.',
+      }[result.reason];
+      return showSettings(
+        c,
+        ctx.session,
+        ctx.orgId,
+        { error },
+        result.reason === 'too_many' ? 409 : 400,
+      );
+    }
+    await record(c, ctx.session, 'org.service_account_created', {
+      org: ctx.orgId,
+      service_account: result.account.id,
+      resource: result.account.resource,
+      scope: result.account.scopes.join(' '),
+      auth: result.account.auth,
+    });
+    return showSettings(
+      c,
+      ctx.session,
+      ctx.orgId,
+      result.secret
+        ? { newSecret: { id: result.account.id, secret: result.secret } }
+        : { notice: `Service account created. Its client ID is ${result.account.id}.` },
+    );
   });
 
   // Streaming to the organization's own security monitoring: owners (DESIGN §4.23).

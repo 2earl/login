@@ -156,6 +156,9 @@ export function registerIntrospection(app: Hono<AppEnv>, deps: Deps): void {
         scope: validated.scope.join(' '),
         client_id: validated.clientId,
         sub: props.uid,
+        // A service account acts for its organization, not for a person (DESIGN §4.33).
+        sub_type: props.kind === 'service_account' ? 'service_account' : 'user',
+        ...(props.org ? { organization: props.org } : {}),
         aud: validated.audience,
         iss: c.env.ISSUER,
         exp: validated.expiresAt,

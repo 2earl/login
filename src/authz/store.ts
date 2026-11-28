@@ -261,7 +261,7 @@ export async function listCustomRoles(db: D1Database, orgId: string): Promise<Cu
 
 // ---- Assignments ------------------------------------------------------------------------------
 
-export type Principal = { kind: 'user' | 'group'; id: string };
+export type Principal = { kind: 'user' | 'group' | 'service_account'; id: string };
 
 export interface Assignment {
   id: string;
@@ -410,6 +410,13 @@ export async function assignRole(
         }
       }
     }
+  } else if (principal.kind === 'service_account') {
+    if (orgId === null) return { ok: false, reason: 'unknown_principal' };
+    const account = await db
+      .prepare('SELECT 1 AS ok FROM service_accounts WHERE id = ? AND org_id = ?')
+      .bind(principal.id, orgId)
+      .first<{ ok: number }>();
+    if (!account) return { ok: false, reason: 'unknown_principal' };
   } else {
     if (orgId === null) return { ok: false, reason: 'unknown_principal' };
     const group = await db
@@ -530,7 +537,7 @@ interface AssignmentRow {
   scope_kind: 'platform' | 'org';
   org_id: string | null;
   resource: string;
-  principal_kind: 'user' | 'group';
+  principal_kind: 'user' | 'group' | 'service_account';
   principal_id: string;
   role: string;
   service: string;

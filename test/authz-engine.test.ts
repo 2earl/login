@@ -454,7 +454,7 @@ describe('questions the engine refuses', () => {
     ).rejects.toBeInstanceOf(AuthzError);
   });
 
-  it('gives service accounts nothing until phase 13c', async () => {
+  it('gives an unknown service account nothing', async () => {
     const found = await effective(env, {
       subject: { type: 'service_account', id: 'sa_1' },
       service: 'emanet',

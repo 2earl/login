@@ -14,6 +14,7 @@ import { dueDeletions } from './managed';
 import { deliverStreams } from './org-audit';
 import { serviceForResource } from './services';
 import { expiredAssignmentsStatement } from './authz/store';
+import { cleanUpServiceAccounts } from './service-accounts';
 import { boundKey, challenge, checkAccessToken } from './token-check';
 
 export { PromptshareDirectory } from './directory';
@@ -139,6 +140,13 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
       if (notices && (notices.failed > 0 || notices.waiting > 0)) {
         console.warn('deletion notices pending', notices.failed, notices.waiting);
       }
+      // Tokens and library clients of deleted service accounts (DESIGN §4.33).
+      await cleanUpServiceAccounts(this.env).catch((error: unknown) => {
+        console.error(
+          'service account clean-up failed',
+          error instanceof Error ? error.name : 'unknown',
+        );
+      });
     }
     if (controller.cron !== DAILY_CRON) return;
 
@@ -158,6 +166,7 @@ export default class LoginWorker extends WorkerEntrypoint<Env> {
         ),
         // Role assignments whose time is up (DESIGN §4.32); the engine already ignores them.
         expiredAssignmentsStatement(this.env.DB, now),
+        this.env.DB.prepare('DELETE FROM client_assertion_jti WHERE expires_at <= ?').bind(now),
       ]),
       (async () => {
         const cursor = (await this.env.OAUTH_KV.get(PURGE_CURSOR_KEY)) ?? undefined;
