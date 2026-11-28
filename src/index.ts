@@ -20,6 +20,7 @@ export { PromptshareDirectory } from './directory';
 export { OrganizationDirectory } from './org-directory';
 export { StaffDirectory } from './staff-directory';
 export { OrganizationProvisioning } from './org-provisioning';
+export { Authorization } from './authz/entrypoint';
 
 const app = createApp({
   fetch: (input, init) => fetch(input, init),
