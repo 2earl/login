@@ -18,6 +18,11 @@ import { DpopError, dpopOf, verifyDpopProof, withDpop } from './dpop';
 import { pushedRequestUrl, registerParRoute } from './par';
 import { membershipsOf, ownershipPlan } from './orgs';
 import { audit } from './audit';
+import {
+  CLIENT_CREDENTIALS,
+  clientCredentialsResponse,
+  serviceAccountCallback,
+} from './service-accounts';
 import { clientScopePolicy, refusedScopes } from './authz/client-policy';
 import { hmacHex, pkceChallenge, timingSafeEqual } from './crypto';
 import { GoogleSignInError, buildGoogleAuthUrl, exchangeCode, verifyGoogleIdToken } from './google';
@@ -980,6 +985,20 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       );
     }
 
+    // A service account's library client is for the client credentials grant only (§4.33).
+    if (request.redirectUri === serviceAccountCallback(c.env)) {
+      return c.html(
+        messagePage(
+          {
+            title: 'This app can’t sign people in',
+            body: 'It belongs to a service account, which gets its access on its own.',
+          },
+          'Connection stopped',
+        ),
+        400,
+      );
+    }
+
     // An app's own sign-in scope is for that app only (DESIGN §4.32, src/authz/client-policy.ts).
     const refused = refusedScopes(c.env, service, request.clientId, request.scope);
     if (refused.length > 0) {
@@ -1281,17 +1300,20 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         });
       }
     }
-    // The device grant (RFC 8628) is login's own, around the library's code flow (§4.13).
+    // The device grant (RFC 8628) is login's own, around the library's code flow (§4.13), and so
+    // is client credentials for service accounts (§4.33).
     const response =
       grantType === DEVICE_GRANT && form
         ? await deviceTokenResponse(c, now, form, exchangeEnv)
-        : await withIdToken(
-            c.env,
-            now,
-            typeof grantType === 'string' ? grantType : null,
-            // OpenID Connect: an ID token beside the access token when the grant includes `openid`.
-            await authorizationServer(c.env).fetch(c.req.raw, exchangeEnv, workerCtx(c)),
-          );
+        : grantType === CLIENT_CREDENTIALS && form
+          ? await clientCredentialsResponse(c, now, form, exchangeEnv)
+          : await withIdToken(
+              c.env,
+              now,
+              typeof grantType === 'string' ? grantType : null,
+              // OpenID Connect: an ID token beside the access token when the grant includes `openid`.
+              await authorizationServer(c.env).fetch(c.req.raw, exchangeEnv, workerCtx(c)),
+            );
     return dpopOf(exchangeEnv)?.accessTokenBound ? asDpopTokenType(response) : response;
   });
   registerIntrospection(app, deps);

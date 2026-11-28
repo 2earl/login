@@ -139,7 +139,20 @@ async function serverMetadata(c: AppContext): Promise<Record<string, unknown>> {
         ? (meta.grant_types_supported as string[])
         : ['authorization_code', 'refresh_token']),
       DEVICE_GRANT,
+      // Service accounts (DESIGN §4.33).
+      'client_credentials',
     ],
+    token_endpoint_auth_methods_supported: [
+      ...new Set([
+        ...(Array.isArray(meta.token_endpoint_auth_methods_supported)
+          ? (meta.token_endpoint_auth_methods_supported as string[])
+          : ['none']),
+        'client_secret_basic',
+        'client_secret_post',
+        'private_key_jwt',
+      ]),
+    ],
+    token_endpoint_auth_signing_alg_values_supported: ['ES256', 'EdDSA', 'RS256'],
   };
 }
 

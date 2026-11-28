@@ -54,6 +54,10 @@ export interface GrantProps {
   method?: SignInMethod | null;
   /** The key this grant's refresh tokens are bound to (DPoP, DESIGN §4.15). */
   dpopJkt?: string;
+  /** A service account's grant (DESIGN §4.33): `uid` is the account (`sa_…`), not a person. */
+  kind?: 'service_account';
+  /** The organization a service account belongs to. */
+  org?: string;
   /** Access tokens only: the key the token is bound to (RFC 9449 §6.1). */
   cnf?: { jkt: string };
   /** OpenID Connect grants only (DESIGN §4.11). */
@@ -142,6 +146,24 @@ export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
         clientId,
         scope,
       }) => {
+        // A service account (DESIGN §4.33): active, with its own client, in an active
+        // organization; one code exchange per token, never a refresh token.
+        if ((props as GrantProps).kind === 'service_account') {
+          const active = await env.DB.prepare(
+            `SELECT 1 AS ok FROM service_accounts s
+             JOIN organizations o ON o.id = s.org_id AND o.status = 'active'
+             WHERE s.id = ? AND s.client_id = ? AND s.status = 'active'`,
+          )
+            .bind(userId, clientId)
+            .first<{ ok: number }>();
+          if (!active || grantType !== GrantType.AUTHORIZATION_CODE) {
+            await authorizationServer(env).getOAuthApi(env).revokeGrant(grantId, userId);
+            throw new OAuthError('invalid_grant', {
+              description: 'This service account is no longer active.',
+            });
+          }
+          return { ...dpopBinding(env, props as GrantProps, resource), refreshTokenTTL: 0 };
+        }
         // Every code exchange and refresh checks that the account still exists and is active.
         // Deletion and suspension revoke grants, but a grant created while that was running (a
         // consent submitted in another tab) is caught here, at the latest 15 minutes later.

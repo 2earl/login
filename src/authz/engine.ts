@@ -81,20 +81,32 @@ export async function effective(
   const { subject } = query;
   const orgId = query.orgId ?? null;
   const now = query.context?.now ?? Math.floor(Date.now() / 1000);
-  // Service accounts come in phase 13c; until then they hold nothing.
-  if (subject.type !== 'user') return limitToScopes(empty(), manifest.scopeGrants, query.context);
-
   const db = env.DB;
-  const user = await db
-    .prepare('SELECT status FROM users WHERE id = ?')
-    .bind(subject.id)
-    .first<{ status: string }>();
-  if (user?.status !== 'active') return empty();
-
   const result = empty();
   const roleIds: { role: string; resource: string }[] = [];
 
-  if (orgId !== null) {
+  if (subject.type === 'service_account') {
+    // A service account (DESIGN §4.33) holds only what it was given, in its own organization.
+    const account = await db
+      .prepare(
+        `SELECT s.org_id FROM service_accounts s
+         JOIN organizations o ON o.id = s.org_id AND o.status = 'active'
+         WHERE s.id = ? AND s.status = 'active'`,
+      )
+      .bind(subject.id)
+      .first<{ org_id: string }>();
+    if (!account || orgId === null || account.org_id !== orgId) return empty();
+  } else {
+    const user = await db
+      .prepare('SELECT status FROM users WHERE id = ?')
+      .bind(subject.id)
+      .first<{ status: string }>();
+    if (user?.status !== 'active') return empty();
+  }
+
+  if (subject.type === 'service_account') {
+    // No base role.
+  } else if (orgId !== null) {
     const member = await db
       .prepare(
         `SELECT m.role FROM org_members m
@@ -122,15 +134,15 @@ export async function effective(
          AND (a.expires_at IS NULL OR a.expires_at > ?2)
          AND ((?3 IS NULL AND a.scope_kind = 'platform')
               OR (a.scope_kind = 'org' AND a.org_id = ?3))
-         AND ((a.principal_kind = 'user' AND a.principal_id = ?4)
-              OR (a.principal_kind = 'group' AND a.scope_kind = 'org' AND a.principal_id IN (
+         AND ((a.principal_kind = ?5 AND a.principal_id = ?4)
+              OR (?5 = 'user' AND a.principal_kind = 'group' AND a.scope_kind = 'org' AND a.principal_id IN (
                 SELECT gm.group_id FROM scim_group_members gm
                 JOIN scim_users su ON su.id = gm.scim_user_id
                 WHERE su.user_id = ?4 AND su.active = 1 AND su.org_id = a.org_id)))
        ORDER BY a.role, a.resource
        LIMIT 500`,
     )
-    .bind(query.service, now, orgId, subject.id)
+    .bind(query.service, now, orgId, subject.id, subject.type)
     .all<{ role: string; resource: string }>();
   roleIds.push(...assigned);
 

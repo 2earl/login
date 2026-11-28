@@ -352,7 +352,9 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | Z6 | Enumeration through the decision API | Service Binding only; no HTTP surface until phase 13e, which needs resource-server credentials |
 | Z7 | A misconfigured manifest grants everything | Permissions must exist and start with their service's ID; every role permission, default and exclusive pair is checked by a test; an unknown permission throws |
 | Z8 | Login's own rules change by accident when they move onto the manifest | Exhaustive parity test over every role combination against §4.14 and §4.29 |
-| Z9 | A service account's secret or key is stolen | Planned for phase 13c: shown once, kept as a hash, private_key_jwt with single-use `jti`, scopes fixed by the owner, revocable at once, 15-minute tokens without refresh |
+| Z9 | A service account's secret or key is stolen | Secret shown once and kept as SHA-256, or private_key_jwt with single-use `jti` and ≤5-minute assertions; scopes fixed by the owner; deleting the account revokes its tokens at once; 15-minute tokens without refresh (tested) |
+| Z12 | A service account's library client is used to sign a person in | `/authorize` refuses its redirect URI; its grants are refused at any exchange but the first code exchange (tested) |
+| Z13 | A service account acts across organizations or as a person | It holds roles only in its own organization; no `openid` or first-party scopes; `props.kind` tells resources it isn't a person (tested) |
 | Z11 | Any app asks for a 2earl app's own sign-in scope and a person approves it | `firstPartyClients`: refused for any other client at `/authorize` and every exchange once enforced; reported until then (tested) |
 | Z10 | Login is unavailable | Every permission check fails closed (the app answers 503). Wider blast radius than sign-in alone; accepted |
 

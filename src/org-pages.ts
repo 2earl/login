@@ -1,3 +1,4 @@
+import { MAX_SERVICE_ACCOUNTS, type ServiceAccount } from './service-accounts';
 import {
   ORG_NAME_MAX,
   ROLE_LABEL,
@@ -359,6 +360,10 @@ export function orgSettingsPage(params: {
   apiKeys?: ApiKeyInfo[];
   newKey?: string;
   issuer?: string;
+  /** Owners: service accounts (DESIGN §4.33), a just-created secret, and what they can be for. */
+  serviceAccounts?: ServiceAccount[];
+  newSecret?: { id: string; secret: string };
+  serviceAccountResources?: { resource: string; label: string; scopes: string[] }[];
   notice?: string | undefined;
   error?: string | undefined;
 }): string {
@@ -382,6 +387,15 @@ export function orgSettingsPage(params: {
       '</section>' +
       (active && role === 'owner' && params.apiKeys
         ? apiKeysSection(base, params.apiKeys, params.newKey, params.issuer ?? '')
+        : '') +
+      (active && role === 'owner' && params.serviceAccounts
+        ? serviceAccountsSection(
+            base,
+            params.serviceAccounts,
+            params.newSecret,
+            params.serviceAccountResources ?? [],
+            params.issuer ?? '',
+          )
         : '') +
       '<section class="section" aria-labelledby="leave-heading">' +
       '<h2 id="leave-heading">Leave</h2>' +
@@ -440,6 +454,64 @@ function apiKeysSection(
     '<label class="field"><span>Access</span><select name="access"><option value="read">Read</option><option value="write">Read and write</option></select></label>' +
     '<button class="button secondary" type="submit">Create key</button></form>' +
     `<p class="note">Up to ${String(MAX_KEYS)} keys. Every change made with a key is in the activity, with the key’s ID.</p>` +
+    '</section>'
+  );
+}
+
+/** Service accounts: the organization's backends (DESIGN §4.33). */
+function serviceAccountsSection(
+  base: string,
+  accounts: ServiceAccount[],
+  newSecret: { id: string; secret: string } | undefined,
+  resources: { resource: string; label: string; scopes: string[] }[],
+  issuer: string,
+): string {
+  const rows = accounts
+    .map(
+      (a) =>
+        '<li class="admin-row"><div class="app-main">' +
+        `<p class="app-name">${escapeHtml(a.name)} <span class="tag tag-muted">${a.auth === 'secret' ? 'Secret' : 'Key'}</span></p>` +
+        `<p class="app-meta">Client ID <code>${escapeHtml(a.id)}</code> · for <code>${escapeHtml(a.resource)}</code></p>` +
+        `<p class="app-meta">${a.scopes.map((s) => `<code>${escapeHtml(s)}</code>`).join(' ')}</p>` +
+        `<p class="app-meta">Created ${formatDate(a.createdAt)} · ${a.lastUsedAt ? `last used ${formatDate(a.lastUsedAt)}` : 'never used'}</p>` +
+        '</div><div class="row-actions">' +
+        `<form method="post" action="${base}/service-accounts">` +
+        hidden({ action: 'delete', id: a.id }) +
+        '<button class="button secondary small" type="submit">Delete</button></form>' +
+        '</div></li>',
+    )
+    .join('');
+  const choices = resources
+    .map(
+      (r) =>
+        `<fieldset class="field"><legend>${escapeHtml(r.label)}</legend>` +
+        r.scopes
+          .map(
+            (scope) =>
+              `<label class="confirm"><input type="checkbox" name="scope" value="${escapeHtml(`${r.resource} ${scope}`)}"><span><code>${escapeHtml(scope)}</code></span></label>`,
+          )
+          .join('') +
+        '</fieldset>',
+    )
+    .join('');
+  return (
+    '<section class="section" aria-labelledby="sa-heading">' +
+    '<h2 id="sa-heading">Service accounts</h2>' +
+    `<p class="section-text">For your own servers that call a 2earl service, such as KYC’s API. A server gets a 15-minute access token at <code>${escapeHtml(issuer)}/oauth/token</code> with <code>grant_type=client_credentials</code>, its client ID, and its secret or a JWT signed with its own key. It acts for the organization, never for a person, and can do only what you tick here.</p>` +
+    (newSecret
+      ? '<div class="secret-once" role="status"><p><strong>The new account’s secret.</strong> Copy it now: it isn’t shown again.</p>' +
+        `<p>Client ID <code>${escapeHtml(newSecret.id)}</code></p>` +
+        `<p><code class="secret">${escapeHtml(newSecret.secret)}</code></p></div>`
+      : '') +
+    (rows ? `<ul class="admin-list">${rows}</ul>` : '') +
+    `<form method="post" action="${base}/service-accounts" class="stack-form">` +
+    hidden({ action: 'create' }) +
+    '<label class="field"><span>Name</span><input name="name" type="text" required maxlength="60" placeholder="Onboarding backend" autocomplete="off"></label>' +
+    choices +
+    '<label class="field"><span>Public keys (optional): a JWK set for signed JWTs instead of a secret</span>' +
+    '<textarea name="jwks" rows="3" spellcheck="false" placeholder=\'{"keys":[{"kty":"EC","crv":"P-256","x":"…","y":"…"}]}\'></textarea></label>' +
+    '<button class="button secondary" type="submit">Create service account</button></form>' +
+    `<p class="note">Up to ${String(MAX_SERVICE_ACCOUNTS)} accounts, each for one service. Deleting one ends its tokens within a minute.</p>` +
     '</section>'
   );
 }

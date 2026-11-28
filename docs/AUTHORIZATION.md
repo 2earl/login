@@ -76,13 +76,21 @@ if (!permissions.includes('emanet:cases.write')) return forbidden();
 - Keep your membership gate (`OrganizationDirectory.roleOf`) where you already have it; a
   non-member simply gets no permissions here.
 
-## 4. Testing
+## 4. Requests from service accounts
+
+An organization's own servers call your API with a token from a **service account** (DESIGN
+§4.33): `validateToken` gives `userId` = `sa_…`, `props.kind === 'service_account'` and
+`props.org`, the organization it acts for. Treat `props.org` as the tenant; don't look the
+organization up from the client ID. Ask `permissionsOf({ subject: { type: 'service_account', id },
+orgId: props.org, context: { scopes } })` if you give accounts roles; or check the token's scopes
+alone if your API is scope-based.
+
+## 5. Testing
 
 Stub the binding in `@cloudflare/vitest-plugin` with an `Authorization` entrypoint that returns
 fixed answers, as login's own `vitest.config.ts` does for `AccountEvents`. To run against the real
 thing, bind `login-e2e` (GATEWAY_INTEGRATION §8) with the same `entrypoint` and `props`.
 
-## 5. What's next
+## 6. What's next
 
-Custom roles and assignments in the organization's pages and API (phase 13b), service accounts
-with client credentials (13c), conditions, time-bound access and AuthZEN over HTTP (13e).
+Custom roles and assignments in the organization's pages and API (phase 13b), conditions, time-bound access and AuthZEN over HTTP (13e).
