@@ -1474,8 +1474,6 @@ There is **no registration endpoint** (`clientRegistrationEndpoint` unset).
 | `emanet:partner` | Sign in to Emanet Kurumsal for one's organization (`https://kurumsal.emanet.dev`) | Emanet Kurumsal |
 | `emanet:field` | Sign in to Emanet Saha as a field agent (`https://saha.emanet.dev`) | Emanet Saha |
 | `emanet:control` | Sign in to Emanet Merkez as 2earl staff (`https://merkez.emanet.dev`) | Emanet Merkez |
-| `kyc:console` | Sign in to the 2earl KYC console (`https://kyc.2earl.com`) | KYC console |
-| `kyc:<area>.<verb>` | Use the KYC API for one's organization: `kyc:sessions.write`, `.read`, `kyc:identity.read`, `kyc:evidence.read`, `kyc:data.delete`, `kyc:config.write`, `kyc:usage.read` | KYC customers' API clients |
 | `admin` | Administer the identity service | owner's first-party sessions only; never to OAuth clients |
 
 Scopes are opaque strings to `login`; their enforcement lives in the resource server.
