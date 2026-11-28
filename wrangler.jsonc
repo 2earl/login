@@ -43,6 +43,8 @@
     "EMANET_KURUMSAL_RESOURCE": "https://kurumsal.emanet.dev",
     "EMANET_SAHA_RESOURCE": "https://saha.emanet.dev",
     "EMANET_MERKEZ_RESOURCE": "https://merkez.emanet.dev",
+    // KYC (2earl/kyc): its console and its tenant API.
+    "KYC_RESOURCE": "https://kyc.2earl.com",
     // Second factor (DESIGN §4.7). "true" makes every user enrol before using the account.
     // Users who enrolled are challenged either way, and /admin always requires it.
     "MFA_REQUIRED": "false",

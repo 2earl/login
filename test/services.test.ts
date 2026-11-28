@@ -265,7 +265,9 @@ describe('account-deletion notices', () => {
     const down = fakeService(true);
     const first = await deliverDeletionNotices(envWith({ MCP_GATEWAY_EVENTS: down.binding }), NOW);
     expect(first.failed).toBe(1);
-    const row = await env.DB.prepare('SELECT attempts, last_error FROM deletion_notices').first<{
+    const row = await env.DB.prepare(
+      "SELECT attempts, last_error FROM deletion_notices WHERE service = 'mcp'",
+    ).first<{
       attempts: number;
       last_error: string;
     }>();
@@ -274,14 +276,19 @@ describe('account-deletion notices', () => {
     const up = fakeService();
     await deliverDeletionNotices(envWith({ MCP_GATEWAY_EVENTS: up.binding }), NOW + 900);
     expect(up.deleted).toEqual([userId]);
-    expect(await count('deletion_notices')).toBe(0);
+    expect(await count('deletion_notices', "service = 'mcp'")).toBe(0);
   });
 
   it('delivers over the real binding right after the deletion', async () => {
     await deleteOwnAccount({});
-    // Every service is told at once.
-    expect(await count('deletion_notices')).toBe(0);
-    expect(await count('audit_events', "event = 'user.deletion_delivered'")).toBe(SERVICES.length);
+    // Every service with a binding is told at once; KYC's notice waits for its binding.
+    const bound = SERVICES.filter(
+      (s) => (env as unknown as Record<string, unknown>)[s.deletionBinding] !== undefined,
+    );
+    expect(bound.map((s) => s.id)).toEqual(['mcp', 'promptshare', 'emanet']);
+    expect(await count('deletion_notices')).toBe(SERVICES.length - bound.length);
+    expect(await count('deletion_notices', "service = 'kyc'")).toBe(1);
+    expect(await count('audit_events', "event = 'user.deletion_delivered'")).toBe(bound.length);
   });
 
   it('runs on the minute cron trigger, every 15 minutes', async () => {
