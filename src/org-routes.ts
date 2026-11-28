@@ -1,4 +1,14 @@
-import { serviceForResource } from './services';
+import { ASSIGNABLE_SERVICES, mayDefineRole, mayGrant, mayRevoke } from './authz/grant';
+import {
+  assignRole,
+  createCustomRole,
+  customRole,
+  deleteCustomRole,
+  listAssignments,
+  listCustomRoles,
+  revokeAssignment,
+} from './authz/store';
+import { serviceForResource, systemRole } from './services';
 import {
   createServiceAccount,
   deleteServiceAccount,
@@ -79,6 +89,7 @@ import {
   newOrgPage,
   orgCreationClosedPage,
   orgSetupPage,
+  orgAccessPage,
   orgActivityPage,
   orgPage,
   orgSettingsPage,
@@ -111,6 +122,8 @@ import {
   listMembers,
   membership,
   orgName,
+  orgRoleCan,
+  ROLE_LABEL,
   removeMember,
   renameOrganization,
   setRole,
@@ -580,6 +593,267 @@ export function registerOrgRoutes(app: Hono<AppEnv>, deps: Deps): void {
       access,
     });
     return showSettings(c, ctx.session, ctx.orgId, { newKey: created.key });
+  });
+
+  // ---- Roles in 2earl's apps (DESIGN §4.32) ----------------------------------------------------
+
+  async function showAccess(
+    c: AppContext,
+    session: Session,
+    orgId: string,
+    flash: { notice?: string; error?: string } = {},
+    status: 200 | 400 | 403 | 409 = 200,
+  ) {
+    const found = await membership(c.env.DB, orgId, session.user.id);
+    if (!found || !orgRoleCan(found.role, 'login:access.read')) return c.html(notFoundPage(), 404);
+    const now = deps.now();
+    const [members, custom, assignments, groups, accounts] = await Promise.all([
+      listMembers(c.env.DB, orgId),
+      listCustomRoles(c.env.DB, orgId),
+      listAssignments(c.env.DB, orgId, now),
+      c.env.DB.prepare(
+        'SELECT id, display_name FROM scim_groups WHERE org_id = ? ORDER BY display_name COLLATE NOCASE',
+      )
+        .bind(orgId)
+        .all<{ id: string; display_name: string }>(),
+      listServiceAccounts(c.env.DB, orgId),
+    ]);
+    const memberLabel = new Map(
+      members.map((m) => [
+        m.userId,
+        m.name ? `${m.name}${m.email ? ` (${m.email})` : ''}` : (m.email ?? m.userId),
+      ]),
+    );
+    const groupLabel = new Map(groups.results.map((g) => [g.id, g.display_name]));
+    const accountLabel = new Map(accounts.map((a) => [a.id, a.name]));
+    const roleName = (id: string) =>
+      systemRole(id)?.name ?? custom.find((r) => r.id === id)?.name ?? id;
+    return c.html(
+      orgAccessPage({
+        org: found.org,
+        role: found.role,
+        services: ASSIGNABLE_SERVICES.map((service) => ({
+          id: service.id,
+          name: service.name,
+          permissions: Object.entries(service.authz.permissions).map(([id, label]) => ({
+            id,
+            label,
+          })),
+          systemRoles: Object.entries(service.authz.roles)
+            .filter(([, r]) => r.assignable === 'org')
+            .map(([id, r]) => ({
+              id,
+              name: r.name,
+              permissions: [...r.permissions],
+              privileged: r.privileged === true,
+            })),
+          customRoles: custom.filter((r) => r.service === service.id),
+          defaults: Object.entries(service.authz.orgDefaults ?? {}).map(([base, roleId]) => ({
+            base: ROLE_LABEL[base as OrgRole].toLowerCase(),
+            role: roleName(roleId),
+          })),
+        })),
+        assignments: assignments.map((a) => ({
+          id: a.id,
+          service: a.service,
+          principal:
+            (a.principal.kind === 'user'
+              ? memberLabel.get(a.principal.id)
+              : a.principal.kind === 'group'
+                ? groupLabel.get(a.principal.id)
+                : accountLabel.get(a.principal.id)) ?? a.principal.id,
+          principalKind: a.principal.kind,
+          roleName: roleName(a.role),
+          expiresAt: a.expiresAt,
+          grantedAt: a.grantedAt,
+          reason: a.reason,
+        })),
+        members: members
+          .filter((m) => m.userId !== session.user.id)
+          .map((m) => ({ id: m.userId, label: memberLabel.get(m.userId) ?? m.userId })),
+        groups: groups.results.map((g) => ({ id: g.id, label: g.display_name })),
+        serviceAccounts: accounts.map((a) => ({ id: a.id, label: a.name })),
+        canAssign: orgRoleCan(found.role, 'login:access.assign'),
+        canManageRoles: orgRoleCan(found.role, 'login:roles.manage'),
+        ...flash,
+      }),
+      status,
+    );
+  }
+
+  const text = (form: FormData, name: string) => {
+    const value = form.get(name);
+    return typeof value === 'string' ? value : '';
+  };
+
+  const REFUSED: Record<string, string> = {
+    not_allowed: 'Your role in the organization doesn’t allow this.',
+    privileged: 'Only owners can give or take this role.',
+    self: 'You can’t give yourself a role. Ask another admin or owner.',
+    exceeds: 'You can only give roles whose permissions you hold yourself.',
+    unknown_role: 'That role doesn’t exist here.',
+    unknown_principal: 'Choose a member, directory group or service account of this organization.',
+    wrong_scope: 'That role isn’t given in organizations.',
+    not_assignable: 'That role can’t be given.',
+    invalid_resource: 'That role can’t be given for one item.',
+    invalid_expiry: 'Enter a number of days from 1 to 365, or leave it empty.',
+    exclusive: 'This person already holds a role that can’t be combined with this one.',
+    duplicate: 'They already have this role.',
+    too_many: 'The organization has the most roles it can give. Take some back first.',
+    invalid_name: 'Give the role a plain name.',
+    invalid_permissions: 'Tick at least one permission.',
+    unknown_service: 'Choose an app.',
+    not_found: 'That role doesn’t exist here.',
+  };
+
+  app.get('/orgs/:org/access', async (c) => {
+    const session = c.get('session');
+    if (!session) return signIn(c);
+    const done = c.req.query('done');
+    return showAccess(c, session, c.req.param('org'), {
+      ...(done && ACCESS_DONE[done] ? { notice: ACCESS_DONE[done] } : {}),
+    });
+  });
+
+  const ACCESS_DONE: Record<string, string> = {
+    assigned: 'Role given. It applies from their next request.',
+    revoked: 'Role taken back. It ends at their next request.',
+    role_created: 'Role created. Give it to people below.',
+    role_deleted: 'Role deleted, and taken back from everyone who had it.',
+  };
+
+  app.post('/orgs/:org/access/assign', async (c) => {
+    const ctx = await forChange(c);
+    if (ctx instanceof Response) return ctx;
+    if (!orgRoleCan(ctx.role, 'login:access.assign')) return c.html(notFoundPage(), 404);
+    const now = deps.now();
+    const redirect = changeCheck(ctx.session, now, `/orgs/${ctx.orgId}/access`);
+    if (redirect) return c.redirect(redirect, 303);
+    const actor = { userId: ctx.session.user.id, role: ctx.role };
+    const fail = (reason: string, status: 400 | 403 | 409 = 400) =>
+      showAccess(
+        c,
+        ctx.session,
+        ctx.orgId,
+        { error: REFUSED[reason] ?? 'Nothing changed.' },
+        status,
+      );
+
+    if (ctx.form.get('action') === 'revoke') {
+      const id = ctx.form.get('id');
+      const current = (await listAssignments(c.env.DB, ctx.orgId, 0)).find((a) => a.id === id);
+      if (!current) return fail('unknown_role');
+      const allowed = await mayRevoke(c.env, actor, ctx.orgId, {
+        role: current.role,
+        principal: current.principal,
+      });
+      if (!allowed.ok) return fail(allowed.reason, 403);
+      await revokeAssignment(c.env.DB, ctx.orgId, current.id);
+      await record(c, ctx.session, 'authz.unassigned', {
+        org: ctx.orgId,
+        assignment: current.id,
+        role: current.role,
+        principal: `${current.principal.kind}:${current.principal.id}`,
+      });
+      return c.redirect(`/orgs/${encodeURIComponent(ctx.orgId)}/access?done=revoked`, 303);
+    }
+
+    const [kind, id] = text(ctx.form, 'principal').split(':');
+    if ((kind !== 'user' && kind !== 'group' && kind !== 'service_account') || !id) {
+      return fail('unknown_principal');
+    }
+    const role = text(ctx.form, 'role');
+    const principal = { kind, id } as const;
+    const allowed = await mayGrant(c.env, actor, ctx.orgId, { role, principal });
+    if (!allowed.ok) return fail(allowed.reason, 403);
+    const daysText = text(ctx.form, 'days').trim();
+    const days = daysText === '' ? null : Number(daysText);
+    if (days !== null && (!Number.isInteger(days) || days < 1 || days > 365)) {
+      return fail('invalid_expiry');
+    }
+    const reason = ctx.form.get('reason');
+    const result = await assignRole(c.env, now, {
+      orgId: ctx.orgId,
+      principal,
+      role,
+      expiresAt: days === null ? null : now + days * 24 * 60 * 60,
+      grantedBy: actor.userId,
+      reason: typeof reason === 'string' ? reason : '',
+    });
+    if (!result.ok) return fail(result.reason, result.reason === 'too_many' ? 409 : 400);
+    await record(c, ctx.session, 'authz.assigned', {
+      org: ctx.orgId,
+      assignment: result.assignment.id,
+      role,
+      principal: `${kind}:${id}`,
+      days,
+    });
+    return c.redirect(`/orgs/${encodeURIComponent(ctx.orgId)}/access?done=assigned`, 303);
+  });
+
+  app.post('/orgs/:org/access/roles', async (c) => {
+    const ctx = await forChange(c);
+    if (ctx instanceof Response) return ctx;
+    if (!orgRoleCan(ctx.role, 'login:roles.manage')) return c.html(notFoundPage(), 404);
+    const now = deps.now();
+    const redirect = changeCheck(ctx.session, now, `/orgs/${ctx.orgId}/access`);
+    if (redirect) return c.redirect(redirect, 303);
+    const actor = { userId: ctx.session.user.id, role: ctx.role };
+    const fail = (reason: string, status: 400 | 403 | 409 = 400) =>
+      showAccess(
+        c,
+        ctx.session,
+        ctx.orgId,
+        { error: REFUSED[reason] ?? 'Nothing changed.' },
+        status,
+      );
+
+    if (ctx.form.get('action') === 'delete') {
+      const id = text(ctx.form, 'id');
+      const current = await customRole(c.env.DB, ctx.orgId, id);
+      if (!current) return fail('not_found');
+      const allowed = await mayDefineRole(
+        c.env,
+        actor,
+        ctx.orgId,
+        current.service,
+        current.permissions,
+      );
+      if (!allowed.ok) return fail(allowed.reason, 403);
+      await deleteCustomRole(c.env.DB, ctx.orgId, id);
+      await record(c, ctx.session, 'authz.role_deleted', {
+        org: ctx.orgId,
+        role: id,
+        name: current.name,
+      });
+      return c.redirect(`/orgs/${encodeURIComponent(ctx.orgId)}/access?done=role_deleted`, 303);
+    }
+
+    const service = text(ctx.form, 'service');
+    const permissions = ctx.form
+      .getAll('permission')
+      .filter((p): p is string => typeof p === 'string');
+    const allowed = await mayDefineRole(c.env, actor, ctx.orgId, service, permissions);
+    if (!allowed.ok) return fail(allowed.reason, 403);
+    const name = ctx.form.get('name');
+    const description = ctx.form.get('description');
+    const created = await createCustomRole(c.env.DB, now, {
+      orgId: ctx.orgId,
+      service,
+      name: typeof name === 'string' ? name : '',
+      description: typeof description === 'string' ? description : '',
+      permissions,
+      createdBy: actor.userId,
+    });
+    if (!created.ok) return fail(created.reason, created.reason === 'too_many' ? 409 : 400);
+    await record(c, ctx.session, 'authz.role_created', {
+      org: ctx.orgId,
+      role: created.role.id,
+      name: created.role.name,
+      service,
+      permissions: created.role.permissions.join(' '),
+    });
+    return c.redirect(`/orgs/${encodeURIComponent(ctx.orgId)}/access?done=role_created`, 303);
   });
 
   // The organization's service accounts: owners, with a recent proof (DESIGN §4.33).

@@ -2142,5 +2142,49 @@ export const tr: Catalog = {
     'KYC admin': 'KYC yöneticisi',
     'KYC developer': 'KYC geliştiricisi',
     'KYC auditor': 'KYC denetçisi',
+    'See the organization’s roles in 2earl’s apps, and who holds them':
+      'Kurumun 2earl uygulamalarındaki rollerini ve bunlara kimlerin sahip olduğunu görme',
+    'Give and take roles in 2earl’s apps, up to what you hold yourself':
+      '2earl uygulamalarında, kendi sahip olduklarınızı aşmadan rol verme ve geri alma',
+    'Create, change and delete the organization’s own roles':
+      'Kurumun kendi rollerini oluşturma, değiştirme ve silme',
+    'Roles in apps': 'Uygulamalardaki roller',
+    'What your people may do in 2earl’s apps. Each person’s role in the organization gives them a starting set; here you give more, to people, directory groups or service accounts, for good or for a number of days. You can give only roles whose permissions you hold yourself.':
+      'Kişilerinizin 2earl uygulamalarında neler yapabileceği. Herkesin kurumdaki rolü bir başlangıç kümesi verir; burada kişilere, dizin gruplarına veya hizmet hesaplarına süresiz ya da belirli gün sayısı için daha fazlasını verirsiniz. Yalnızca izinlerine kendiniz sahip olduğunuz rolleri verebilirsiniz.',
+    Roles: 'Roller',
+    'Given roles': 'Verilen roller',
+    'Nobody has been given a role here.': 'Burada henüz kimseye rol verilmedi.',
+    Who: 'Kime',
+    'For how many days (empty: until taken back)': 'Kaç gün için (boş: geri alınana kadar)',
+    'Why (optional, kept with the role)': 'Neden (isteğe bağlı, rolle birlikte saklanır)',
+    'Give role': 'Rol ver',
+    'Create role': 'Rol oluştur',
+    'Description (optional)': 'Açıklama (isteğe bağlı)',
+    Permissions: 'İzinler',
+    'Built in': 'Hazır',
+    'Owners give it': 'Sahipler verir',
+    Yours: 'Sizin',
+    'Take back': 'Geri al',
+    Person: 'Kişi',
+    'Directory group': 'Dizin grubu',
+    'Service account': 'Hizmet hesabı',
+    'Service accounts': 'Hizmet hesapları',
+    'Create service account': 'Hizmet hesabı oluştur',
+    'Role given. It applies from their next request.':
+      'Rol verildi. Bir sonraki isteklerinden itibaren geçerli.',
+    'Role taken back. It ends at their next request.':
+      'Rol geri alındı. Bir sonraki isteklerinde sona erer.',
+    'Role created. Give it to people below.': 'Rol oluşturuldu. Aşağıdan kişilere verin.',
+    'Role deleted, and taken back from everyone who had it.':
+      'Rol silindi ve sahip olan herkesten geri alındı.',
+    'You can’t give yourself a role. Ask another admin or owner.':
+      'Kendinize rol veremezsiniz. Başka bir yöneticiye veya sahibe sorun.',
+    'You can only give roles whose permissions you hold yourself.':
+      'Yalnızca izinlerine kendiniz sahip olduğunuz rolleri verebilirsiniz.',
+    'Only owners can give or take this role.': 'Bu rolü yalnızca sahipler verip geri alabilir.',
+    'Your role in the organization doesn’t allow this.': 'Kurumdaki rolünüz buna izin vermiyor.',
+    'They already have this role.': 'Bu role zaten sahipler.',
+    'Service account deleted. Its tokens stop working within a minute.':
+      'Hizmet hesabı silindi. Belirteçleri bir dakika içinde çalışmaz hale gelir.',
   },
 };

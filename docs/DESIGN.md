@@ -1373,6 +1373,15 @@ and every permission in the role; roles marked `privileged` need an owner; nobod
 themselves; owners are made only as today (§4.14), never through an assignment. The last-owner
 rule stays in SQL.
 
+**In the organization** (`/orgs/:id/access`, "Roles in apps"; phase 13b): owners, admins and
+auditors see each app's built-in roles, the organization's own roles, what each base role gives
+by default, and who holds which. Owners and admins give and take roles (to members, directory
+groups and service accounts, for good or for 1–365 days, with an optional reason); owners create
+and delete the organization's own roles. Every change needs a recent proof, is same-origin, and
+is in the activity (`authz.assigned`, `authz.unassigned`, `authz.role_created`,
+`authz.role_deleted`). login's own roles are never given here: owners, admins, auditors and
+members stay as §4.14 says.
+
 **Limits:** 50 custom roles per organization, 200 permissions per role, 5,000 assignments per
 organization.
 

@@ -38,6 +38,8 @@ const ALERTS: Partial<Record<AuditEvent, (detail: Detail) => string | null>> = {
   'org.api_key_created': (d) =>
     `created an API key “${String(d.name)}” with ${d.access === 'write' ? 'read and write' : 'read'} access`,
   'org.scim_token_created': () => 'created a directory sync (SCIM) token',
+  'org.service_account_created': (d) =>
+    `created a service account with ${String(d.scope)} for ${String(d.resource)}`,
   'org.domain_unmanaged': (d) => `stopped managing accounts at ${String(d.domain)}`,
   'org.domain_removed': (d) => `removed the domain ${String(d.domain)}`,
   'org.policy_changed': () => 'changed the security rules for managed accounts',

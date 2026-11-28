@@ -1,4 +1,5 @@
 import { MAX_SERVICE_ACCOUNTS, type ServiceAccount } from './service-accounts';
+import type { CustomRole } from './authz/store';
 import {
   ORG_NAME_MAX,
   ROLE_LABEL,
@@ -6,6 +7,7 @@ import {
   canManageOrganization,
   canRemove,
   canSeeActivity,
+  orgRoleCan,
   canSetRole,
   type Member,
   type OpenInvitation,
@@ -57,7 +59,7 @@ function flash(params: { notice?: string | undefined; error?: string | undefined
   );
 }
 
-export type OrgTab = 'members' | 'activity' | 'directory' | 'settings';
+export type OrgTab = 'members' | 'activity' | 'access' | 'directory' | 'settings';
 
 /** The organization's name, your role, and its tabs: the same on each of its pages. */
 export function orgHeader(org: Organization, role: OrgRole, tab: OrgTab): string {
@@ -65,6 +67,7 @@ export function orgHeader(org: Organization, role: OrgRole, tab: OrgTab): string
   const tabs: [OrgTab, string, string, boolean][] = [
     ['members', 'Members', base, true],
     ['activity', 'Activity', `${base}/activity`, canSeeActivity(role)],
+    ['access', 'Roles in apps', `${base}/access`, orgRoleCan(role, 'login:access.read')],
     ['directory', 'Domains & SSO', `${base}/directory`, role === 'owner'],
     ['settings', 'Settings', `${base}/settings`, true],
   ];
@@ -516,6 +519,164 @@ function serviceAccountsSection(
   );
 }
 
+export interface AccessService {
+  id: string;
+  name: string;
+  permissions: { id: string; label: string }[];
+  systemRoles: { id: string; name: string; permissions: string[]; privileged: boolean }[];
+  customRoles: CustomRole[];
+  /** The role each base role gives here (DESIGN §4.32), shown so nobody is surprised. */
+  defaults: { base: string; role: string }[];
+}
+
+export interface AccessAssignment {
+  id: string;
+  service: string;
+  principal: string;
+  principalKind: 'user' | 'group' | 'service_account';
+  roleName: string;
+  expiresAt: number | null;
+  grantedAt: number;
+  reason: string;
+}
+
+/** Roles in 2earl's apps: system and custom roles, and who holds which (DESIGN §4.32). */
+export function orgAccessPage(params: {
+  org: Organization;
+  role: OrgRole;
+  services: AccessService[];
+  assignments: AccessAssignment[];
+  members: { id: string; label: string }[];
+  groups: { id: string; label: string }[];
+  serviceAccounts: { id: string; label: string }[];
+  canAssign: boolean;
+  canManageRoles: boolean;
+  notice?: string | undefined;
+  error?: string | undefined;
+}): string {
+  const { org, role } = params;
+  const base = `/orgs/${escapeHtml(org.id)}`;
+  const active = org.status === 'active';
+  const kindLabel = {
+    user: 'Person',
+    group: 'Directory group',
+    service_account: 'Service account',
+  };
+  const sections = params.services
+    .map((service) => {
+      const label = (id: string) => service.permissions.find((p) => p.id === id)?.label ?? id;
+      const roleRows = [
+        ...service.systemRoles.map(
+          (r) =>
+            '<li class="admin-row"><div class="app-main">' +
+            `<p class="app-name">${escapeHtml(r.name)} <span class="tag tag-muted">${r.privileged ? 'Owners give it' : 'Built in'}</span></p>` +
+            `<p class="app-meta">${r.permissions.map((p) => escapeHtml(label(p))).join(' · ')}</p>` +
+            '</div></li>',
+        ),
+        ...service.customRoles.map(
+          (r) =>
+            '<li class="admin-row"><div class="app-main">' +
+            `<p class="app-name">${escapeHtml(r.name)} <span class="tag">Yours</span></p>` +
+            (r.description ? `<p class="app-meta">${escapeHtml(r.description)}</p>` : '') +
+            `<p class="app-meta">${r.permissions.map((p) => escapeHtml(label(p))).join(' · ')}</p>` +
+            '</div>' +
+            (active && params.canManageRoles
+              ? '<div class="row-actions">' +
+                `<form method="post" action="${base}/access/roles">` +
+                hidden({ action: 'delete', id: r.id }) +
+                '<button class="button secondary small" type="submit">Delete</button></form></div>'
+              : '') +
+            '</li>',
+        ),
+      ].join('');
+      const defaults = service.defaults.length
+        ? `<p class="note">Without anything below, ${service.defaults
+            .map((d) => `${escapeHtml(d.base)}s are ${escapeHtml(d.role)}`)
+            .join(', ')}.</p>`
+        : '';
+      const held = params.assignments.filter((a) => a.service === service.id);
+      const heldRows = held
+        .map(
+          (a) =>
+            '<li class="admin-row"><div class="app-main">' +
+            `<p class="app-name">${escapeHtml(a.principal)} <span class="tag tag-muted">${kindLabel[a.principalKind]}</span></p>` +
+            `<p class="app-meta">${escapeHtml(a.roleName)} · since ${formatDate(a.grantedAt)}${a.expiresAt ? ` · until ${formatDate(a.expiresAt)}` : ''}${a.reason ? ` · ${escapeHtml(a.reason)}` : ''}</p>` +
+            '</div>' +
+            (active && params.canAssign
+              ? '<div class="row-actions">' +
+                `<form method="post" action="${base}/access/assign">` +
+                hidden({ action: 'revoke', id: a.id }) +
+                '<button class="button secondary small" type="submit">Take back</button></form></div>'
+              : '') +
+            '</li>',
+        )
+        .join('');
+      const roleOptions = [
+        ...service.systemRoles.map((r) => [r.id, r.name] as const),
+        ...service.customRoles.map((r) => [r.id, r.name] as const),
+      ]
+        .map(([id, name]) => `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`)
+        .join('');
+      const who = [
+        ...params.members.map((m) => [`user:${m.id}`, m.label] as const),
+        ...params.groups.map((g) => [`group:${g.id}`, `${g.label} (directory group)`] as const),
+        ...params.serviceAccounts.map(
+          (a) => [`service_account:${a.id}`, `${a.label} (service account)`] as const,
+        ),
+      ]
+        .map(([id, name]) => `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`)
+        .join('');
+      const assignForm =
+        active && params.canAssign
+          ? `<form method="post" action="${base}/access/assign" class="stack-form">` +
+            hidden({ action: 'assign' }) +
+            `<label class="field"><span>Who</span><select name="principal" required>${who}</select></label>` +
+            `<label class="field"><span>Role</span><select name="role" required>${roleOptions}</select></label>` +
+            '<label class="field"><span>For how many days (empty: until taken back)</span><input name="days" type="number" min="1" max="365" inputmode="numeric"></label>' +
+            '<label class="field"><span>Why (optional, kept with the role)</span><input name="reason" type="text" maxlength="300" autocomplete="off"></label>' +
+            '<button class="button secondary" type="submit">Give role</button></form>'
+          : '';
+      const defineForm =
+        active && params.canManageRoles
+          ? `<details class="disclosure"><summary>Create a role for ${escapeHtml(service.name)}</summary>` +
+            `<form method="post" action="${base}/access/roles" class="stack-form">` +
+            hidden({ action: 'create', service: service.id }) +
+            '<label class="field"><span>Name</span><input name="name" type="text" required maxlength="60" autocomplete="off"></label>' +
+            '<label class="field"><span>Description (optional)</span><input name="description" type="text" maxlength="300" autocomplete="off"></label>' +
+            '<fieldset class="field"><legend>Permissions</legend>' +
+            service.permissions
+              .map(
+                (p) =>
+                  `<label class="confirm"><input type="checkbox" name="permission" value="${escapeHtml(p.id)}"><span>${escapeHtml(p.label)}</span></label>`,
+              )
+              .join('') +
+            '</fieldset><button class="button secondary" type="submit">Create role</button></form></details>'
+          : '';
+      return (
+        `<section class="section" aria-labelledby="svc-${escapeHtml(service.id)}">` +
+        `<h2 id="svc-${escapeHtml(service.id)}">${escapeHtml(service.name)}</h2>` +
+        defaults +
+        `<h3>Roles</h3><ul class="admin-list">${roleRows}</ul>` +
+        defineForm +
+        `<h3>Given roles</h3>` +
+        (heldRows
+          ? `<ul class="admin-list">${heldRows}</ul>`
+          : '<p class="empty">Nobody has been given a role here.</p>') +
+        assignForm +
+        '</section>'
+      );
+    })
+    .join('');
+  return page(
+    `${org.name}: roles in apps`,
+    orgHeader(org, role, 'access') +
+      flash(params) +
+      '<p class="section-text section-first">What your people may do in 2earl’s apps. Each person’s role in the organization gives them a starting set; here you give more, to people, directory groups or service accounts, for good or for a number of days. You can give only roles whose permissions you hold yourself.</p>' +
+      sections,
+    { section: 'Organization' },
+  );
+}
+
 export interface ActivityEntry {
   at: number;
   event: string;
@@ -632,6 +793,16 @@ const ACTIVITY: Record<string, (e: ActivityEntry) => string> = {
     `removed ${e.target ?? 'an account'}: deactivated, deleted in 30 days`,
   'scim.member_added': (e) => `added ${e.target ?? 'someone'}`,
   'scim.member_removed': (e) => `removed ${e.target ?? 'someone'}`,
+  'authz.assigned': (e) =>
+    `gave ${str(e.detail.principal, 'someone')} the role ${str(e.detail.role, '')}`,
+  'authz.unassigned': (e) =>
+    `took the role ${str(e.detail.role, '')} back from ${str(e.detail.principal, 'someone')}`,
+  'authz.role_created': (e) => `created the role “${str(e.detail.name, '')}”`,
+  'authz.role_deleted': (e) => `deleted the role “${str(e.detail.name, '')}”`,
+  'org.service_account_created': (e) =>
+    `created a service account (${str(e.detail.service_account, '')})`,
+  'org.service_account_deleted': (e) =>
+    `deleted a service account (${str(e.detail.service_account, '')})`,
   'scim.user_created': () => 'provisioned a person',
   'scim.user_updated': () => 'updated a person',
   'scim.user_deleted': () => 'deprovisioned a person',
