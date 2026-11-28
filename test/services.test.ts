@@ -58,6 +58,7 @@ async function deleteOwnAccount(
     MCP_GATEWAY_EVENTS: undefined,
     PROMPTSHARE_EVENTS: undefined,
     EMANET_EVENTS: undefined,
+    KYC_EVENTS: undefined,
   },
 ): Promise<void> {
   const ip = freshIp();
@@ -231,6 +232,7 @@ describe('account-deletion notices', () => {
         MCP_GATEWAY_EVENTS: undefined,
         PROMPTSHARE_EVENTS: undefined,
         EMANET_EVENTS: undefined,
+        KYC_EVENTS: undefined,
       }),
       NOW,
     );
@@ -246,6 +248,7 @@ describe('account-deletion notices', () => {
         MCP_GATEWAY_EVENTS: gateway.binding,
         PROMPTSHARE_EVENTS: undefined,
         EMANET_EVENTS: undefined,
+        KYC_EVENTS: undefined,
       }),
       NOW,
     );
