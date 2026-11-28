@@ -14,6 +14,9 @@ export const LOGIN_AUTHZ: ServiceAuthz = {
     'login:members.manage': 'Change roles of members, auditors and admins, and remove them',
     'login:owners.manage': 'Make, unmake and remove owners',
     'login:organization.manage': 'Rename and delete the organization',
+    'login:access.read': 'See the organization’s roles in 2earl’s apps, and who holds them',
+    'login:access.assign': 'Give and take roles in 2earl’s apps, up to what you hold yourself',
+    'login:roles.manage': 'Create, change and delete the organization’s own roles',
     // Across 2earl (staff).
     'login:staff.view': 'Open the admin area: people, organizations, the security log',
     'login:users.sign_out': 'Sign a person out everywhere',
@@ -37,6 +40,9 @@ export const LOGIN_AUTHZ: ServiceAuthz = {
         'login:members.manage',
         'login:owners.manage',
         'login:organization.manage',
+        'login:access.read',
+        'login:access.assign',
+        'login:roles.manage',
       ],
     },
     'login:admin': {
@@ -47,12 +53,14 @@ export const LOGIN_AUTHZ: ServiceAuthz = {
         'login:activity.read',
         'login:members.invite',
         'login:members.manage',
+        'login:access.read',
+        'login:access.assign',
       ],
     },
     'login:auditor': {
       name: 'Auditor',
       assignable: 'org',
-      permissions: ['login:members.read', 'login:activity.read'],
+      permissions: ['login:members.read', 'login:activity.read', 'login:access.read'],
     },
     'login:member': {
       name: 'Member',

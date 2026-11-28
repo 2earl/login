@@ -116,7 +116,11 @@ export type AuditEvent =
   | 'admin.scope_policy_changed'
   | 'service_account.used'
   | 'org.service_account_created'
-  | 'org.service_account_deleted';
+  | 'org.service_account_deleted'
+  | 'authz.assigned'
+  | 'authz.unassigned'
+  | 'authz.role_created'
+  | 'authz.role_deleted';
 
 export async function audit(
   db: D1Database,
