@@ -5,6 +5,7 @@ import {
   OAuthError,
 } from '@cloudflare/workers-oauth-provider';
 import { audit } from './audit';
+import { clientScopePolicy, refusedScopes } from './authz/client-policy';
 import { dpopOf } from './dpop';
 import type { SignInMethod } from './sessions';
 import { ALL_SCOPES, IDENTITY, allResources, scopeLabel, serviceForResource } from './services';
@@ -139,6 +140,7 @@ export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
         env,
         resource,
         clientId,
+        scope,
       }) => {
         // Every code exchange and refresh checks that the account still exists and is active.
         // Deletion and suspension revoke grants, but a grant created while that was running (a
@@ -162,6 +164,30 @@ export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
           throw new OAuthError('invalid_grant', {
             description: 'The organization that manages this account doesn’t allow this app.',
           });
+        }
+        // An app's own sign-in scope is for that app only (DESIGN §4.32): also checked here, so
+        // the device flow, pushed requests and grants made before the rule are covered.
+        const service = serviceForResource(env, resource);
+        const refused = service ? refusedScopes(env, service, clientId, scope) : [];
+        if (refused.length > 0) {
+          if ((await clientScopePolicy(env.DB)) === 'enforce') {
+            await authorizationServer(env).getOAuthApi(env).revokeGrant(grantId, userId);
+            await audit(env.DB, clock(), 'grant.refused', {
+              actorUserId: userId,
+              clientId,
+              detail: { reason: 'scope_not_for_client', scope: refused.join(' ') },
+            });
+            throw new OAuthError('invalid_grant', {
+              description: 'This app may not use these permissions.',
+            });
+          }
+          if (grantType === GrantType.AUTHORIZATION_CODE) {
+            await audit(env.DB, clock(), 'authz.scope_policy_would_refuse', {
+              actorUserId: userId,
+              clientId,
+              detail: { scope: refused.join(' '), at: 'token' },
+            });
+          }
         }
         const binding = dpopBinding(env, props as GrantProps, resource);
         if (grantType !== GrantType.REFRESH_TOKEN) return binding;

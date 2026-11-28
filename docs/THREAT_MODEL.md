@@ -353,6 +353,7 @@ boundary → mitigations → residual risks. Re-review whenever a phase changes 
 | Z7 | A misconfigured manifest grants everything | Permissions must exist and start with their service's ID; every role permission, default and exclusive pair is checked by a test; an unknown permission throws |
 | Z8 | Login's own rules change by accident when they move onto the manifest | Exhaustive parity test over every role combination against §4.14 and §4.29 |
 | Z9 | A service account's secret or key is stolen | Planned for phase 13c: shown once, kept as a hash, private_key_jwt with single-use `jti`, scopes fixed by the owner, revocable at once, 15-minute tokens without refresh |
+| Z11 | Any app asks for a 2earl app's own sign-in scope and a person approves it | `firstPartyClients`: refused for any other client at `/authorize` and every exchange once enforced; reported until then (tested) |
 | Z10 | Login is unavailable | Every permission check fails closed (the app answers 503). Wider blast radius than sign-in alone; accepted |
 
 ### D — DPoP and pushed authorization requests (DESIGN §4.15, phase 9d)

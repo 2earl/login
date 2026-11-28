@@ -303,6 +303,25 @@ describe('apps', () => {
     expect(response.status).toBe(400);
   });
 
+  it('switches the first-party permissions rule, and lists what it would refuse', async () => {
+    await env.DB.prepare(
+      `INSERT INTO audit_events (id, at, event, client_id, detail)
+       VALUES ('e1', ?, 'authz.scope_policy_would_refuse', 'https://stranger.example/c.json', '{"scope":"emanet:control"}')`,
+    )
+      .bind(NOW)
+      .run();
+    const page = await call(app, '/admin/apps', { cookies: { '__Host-session': owner } });
+    const html = await page.text();
+    expect(html).toContain('Reporting:');
+    expect(html).toContain('https://stranger.example/c.json');
+    const switched = await post('/admin/apps', { action: 'scope_policy', mode: 'enforce' });
+    expect(switched.headers.get('Location')).toBe('/admin/apps?done=scope_policy_enforce');
+    expect(await count('settings', "key = 'client_scope_policy' AND value = 'enforce'")).toBe(1);
+    expect(await count('audit_events', "event = 'admin.scope_policy_changed'")).toBe(1);
+    expect((await post('/admin/apps', { action: 'scope_policy', mode: 'off' })).status).toBe(400);
+    await env.DB.prepare("DELETE FROM settings WHERE key = 'client_scope_policy'").run();
+  });
+
   it('refuses to verify an unknown client ID', async () => {
     const response = await post('/admin/apps', { action: 'trust', client_id: 'no-such-client' });
     expect(response.status).toBe(400);

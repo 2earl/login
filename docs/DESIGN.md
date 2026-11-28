@@ -1384,6 +1384,17 @@ the deletion; organizations' custom roles cascade. A daily sweep removes expired
 Their inputs are a closed set of roles, so an exhaustive test proves the manifest gives the same
 answers as the code it replaces (`test/authz-parity.test.ts`); no runtime shadow mode is needed.
 
+**First-party scopes** (phase 13c, `firstPartyClients` in `src/services.ts`,
+`src/authz/client-policy.ts`). An app's own sign-in scope belongs to that app: `emanet:partner`,
+`emanet:field` and `emanet:control` to the three Emanet apps' metadata documents,
+`promptshare:account` to Prompt share's website. Before this, any client could ask for them and
+only the person's consent stood in the way. Checked at `/authorize` and at every code exchange
+and refresh (which covers the device flow and pushed requests). The owner turns it on in two
+steps on `/admin/apps`, without a deploy: **reporting** (the default) refuses nothing and lists
+each app that would have been refused (`authz.scope_policy_would_refuse`); **enforced** refuses
+at `/authorize` (`invalid_scope`) and revokes such grants at their next exchange
+(`grant.refused`, `scope_not_for_client`). Enforce once the list shows only strangers.
+
 ### 4.33 Service accounts (phase 13c)
 
 Machine identities for organizations' backends (a bank's server calling KYC) and for 2earl's own

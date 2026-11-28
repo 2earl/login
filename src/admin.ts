@@ -32,6 +32,7 @@ import { createResourceServer, deleteResourceServer, listResourceServers } from 
 import { allResources, serviceForResource } from './services';
 import { isStepUpFresh } from './mfa';
 import { setSignupMode, signupMode } from './settings';
+import { clientScopePolicy, setClientScopePolicy } from './authz/client-policy';
 import { authorizationServer } from './oauth';
 import { notFoundPage } from './pages';
 import type { Session } from './sessions';
@@ -80,6 +81,9 @@ const NOTICES: Record<string, string> = {
   untrusted: 'Verification removed.',
   unregistered: 'App deleted and its access revoked.',
   rs_deleted: 'Resource server credentials revoked.',
+  scope_policy_enforce:
+    'First-party permissions are enforced: other apps asking for them are refused.',
+  scope_policy_report: 'First-party permissions are reported, not refused.',
   signup_open: 'Sign-up is open. Anyone can create an account.',
   signup_invite: 'Sign-up is closed. New accounts need an invitation.',
   org_suspended: 'Organization suspended.',
@@ -466,7 +470,23 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
       }
       cursor = pageOfClients.cursor;
     } while (cursor && registered.length < 500);
+    const { results: reports } = await c.env.DB.prepare(
+      `SELECT client_id, json_extract(detail, '$.scope') AS scope, COUNT(*) AS count
+       FROM audit_events
+       WHERE event = 'authz.scope_policy_would_refuse' AND at > ? AND client_id IS NOT NULL
+       GROUP BY client_id, scope ORDER BY count DESC LIMIT 50`,
+    )
+      .bind(deps.now() - 7 * 24 * 60 * 60)
+      .all<{ client_id: string; scope: string | null; count: number }>();
     return adminAppsPage({
+      scopePolicy: {
+        mode: await clientScopePolicy(c.env.DB),
+        reports: reports.map((r) => ({
+          clientId: r.client_id,
+          scope: r.scope ?? '',
+          count: r.count,
+        })),
+      },
       resourceServers: await listResourceServers(c.env.DB),
       resources: allResources(c.env).map((resource) => {
         const service = serviceForResource(c.env, resource);
@@ -930,6 +950,13 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
           .run();
         await record(c, session, 'admin.client_deleted', { client: clientId });
         return c.redirect('/admin/apps?done=unregistered', 303);
+      }
+      case 'scope_policy': {
+        const mode = field('mode');
+        if (mode !== 'report' && mode !== 'enforce') return fail('Choose a rule.');
+        await setClientScopePolicy(c.env.DB, now, mode);
+        await record(c, session, 'admin.scope_policy_changed', { mode });
+        return c.redirect(`/admin/apps?done=scope_policy_${mode}`, 303);
       }
       case 'rs_create': {
         const name = field('name').slice(0, 100);
