@@ -85,6 +85,13 @@ organization up from the client ID. Ask `permissionsOf({ subject: { type: 'servi
 orgId: props.org, context: { scopes } })` if you give accounts roles; or check the token's scopes
 alone if your API is scope-based.
 
+### An organization on a person's token
+
+An app that works for one organization at a time can send `organization=org_…` on `/authorize`.
+login lets only members through, shows the organization on the consent page, and puts it in
+`props.org`; the grant ends when the person leaves. Use `props.org` as the `orgId` of your
+`permissionsOf` calls for such tokens.
+
 ## 5. Testing
 
 Stub the binding in `@cloudflare/vitest-plugin` with an `Authorization` entrypoint that returns

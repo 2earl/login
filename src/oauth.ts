@@ -56,7 +56,10 @@ export interface GrantProps {
   dpopJkt?: string;
   /** A service account's grant (DESIGN §4.33): `uid` is the account (`sa_…`), not a person. */
   kind?: 'service_account';
-  /** The organization a service account belongs to. */
+  /**
+   * The organization the token acts for: a service account's own, or the one a person chose for
+   * an app with `organization` on /authorize (DESIGN §4.32). Checked at every exchange.
+   */
   org?: string;
   /** Access tokens only: the key the token is bound to (RFC 9449 §6.1). */
   cnf?: { jkt: string };
@@ -173,6 +176,28 @@ export function authorizationServer(env: Env): OAuthAuthorizationServer<Env> {
           throw new OAuthError('invalid_grant', {
             description: 'This account is no longer active.',
           });
+        }
+        // A grant for an organization lasts while the person is an active member of it.
+        const grantOrg = (props as GrantProps).org;
+        if (grantOrg) {
+          const member = await env.DB.prepare(
+            `SELECT 1 AS ok FROM org_members m
+             JOIN organizations o ON o.id = m.org_id AND o.status = 'active'
+             WHERE m.org_id = ? AND m.user_id = ?`,
+          )
+            .bind(grantOrg, userId)
+            .first<{ ok: number }>();
+          if (!member) {
+            await authorizationServer(env).getOAuthApi(env).revokeGrant(grantId, userId);
+            await audit(env.DB, clock(), 'grant.refused', {
+              actorUserId: userId,
+              clientId,
+              detail: { reason: 'not_a_member', org: grantOrg },
+            });
+            throw new OAuthError('invalid_grant', {
+              description: 'This account is no longer a member of the organization.',
+            });
+          }
         }
         // The organization that manages the account may allow only some apps (DESIGN §4.22):
         // checked at every exchange and refresh, so access ends within one access token's life.

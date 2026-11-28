@@ -217,6 +217,24 @@ function nonceMac(env: Env, handle: string, nonce: string): Promise<string> {
   return hmacHex(env.SESSION_PEPPER, `consent-nonce:${handle}:${nonce}`);
 }
 
+/** The organization a grant is for travels the same way (DESIGN §4.32). */
+function orgMac(env: Env, handle: string, org: string): Promise<string> {
+  return hmacHex(env.SESSION_PEPPER, `consent-org:${handle}:${org}`);
+}
+
+/** The name of an active organization the account is an active member of, or null. */
+async function activeMembership(db: D1Database, orgId: string, userId: string) {
+  return db
+    .prepare(
+      `SELECT o.name FROM org_members m
+       JOIN organizations o ON o.id = m.org_id AND o.status = 'active'
+       JOIN users u ON u.id = m.user_id AND u.status = 'active'
+       WHERE m.org_id = ? AND m.user_id = ?`,
+    )
+    .bind(orgId, userId)
+    .first<{ name: string }>();
+}
+
 /** Grant properties: the account, when, and for OpenID Connect what the ID token needs. */
 async function grantProps(
   c: AppContext,
@@ -225,6 +243,7 @@ async function grantProps(
   request: AuthRequest,
   scope: readonly string[],
   nonce: string | null,
+  org: string | null = null,
 ): Promise<GrantProps> {
   const props: GrantProps = {
     uid: session.user.id,
@@ -232,6 +251,8 @@ async function grantProps(
     aal2At: session.aal === 'aal2' ? session.aal2At : null,
     signedInAt: session.createdAt,
     method: session.method,
+    // The organization the app acts for (`organization` on /authorize, DESIGN §4.32).
+    ...(org ? { org } : {}),
   };
   if (scope.includes('openid')) {
     props.oidc = {
@@ -937,6 +958,14 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       );
     }
     const nonce = query.get('nonce');
+    // `organization`: the app asks to act for one of the person's organizations (DESIGN §4.32).
+    const orgParam = query.get('organization');
+    if (orgParam !== null && !/^org_[A-Za-z0-9_-]{1,60}$/.test(orgParam)) {
+      return c.redirect(
+        authorizationErrorRedirect(request, 'invalid_request', 'organization must be an org_… ID'),
+        302,
+      );
+    }
     if (nonce !== null && (nonce.length === 0 || nonce.length > 255)) {
       return c.redirect(
         authorizationErrorRedirect(request, 'invalid_request', 'nonce must be 1 to 255 characters'),
@@ -1096,6 +1125,21 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       );
     }
 
+    const orgName =
+      orgParam === null
+        ? null
+        : (await activeMembership(c.env.DB, orgParam, session.user.id))?.name;
+    if (orgParam !== null && !orgName) {
+      return c.redirect(
+        authorizationErrorRedirect(
+          request,
+          'access_denied',
+          'You aren’t an active member of that organization',
+        ),
+        302,
+      );
+    }
+
     const remember = { secret: c.env.CONSENT_REMEMBER_SECRET, subject: session.user.id };
     if (!prompt.has('consent') && (await oauth.isConsentRemembered(c.req.raw, request, remember))) {
       const scope = scopesFor(service, request.scope);
@@ -1104,7 +1148,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         userId: session.user.id,
         metadata: {},
         scope,
-        props: await grantProps(c, deps.now(), session, request, scope, nonce),
+        props: await grantProps(c, deps.now(), session, request, scope, nonce, orgParam),
       });
       await audit(c.env.DB, deps.now(), 'consent.reused', {
         actorUserId: session.user.id,
@@ -1135,6 +1179,10 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       offeredMac: await offeredScopesMac(c.env, consent.handle, offered),
       nonce:
         nonce === null ? null : { value: nonce, mac: await nonceMac(c.env, consent.handle, nonce) },
+      organization:
+        orgParam === null || !orgName
+          ? null
+          : { value: orgParam, name: orgName, mac: await orgMac(c.env, consent.handle, orgParam) },
       clientName: details.clientName,
       clientDomain: details.clientDomain ?? null,
       trusted: Boolean(trusted),
@@ -1199,6 +1247,19 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       }
       nonce = nonceField;
     }
+    const orgField = form.get('organization');
+    let org: string | null = null;
+    if (typeof orgField === 'string') {
+      const macField = form.get('organization_mac');
+      if (
+        typeof macField !== 'string' ||
+        !timingSafeEqual(macField, await orgMac(c.env, handle, orgField)) ||
+        !(await activeMembership(c.env.DB, orgField, session.user.id))
+      ) {
+        return c.html(messagePage(MESSAGES.consentExpired, 'Approval stopped'), 400);
+      }
+      org = orgField;
+    }
 
     try {
       if (form.get('decision') !== 'approve' || scope.length === 0) {
@@ -1235,7 +1296,15 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         userId: session.user.id,
         metadata: {},
         scope: approvedScope,
-        props: await grantProps(c, deps.now(), session, approved.request, approvedScope, nonce),
+        props: await grantProps(
+          c,
+          deps.now(),
+          session,
+          approved.request,
+          approvedScope,
+          nonce,
+          org,
+        ),
       });
       await audit(c.env.DB, deps.now(), 'consent.approved', {
         actorUserId: session.user.id,

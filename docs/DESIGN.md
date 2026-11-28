@@ -1389,6 +1389,14 @@ is in the activity (`authz.assigned`, `authz.unassigned`, `authz.role_created`,
 `authz.role_deleted`). login's own roles are never given here: owners, admins, auditors and
 members stay as §4.14 says.
 
+**An organization on a person's token** (`organization=org_…` on `/authorize`, also through
+PAR): an app asks to act for one of the person's organizations. Only an active member of an active
+organization gets past `/authorize` (`access_denied` otherwise); the consent page says "On behalf
+of …"; the organization travels through the form bound to the handle, like the nonce; the grant
+carries it as `props.org` (`validateToken`, introspection `organization`). Every exchange and
+refresh checks the person is still a member, else `grant.refused` (`not_a_member`). Without the
+parameter nothing changes.
+
 **Limits:** 50 custom roles per organization, 200 permissions per role, 5,000 assignments per
 organization.
 
