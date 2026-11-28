@@ -74,6 +74,14 @@ describe('which client may ask for which scope', () => {
         'promptshare:account',
       ]),
     ).toEqual([]);
+    const kyc = serviceById('kyc');
+    if (!kyc) throw new Error('missing service');
+    expect(
+      refusedScopes(env, kyc, `${env.KYC_RESOURCE}/console/client.json`, ['kyc:console']),
+    ).toEqual([]);
+    expect(refusedScopes(env, kyc, kurumsal, ['kyc:console', 'kyc:usage.read'])).toEqual([
+      'kyc:console',
+    ]);
     // Scopes no rule names are for any app, after consent.
     const mcp = serviceById('mcp');
     if (!mcp) throw new Error('missing service');

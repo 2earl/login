@@ -102,7 +102,6 @@ describe('the roles-in-apps page', () => {
     expect((await page(cy)).status).toBe(404);
     const html = await (await page(dee)).text();
     expect(html).toContain('Emanet Kurumsal');
-    expect(html).toContain('KYC');
     expect(html).toContain('Partner admin');
     // Auditors read; they get no forms.
     expect(html).not.toContain('Give role');
@@ -139,14 +138,14 @@ describe('giving roles', () => {
     const ok = await post(bob, `/orgs/${orgId}/access/assign`, {
       action: 'assign',
       principal: `user:${cy.id}`,
-      role: 'kyc:tenant_reviewer',
+      role: 'emanet:case_manager',
     });
     expect(ok.status).toBe(303);
-    expect(await can(cy, 'kyc:tenant.review')).toBe(true);
+    expect(await can(cy, 'emanet:cases.write')).toBe(true);
     const self = await post(bob, `/orgs/${orgId}/access/assign`, {
       action: 'assign',
       principal: `user:${bob.id}`,
-      role: 'kyc:tenant_developer',
+      role: 'emanet:viewer',
     });
     expect(self.status).toBe(403);
     expect(await self.text()).toContain('You can’t give yourself a role');
