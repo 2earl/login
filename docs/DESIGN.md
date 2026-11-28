@@ -1262,6 +1262,13 @@ role may do: the routes and pages only ask it. 2earl's other back offices (Emane
 - Table `staff` (migration 0027): `user_id` PK, `role` (`admin` | `support`), `granted_by`,
   `granted_at`. Deleting the account deletes the row.
 
+**App roles for staff** (phase 13b, `/admin/team` → Roles in 2earl's apps): each staff role
+gives each app's default staff role (`staffDefaults`, §4.32). The owner gives more, one app's
+platform role at a time, to the owner or staff, for good or for 1–365 days, with a reason
+(`admin.platform_role_given`, `admin.platform_role_taken`). Roles that would make staff are never
+given this way. Removing someone from staff ends their app roles in the same statement (a
+trigger).
+
 ### 4.30 Organizations are set up by invitation (phase 11)
 
 Only the owner and admins create organizations. Everyone else gets one because 2earl invited

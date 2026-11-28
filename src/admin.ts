@@ -1,3 +1,6 @@
+import { ASSIGNABLE_SERVICES } from './authz/grant';
+import { NEVER_ASSIGNABLE } from './authz/login-manifest';
+import { assignRole, listAssignments, revokeAssignment } from './authz/store';
 import type { Hono } from 'hono';
 import { deleteAccount, revokeAllGrants } from './account';
 import {
@@ -29,7 +32,7 @@ import {
 } from './http';
 import { deliverDeletionNotices, pendingNotices } from './deletion-notices';
 import { createResourceServer, deleteResourceServer, listResourceServers } from './introspection';
-import { allResources, serviceForResource } from './services';
+import { allResources, serviceForResource, systemRole } from './services';
 import { isStepUpFresh } from './mfa';
 import { setSignupMode, signupMode } from './settings';
 import { clientScopePolicy, setClientScopePolicy } from './authz/client-policy';
@@ -95,6 +98,8 @@ const NOTICES: Record<string, string> = {
   setup_withdrawn: 'Invitation withdrawn.',
   staff_granted: 'Role given. They were told by email.',
   staff_revoked: 'Removed from staff. They were told by email.',
+  platform_given: 'Role given. It applies from their next request.',
+  platform_taken: 'Role taken back.',
 };
 
 function isLoopback(url: URL): boolean {
@@ -785,8 +790,40 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
 
   // ---- Staff (DESIGN §4.29) -----------------------------------------------------------------
 
-  const teamHtml = async (c: AppContext, view: AdminView, form?: { email: string }) =>
-    adminTeamPage({ staff: await listStaff(c.env.DB), ...(form ? { form } : {}), ...view });
+  const teamHtml = async (c: AppContext, view: AdminView, form?: { email: string }) => {
+    const members = await listStaff(c.env.DB);
+    const session = c.get('session');
+    const label = new Map<string, string>(members.map((m) => [m.userId, m.email ?? m.userId]));
+    if (session) label.set(session.user.id, `${session.user.primaryEmail ?? 'You'} (owner)`);
+    const held = await listAssignments(c.env.DB, null, deps.now());
+    return adminTeamPage({
+      staff: members,
+      platform: {
+        roles: ASSIGNABLE_SERVICES.flatMap((service) =>
+          Object.entries(service.authz.roles)
+            .filter(([, r]) => r.assignable === 'platform')
+            .filter(([, r]) => !r.permissions.some((p) => NEVER_ASSIGNABLE.has(p)))
+            .map(([id, r]) => ({
+              id,
+              name: r.name,
+              service: service.name,
+              permissions: [...r.permissions],
+            })),
+        ),
+        held: held.map((a) => ({
+          id: a.id,
+          person: label.get(a.principal.id) ?? a.principal.id,
+          role: systemRole(a.role)?.name ?? a.role,
+          service: ASSIGNABLE_SERVICES.find((s) => s.id === a.service)?.name ?? a.service,
+          expiresAt: a.expiresAt,
+          reason: a.reason,
+        })),
+        people: [...label].map(([id, l]) => ({ id, label: l })),
+      },
+      ...(form ? { form } : {}),
+      ...view,
+    });
+  };
 
   app.get('/admin/team', async (c) => {
     const who = await staff(c, staffCan.manageStaff);
@@ -854,6 +891,58 @@ export function registerAdminRoutes(app: Hono<AppEnv>, deps: Deps): void {
         notify(c.env, result.userId, { kind: 'staff_role', role: staffRole }, context),
       );
       return c.redirect('/admin/team?done=staff_granted', 303);
+    }
+
+    // App roles across 2earl (DESIGN §4.32): the owner gives them to staff, for one app.
+    if (action === 'platform_grant') {
+      const roleId = field('role');
+      const system = systemRole(roleId);
+      if (
+        system?.assignable !== 'platform' ||
+        !ASSIGNABLE_SERVICES.some((s) => s.authz.roles[roleId] === system)
+      ) {
+        return fail('Choose a role.');
+      }
+      const daysText = field('days');
+      const days = daysText === '' ? null : Number(daysText);
+      if (days !== null && (!Number.isInteger(days) || days < 1 || days > 365)) {
+        return fail('Enter a number of days from 1 to 365, or leave it empty.');
+      }
+      const result = await assignRole(c.env, now, {
+        orgId: null,
+        principal: { kind: 'user', id: field('user') },
+        role: roleId,
+        expiresAt: days === null ? null : now + days * 24 * 60 * 60,
+        grantedBy: session.user.id,
+        reason: field('reason'),
+      });
+      if (!result.ok) {
+        const error =
+          {
+            unknown_principal: 'Only the owner and staff can be given app roles.',
+            duplicate: 'They already have that role.',
+            exclusive: 'They hold a role that can’t be combined with this one.',
+            not_assignable: 'That role can’t be given.',
+          }[result.reason as string] ?? 'Nothing changed.';
+        return fail(error, 409);
+      }
+      await record(c, session, 'admin.platform_role_given', {
+        target: field('user'),
+        role: roleId,
+        days,
+      });
+      return c.redirect('/admin/team?done=platform_given', 303);
+    }
+
+    if (action === 'platform_revoke') {
+      const gone = await revokeAssignment(c.env.DB, null, field('id'));
+      if (gone) {
+        await record(c, session, 'admin.platform_role_taken', {
+          target: gone.principal.id,
+          role: gone.role,
+        });
+      }
+      return c.redirect('/admin/team?done=platform_taken', 303);
     }
 
     if (action === 'revoke') {
