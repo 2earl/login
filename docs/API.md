@@ -86,6 +86,51 @@ comes back. Events of the last few seconds appear on the next call.
 
 Every change is in the organization's activity, with `"via": "api"` and the key's ID.
 
+## Roles in 2earl's apps
+
+What people may do in Emanet and other 2earl apps beyond their organization role (the
+**Roles in apps** page). A key gives and takes roles, but never privileged ones and never
+login's own (owners, admins); it doesn't create roles: owners do that on the page.
+
+### `GET /roles`
+
+Each app's built-in roles and the organization's own.
+
+```json
+{
+  "data": [
+    {
+      "id": "emanet:viewer",
+      "service": "emanet",
+      "name": "Viewer",
+      "kind": "built_in",
+      "privileged": false,
+      "permissions": ["emanet:cases.read"]
+    }
+  ]
+}
+```
+
+### `GET /assignments`
+
+Roles given, and to whom: `{ "data": [{ "id", "service", "role", "principal": { "type", "id" },
+"expires_at", "granted_at", "reason" }] }`. `type` is `user`, `group` (a directory group) or
+`service_account`.
+
+### `POST /assignments` (read-and-write keys)
+
+```json
+{ "role": "emanet:viewer", "principal": { "type": "user", "id": "6b1c…" }, "days": 30, "reason": "Pilot" }
+```
+
+`days` (1 to 365) and `reason` are optional. Answers `201` with the assignment; `409 duplicate`
+if they already have it; `403 forbidden` for a role a key can't give; `400 unknown_principal`
+for someone who isn't a member, a group or a service account of the organization.
+
+### `POST /assignments/{id}/revoke` (read-and-write keys)
+
+Takes the role back; it ends at the person's next request.
+
 ## Directory sync (SCIM 2.0)
 
 Microsoft Entra ID, Okta and other directories provision people and groups into the organization.

@@ -1,3 +1,14 @@
+import { ASSIGNABLE_SERVICES } from './authz/grant';
+import {
+  assignRole,
+  customRole,
+  listAssignments,
+  listCustomRoles,
+  revokeAssignment,
+  type Assignment,
+} from './authz/store';
+import { CUSTOM_ROLE_PATTERN } from './authz/types';
+import { systemRole } from './services';
 import type { Hono } from 'hono';
 import type { Deps } from './app';
 import { audit } from './audit';
@@ -275,6 +286,135 @@ export function registerOrgApiRoutes(app: Hono<AppEnv>, deps: Deps): void {
       return json({ id: member.userId, deactivated: action === 'deactivate' });
     });
   }
+
+  // ---- Roles in 2earl's apps (DESIGN §4.32) ----------------------------------------------------
+
+  app.get('/api/v1/roles', async (c) => {
+    const auth = await authenticate(c, 'read');
+    if (auth instanceof Response) return auth;
+    const custom = await listCustomRoles(c.env.DB, auth.orgId);
+    return json({
+      data: ASSIGNABLE_SERVICES.flatMap((service) => [
+        ...Object.entries(service.authz.roles)
+          .filter(([, r]) => r.assignable === 'org')
+          .map(([id, r]) => ({
+            id,
+            service: service.id,
+            name: r.name,
+            kind: 'built_in',
+            privileged: r.privileged === true,
+            permissions: [...r.permissions],
+          })),
+        ...custom
+          .filter((r) => r.service === service.id)
+          .map((r) => ({
+            id: r.id,
+            service: r.service,
+            name: r.name,
+            kind: 'custom',
+            privileged: false,
+            permissions: r.permissions,
+          })),
+      ]),
+    });
+  });
+
+  const assignmentJson = (a: Assignment) => ({
+    id: a.id,
+    service: a.service,
+    role: a.role,
+    principal: { type: a.principal.kind, id: a.principal.id },
+    expires_at: a.expiresAt === null ? null : new Date(a.expiresAt * 1000).toISOString(),
+    granted_at: new Date(a.grantedAt * 1000).toISOString(),
+    reason: a.reason,
+  });
+
+  app.get('/api/v1/assignments', async (c) => {
+    const auth = await authenticate(c, 'read');
+    if (auth instanceof Response) return auth;
+    const assignments = await listAssignments(c.env.DB, auth.orgId, deps.now());
+    return json({ data: assignments.map(assignmentJson) });
+  });
+
+  /** A key gives only roles of 2earl's apps, never privileged ones (never login's own). */
+  async function keyMayGive(c: AppContext, orgId: string, role: string): Promise<boolean> {
+    if (CUSTOM_ROLE_PATTERN.test(role)) return (await customRole(c.env.DB, orgId, role)) !== null;
+    const system = systemRole(role);
+    return (
+      system?.assignable === 'org' &&
+      system.privileged !== true &&
+      ASSIGNABLE_SERVICES.some((s) => s.authz.roles[role] === system)
+    );
+  }
+
+  app.post('/api/v1/assignments', async (c) => {
+    const auth = await authenticate(c, 'write');
+    if (auth instanceof Response) return auth;
+    const body = (await c.req.json().catch(() => null)) as {
+      role?: unknown;
+      principal?: { type?: unknown; id?: unknown };
+      days?: unknown;
+      reason?: unknown;
+    } | null;
+    const role = typeof body?.role === 'string' ? body.role : '';
+    const type = body?.principal?.type;
+    const id = body?.principal?.id;
+    if (
+      (type !== 'user' && type !== 'group' && type !== 'service_account') ||
+      typeof id !== 'string'
+    ) {
+      return problem(400, 'invalid_principal', 'principal must be { type, id }.');
+    }
+    if (!(await keyMayGive(c, auth.orgId, role))) {
+      return problem(403, 'forbidden', 'This role can’t be given with an API key.');
+    }
+    const days = body?.days;
+    if (
+      days !== undefined &&
+      days !== null &&
+      (!Number.isInteger(days) || (days as number) < 1 || (days as number) > 365)
+    ) {
+      return problem(400, 'invalid_days', 'days must be a whole number from 1 to 365.');
+    }
+    const now = deps.now();
+    const result = await assignRole(c.env, now, {
+      orgId: auth.orgId,
+      principal: { kind: type, id },
+      role,
+      expiresAt: typeof days === 'number' ? now + days * 24 * 60 * 60 : null,
+      grantedBy: auth.keyId,
+      reason: typeof body?.reason === 'string' ? body.reason : '',
+    });
+    if (!result.ok) {
+      return problem(result.reason === 'duplicate' ? 409 : 400, result.reason, 'Nothing changed.');
+    }
+    await record(auth.orgId, auth.keyId, 'authz.assigned', {
+      assignment: result.assignment.id,
+      role,
+      principal: `${type}:${id}`,
+      days: typeof days === 'number' ? days : null,
+    })(c);
+    return json(assignmentJson(result.assignment), 201);
+  });
+
+  app.post('/api/v1/assignments/:id/revoke', async (c) => {
+    const auth = await authenticate(c, 'write');
+    if (auth instanceof Response) return auth;
+    const current = (await listAssignments(c.env.DB, auth.orgId, 0)).find(
+      (a) => a.id === c.req.param('id'),
+    );
+    if (!current) return problem(404, 'not_found', 'No such assignment.');
+    if (!(await keyMayGive(c, auth.orgId, current.role))) {
+      return problem(403, 'forbidden', 'This role can’t be taken back with an API key.');
+    }
+    await revokeAssignment(c.env.DB, auth.orgId, current.id);
+    await record(auth.orgId, auth.keyId, 'authz.unassigned', {
+      assignment: current.id,
+      role: current.role,
+      principal: `${current.principal.kind}:${current.principal.id}`,
+    })(c);
+    return json({ id: current.id, revoked: true });
+  });
 
   app.post('/api/v1/members/:id/sign-out', async (c) => {
     const auth = await authenticate(c, 'write');

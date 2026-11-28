@@ -218,3 +218,42 @@ describe('the organization’s API', () => {
     ).toBe(404);
   });
 });
+
+describe('roles in apps over the API (DESIGN §4.32)', () => {
+  it('lists roles, gives and takes them with a write key, never privileged ones', async () => {
+    const read = await createKey('read');
+    const write = await createKey('write');
+    const roles = await (
+      await api(read, '/roles')
+    ).json<{ data: { id: string; kind: string }[] }>();
+    expect(roles.data.map((r) => r.id)).toContain('emanet:partner_admin');
+    expect(roles.data.some((r) => r.id.startsWith('login:'))).toBe(false);
+
+    const body = { role: 'emanet:viewer', principal: { type: 'user', id: bob.id }, days: 30 };
+    expect((await api(read, '/assignments', body)).status).toBe(403);
+    const given = await api(write, '/assignments', body);
+    expect(given.status).toBe(201);
+    const assignment = await given.json<{ id: string; role: string; expires_at: string }>();
+    expect(assignment.role).toBe('emanet:viewer');
+    expect((await api(write, '/assignments', body)).status).toBe(409);
+    for (const role of ['login:admin', 'login:owner', 'emanet:staff_admin']) {
+      expect((await api(write, '/assignments', { ...body, role })).status).toBe(403);
+    }
+    expect(
+      (await api(write, '/assignments', { ...body, principal: { type: 'user', id: 'nobody' } }))
+        .status,
+    ).toBe(400);
+
+    const listed = await (await api(read, '/assignments')).json<{ data: { id: string }[] }>();
+    expect(listed.data.map((a) => a.id)).toEqual([assignment.id]);
+    const revoked = await api(write, `/assignments/${assignment.id}/revoke`, {});
+    expect(revoked.status).toBe(200);
+    expect(await count('authz_assignments')).toBe(0);
+    expect(
+      await count(
+        'audit_events',
+        "event IN ('authz.assigned', 'authz.unassigned') AND detail LIKE '%\"via\":\"api\"%'",
+      ),
+    ).toBe(2);
+  });
+});
