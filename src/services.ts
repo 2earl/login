@@ -49,6 +49,12 @@ export interface Service {
    * authorization API.
    */
   authz?: ServiceAuthz;
+  /**
+   * Scopes only some clients may ask for (DESIGN §4.32, phase 13c): an app's own sign-in scope is
+   * for that app, not for any app that knows its name. Scope → the client IDs allowed. Scopes
+   * not listed: any client, after the person's consent.
+   */
+  firstPartyClients?: Readonly<Record<string, (env: Env) => readonly string[]>>;
 }
 
 export const SERVICES: readonly Service[] = [
@@ -85,6 +91,9 @@ export const SERVICES: readonly Service[] = [
       'promptshare:account': 'Sign in to Prompt share',
     },
     deletionBinding: 'PROMPTSHARE_EVENTS',
+    firstPartyClients: {
+      'promptshare:account': (env) => [`${env.PROMPTSHARE_RESOURCE}/oauth/client.json`],
+    },
   },
   {
     // Emanet (2earl/emanet-core and its apps). One core keeps the data, so one deletion and one
@@ -100,6 +109,12 @@ export const SERVICES: readonly Service[] = [
     },
     deletionBinding: 'EMANET_EVENTS',
     organizationEvents: true,
+    // Each app signs in with its own metadata document (2earl/emanet-* src/auth.ts).
+    firstPartyClients: {
+      'emanet:partner': (env) => [`${env.EMANET_KURUMSAL_RESOURCE}/oauth/client.json`],
+      'emanet:field': (env) => [`${env.EMANET_SAHA_RESOURCE}/oauth/client.json`],
+      'emanet:control': (env) => [`${env.EMANET_MERKEZ_RESOURCE}/oauth/client.json`],
+    },
     // What the two apps' `can` maps decided before phase 13 (emanet-kurumsal and emanet-merkez
     // src/core.ts): with no assignments, the defaults give exactly that.
     authz: {
@@ -243,6 +258,7 @@ export function serviceForResource(env: Env, resource: string | undefined): Serv
         deletionBinding: service.deletionBinding,
         ...(service.dpop ? { dpop: true } : {}),
         ...(service.authz ? { authz: service.authz } : {}),
+        ...(service.firstPartyClients ? { firstPartyClients: service.firstPartyClients } : {}),
       };
     }
   }

@@ -553,6 +553,44 @@ export interface AdminRegisteredApp {
   createdAt: number | null;
 }
 
+function scopePolicySection(
+  policy:
+    | { mode: 'report' | 'enforce'; reports: { clientId: string; scope: string; count: number }[] }
+    | undefined,
+): string {
+  if (!policy) return '';
+  const enforcing = policy.mode === 'enforce';
+  const reports =
+    policy.reports.length === 0
+      ? '<p class="empty">No app asked for another app’s permissions in the last 7 days.</p>'
+      : `<ul class="admin-list">${policy.reports
+          .map(
+            (r) =>
+              '<li class="admin-row"><div class="app-main">' +
+              `<p class="app-name"><code>${escapeHtml(r.clientId)}</code></p>` +
+              `<p class="app-meta">asked for <code>${escapeHtml(r.scope)}</code> · ${String(r.count)} times</p>` +
+              '</div></li>',
+          )
+          .join('')}</ul>`;
+  return (
+    '<section class="section" aria-labelledby="first-party-heading">' +
+    '<h2 id="first-party-heading">First-party permissions</h2>' +
+    '<p class="section-text">Each 2earl app’s own sign-in permission is for that app only. ' +
+    (enforcing
+      ? '<strong>Enforced:</strong> any other app asking for one is refused.'
+      : '<strong>Reporting:</strong> nothing is refused yet; apps that would be are listed below. Enforce once only strangers are listed.') +
+    '</p>' +
+    reports +
+    actionForm(
+      '/admin/apps',
+      { action: 'scope_policy', mode: enforcing ? 'report' : 'enforce' },
+      enforcing ? 'Go back to reporting' : 'Enforce',
+      enforcing ? undefined : 'danger',
+    ) +
+    '</section>'
+  );
+}
+
 export function adminAppsPage(
   params: AdminView & {
     trusted: AdminTrustedApp[];
@@ -562,6 +600,11 @@ export function adminAppsPage(
     resources?: { resource: string; label: string }[];
     /** Just-created credentials: the only time the secret is shown. */
     created?: { id: string; secret: string } | undefined;
+    /** Which client may ask for which scope (DESIGN §4.32). */
+    scopePolicy?: {
+      mode: 'report' | 'enforce';
+      reports: { clientId: string; scope: string; count: number }[];
+    };
     notice?: string | undefined;
     error?: string | undefined;
   },
@@ -658,6 +701,7 @@ export function adminAppsPage(
       '<textarea name="redirect_uris" rows="3" required spellcheck="false"></textarea></label>' +
       '<button class="button secondary" type="submit">Register app</button></form>' +
       '</section>' +
+      scopePolicySection(params.scopePolicy) +
       '<section class="section" aria-labelledby="rs-heading">' +
       '<h2 id="rs-heading">Resource servers</h2>' +
       '<p class="section-text">Credentials for a service that checks tokens at <code>/oauth/introspect</code> (RFC 7662) instead of a Service Binding. Each sees only tokens issued for its own resource.</p>' +
@@ -712,6 +756,9 @@ const EVENT_LABEL: Record<AuditEvent, string> = {
   'consent.reused': 'App allowed (remembered)',
   'grant.revoked': 'App disconnected',
   'grant.refused': 'App access refused',
+  'authz.scope_policy_would_refuse': 'An app asked for another app’s permissions (reported)',
+  'authz.scope_policy_refused': 'An app asked for another app’s permissions (refused)',
+  'admin.scope_policy_changed': 'First-party permissions rule changed',
   'account.exported': 'Data downloaded',
   'account.deletion_started': 'Account deletion started',
   'account.deletion_stopped': 'Account deletion stopped',

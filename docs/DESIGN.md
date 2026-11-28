@@ -1384,6 +1384,17 @@ the deletion; organizations' custom roles cascade. A daily sweep removes expired
 Their inputs are a closed set of roles, so an exhaustive test proves the manifest gives the same
 answers as the code it replaces (`test/authz-parity.test.ts`); no runtime shadow mode is needed.
 
+**First-party scopes** (phase 13c, `firstPartyClients` in `src/services.ts`,
+`src/authz/client-policy.ts`). An app's own sign-in scope belongs to that app: `emanet:partner`,
+`emanet:field` and `emanet:control` to the three Emanet apps' metadata documents,
+`promptshare:account` to Prompt share's website. Before this, any client could ask for them and
+only the person's consent stood in the way. Checked at `/authorize` and at every code exchange
+and refresh (which covers the device flow and pushed requests). The owner turns it on in two
+steps on `/admin/apps`, without a deploy: **reporting** (the default) refuses nothing and lists
+each app that would have been refused (`authz.scope_policy_would_refuse`); **enforced** refuses
+at `/authorize` (`invalid_scope`) and revokes such grants at their next exchange
+(`grant.refused`, `scope_not_for_client`). Enforce once the list shows only strangers.
+
 ### 4.33 Service accounts (phase 13c)
 
 Machine identities for organizations' backends (a bank's server calling KYC) and for 2earl's own
@@ -1463,8 +1474,6 @@ There is **no registration endpoint** (`clientRegistrationEndpoint` unset).
 | `emanet:partner` | Sign in to Emanet Kurumsal for one's organization (`https://kurumsal.emanet.dev`) | Emanet Kurumsal |
 | `emanet:field` | Sign in to Emanet Saha as a field agent (`https://saha.emanet.dev`) | Emanet Saha |
 | `emanet:control` | Sign in to Emanet Merkez as 2earl staff (`https://merkez.emanet.dev`) | Emanet Merkez |
-| `kyc:console` | Sign in to the 2earl KYC console (`https://kyc.2earl.com`) | KYC console |
-| `kyc:<area>.<verb>` | Use the KYC API for one's organization: `kyc:sessions.write`, `.read`, `kyc:identity.read`, `kyc:evidence.read`, `kyc:data.delete`, `kyc:config.write`, `kyc:usage.read` | KYC customers' API clients |
 | `admin` | Administer the identity service | owner's first-party sessions only; never to OAuth clients |
 
 Scopes are opaque strings to `login`; their enforcement lives in the resource server.

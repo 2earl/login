@@ -18,6 +18,7 @@ import { DpopError, dpopOf, verifyDpopProof, withDpop } from './dpop';
 import { pushedRequestUrl, registerParRoute } from './par';
 import { membershipsOf, ownershipPlan } from './orgs';
 import { audit } from './audit';
+import { clientScopePolicy, refusedScopes } from './authz/client-policy';
 import { hmacHex, pkceChallenge, timingSafeEqual } from './crypto';
 import { GoogleSignInError, buildGoogleAuthUrl, exchangeCode, verifyGoogleIdToken } from './google';
 import { LOGIN_TX_TTL_SECONDS, consumeLoginTx, createLoginTx } from './login-tx';
@@ -977,6 +978,31 @@ export function createApp(deps: Deps): Hono<AppEnv> {
         authorizationErrorRedirect(request, 'invalid_scope', 'The openid scope is required'),
         302,
       );
+    }
+
+    // An app's own sign-in scope is for that app only (DESIGN §4.32, src/authz/client-policy.ts).
+    const refused = refusedScopes(c.env, service, request.clientId, request.scope);
+    if (refused.length > 0) {
+      if ((await clientScopePolicy(c.env.DB)) === 'enforce') {
+        await audit(c.env.DB, deps.now(), 'authz.scope_policy_refused', {
+          clientId: request.clientId,
+          ipPrefix: clientIp(c),
+          detail: { scope: refused.join(' ') },
+        });
+        return c.redirect(
+          authorizationErrorRedirect(
+            request,
+            'invalid_scope',
+            'This app may not ask for these permissions',
+          ),
+          302,
+        );
+      }
+      await audit(c.env.DB, deps.now(), 'authz.scope_policy_would_refuse', {
+        clientId: request.clientId,
+        ipPrefix: clientIp(c),
+        detail: { scope: refused.join(' '), at: 'authorize' },
+      });
     }
 
     const session = c.get('session');

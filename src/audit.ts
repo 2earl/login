@@ -110,7 +110,10 @@ export type AuditEvent =
   | 'scim.user_updated'
   | 'scim.user_deleted'
   | 'scim.member_added'
-  | 'scim.member_removed';
+  | 'scim.member_removed'
+  | 'authz.scope_policy_would_refuse'
+  | 'authz.scope_policy_refused'
+  | 'admin.scope_policy_changed';
 
 export async function audit(
   db: D1Database,
