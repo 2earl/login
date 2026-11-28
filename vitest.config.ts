@@ -54,6 +54,7 @@ export default defineConfig(async () => {
             standIn('mcp', '2earl MCP gateway'),
             standIn('promptshare', 'Prompt share'),
             standIn('emanet-core', 'Emanet'),
+            standIn('kyc', '2earl KYC'),
           ],
         },
       }),
