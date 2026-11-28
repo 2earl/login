@@ -1116,6 +1116,21 @@ export const tr: Catalog = {
       'Kuruluşunuz adına Emanet Kurumsal’a giriş yapın',
     'Sign in to Emanet Saha as a field agent': 'Emanet Saha’ya saha görevlisi olarak giriş yapın',
     'Sign in to Emanet Merkez as 2earl staff': 'Emanet Merkez’e 2earl personeli olarak giriş yapın',
+    'Sign in to the 2earl KYC console': '2earl KYC konsoluna giriş yapın',
+    'Start identity verifications in 2earl KYC for your organization':
+      'Kurumunuz adına 2earl KYC’de kimlik doğrulaması başlatma',
+    'See the status of your organization’s identity verifications':
+      'Kurumunuzun kimlik doğrulamalarının durumunu görme',
+    'See the identity details of people your organization verified':
+      'Kurumunuzun doğruladığı kişilerin kimlik bilgilerini görme',
+    'See the photos taken during your organization’s verifications':
+      'Kurumunuzun doğrulamaları sırasında çekilen fotoğrafları görme',
+    'Delete verification data your organization holds in 2earl KYC':
+      'Kurumunuzun 2earl KYC’deki doğrulama verilerini silme',
+    'Change your organization’s KYC workflows and webhooks':
+      'Kurumunuzun KYC iş akışlarını ve webhook’larını değiştirme',
+    'See your organization’s KYC usage, plan and statements':
+      'Kurumunuzun KYC kullanımını, planını ve hesap dökümlerini görme',
     'Sign in with': 'Giriş yöntemi',
     'Sign in with SSO': 'SSO ile giriş yapın',
     'Sign in with a passkey': 'Geçiş anahtarıyla giriş yapın',
