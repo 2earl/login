@@ -6,8 +6,8 @@ import { AUTHZ_SERVICES, authzOf, permissionExists, systemRole } from '../src/se
 
 /** DESIGN §4.32: every service's permissions and roles are consistent and translated. */
 describe('authorization manifests', () => {
-  it('lists login, Emanet and KYC', () => {
-    expect(AUTHZ_SERVICES.map((s) => s.id)).toEqual(['login', 'emanet', 'kyc']);
+  it('lists login and Emanet', () => {
+    expect(AUTHZ_SERVICES.map((s) => s.id)).toEqual(['login', 'emanet']);
   });
 
   for (const service of AUTHZ_SERVICES) {
