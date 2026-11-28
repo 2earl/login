@@ -1552,6 +1552,14 @@ pushed_requests  id_hash PK (HMAC of the request_uri's random part), client_id, 
                  created_at, expires_at                              (§4.15; ≤ 10 minutes)
 dpop_proofs      id_hash PK (SHA-256 of key thumbprint and jti), expires_at  (§4.15; 2 minutes)
 staff            user_id PK FK, role (admin | support), granted_by, granted_at  (§4.29)
+authz_roles      id PK ('rol_…'), org_id FK, service, name (UNIQUE per org+service, NOCASE),
+                 description, created_by, created_at, updated_at       (§4.32)
+authz_role_permissions (role_id FK, permission) PK
+authz_assignments id PK ('asg_…'), scope_kind (platform|org), org_id FK NULL, resource ('' or
+                 '<type>:<id>'), principal_kind (user|group|service_account), principal_id,
+                 role, service, condition, expires_at NULL, granted_by, granted_at, reason;
+                 triggers remove a principal's rows when the account, group, staff role or
+                 membership goes                                     (§4.32)
 org_setup_invitations
                  id PK (osi_…), email, org_name, invited_by, created_at, sent_at, expires_at,
                  used_at, org_id FK                                  (§4.30; 14 days)

@@ -41,6 +41,8 @@ export interface ServiceAuthz {
    * none; `'*'` carries every permission. Effective access is always scopes ∩ permissions.
    */
   scopeGrants: Readonly<Record<string, readonly string[] | '*'>>;
+  /** Kinds of the service's own objects a role can be given for one of (`case`, `branch`). */
+  resourceTypes?: readonly string[];
 }
 
 export const PERMISSION_PATTERN = /^[a-z][a-z0-9-]*:[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;
