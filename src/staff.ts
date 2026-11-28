@@ -1,3 +1,5 @@
+import { LOGIN_AUTHZ } from './authz/login-manifest';
+
 /**
  * 2earl's own staff (DESIGN §4.29). Three roles, from the most trusted:
  *
@@ -44,36 +46,43 @@ export async function staffRoleOf(env: Env, userId: string): Promise<StaffRole |
   return row?.role ?? null;
 }
 
-const runs = (role: StaffRole) => role === 'owner' || role === 'admin';
-/** Every staff role. */
-const anyStaff = (role: StaffRole) => STAFF_LABEL[role] !== '';
+/** Whether a staff role holds one of login's own permissions (DESIGN §4.32). */
+export function staffRoleCan(role: StaffRole, permission: string): boolean {
+  const id = LOGIN_AUTHZ.staffDefaults?.[role];
+  return (id ? LOGIN_AUTHZ.roles[id]?.permissions : undefined)?.includes(permission) ?? false;
+}
 
-/** What each role may do; the routes only ask these. */
+const holds = (permission: string) => (role: StaffRole) => staffRoleCan(role, permission);
+
+/**
+ * What each role may do; the routes only ask these. From login's manifest; every role is checked
+ * against the table in §4.29 by test/authz-parity.test.ts.
+ */
 export const staffCan = {
   /** See /admin: users, organizations, the security log. */
-  view: anyStaff,
+  view: holds('login:staff.view'),
   /** Suspend, reactivate, reset a second factor, delete. */
-  manageUsers: runs,
+  manageUsers: holds('login:users.manage'),
   /** End every session and app grant of an account (lost device, hijacked session). */
-  signOutUsers: anyStaff,
+  signOutUsers: holds('login:users.sign_out'),
   /** The sign-up switch and the sign-up invitations. */
-  manageSignUp: runs,
+  manageSignUp: holds('login:signup.manage'),
   /** Suspend, reactivate, delete organizations. */
-  manageOrgs: runs,
+  manageOrgs: holds('login:orgs.manage'),
   /** Invite someone to set up an organization, withdraw such invitations, create one directly. */
-  createOrgs: runs,
+  createOrgs: holds('login:orgs.create'),
   /** Send an open setup invitation again. */
-  resendOrgInvitations: anyStaff,
+  resendOrgInvitations: holds('login:orgs.resend_invitations'),
   /** Registered apps and resource servers. */
-  manageApps: runs,
+  manageApps: holds('login:apps.manage'),
   /** Give and take staff roles. */
-  manageStaff: (role: StaffRole) => role === 'owner',
+  manageStaff: holds('login:staff.manage'),
   /**
    * Act on `target`'s account at all: never on the owner or yourself; on other staff only as
    * the owner.
    */
   actOn: (role: StaffRole, target: StaffRole | null) =>
-    target === 'owner' ? false : target === null ? true : role === 'owner',
+    target === 'owner' ? false : target === null ? true : staffRoleCan(role, 'login:staff.manage'),
 };
 
 export interface StaffMember {

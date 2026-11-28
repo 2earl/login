@@ -1,5 +1,6 @@
 import { releaseStatements } from './managed';
 import { hmacHex, randomToken } from './crypto';
+import { LOGIN_AUTHZ } from './authz/login-manifest';
 import { SERVICES } from './services';
 
 /**
@@ -36,27 +37,48 @@ export function isOrgRole(value: unknown): value is OrgRole {
 }
 
 // ---- Who may do what ----------------------------------------------------------------------------
+// From login's manifest (DESIGN §4.32): each base role is a system role with permissions.
+// test/authz-parity.test.ts checks every combination against the rules of §4.14 and §4.28.
+
+const ORG_PERMISSIONS: Record<OrgRole, ReadonlySet<string>> = {
+  owner: rolePermissions('owner'),
+  admin: rolePermissions('admin'),
+  auditor: rolePermissions('auditor'),
+  member: rolePermissions('member'),
+};
+
+function rolePermissions(role: OrgRole): ReadonlySet<string> {
+  const id = LOGIN_AUTHZ.orgDefaults?.[role];
+  return new Set(id ? (LOGIN_AUTHZ.roles[id]?.permissions ?? []) : []);
+}
+
+/** Whether a base role holds one of login's own permissions in its organization. */
+export const orgRoleCan = (role: OrgRole, permission: string): boolean =>
+  ORG_PERMISSIONS[role].has(permission);
 
 /** Invite people and withdraw invitations. */
-export const canInvite = (actor: OrgRole): boolean => actor === 'owner' || actor === 'admin';
+export const canInvite = (actor: OrgRole): boolean => orgRoleCan(actor, 'login:members.invite');
 
 /** See the organization's activity and download it (DESIGN §4.28): everyone but members. */
-export const canSeeActivity = (actor: OrgRole): boolean => actor !== 'member';
+export const canSeeActivity = (actor: OrgRole): boolean => orgRoleCan(actor, 'login:activity.read');
 
 /** Change `target`'s role to `next`. Only owners make or unmake owners. */
 export function canSetRole(actor: OrgRole, target: OrgRole, next: OrgRole): boolean {
-  if (actor === 'owner') return true;
-  if (actor === 'admin') return target !== 'owner' && next !== 'owner';
-  return false;
+  return target === 'owner' || next === 'owner'
+    ? orgRoleCan(actor, 'login:owners.manage')
+    : orgRoleCan(actor, 'login:members.manage');
 }
 
 /** Remove someone else. Admins can't remove owners. */
 export function canRemove(actor: OrgRole, target: OrgRole): boolean {
-  return actor === 'owner' || (actor === 'admin' && target !== 'owner');
+  return target === 'owner'
+    ? orgRoleCan(actor, 'login:owners.manage')
+    : orgRoleCan(actor, 'login:members.manage');
 }
 
 /** Rename or delete the organization. */
-export const canManageOrganization = (actor: OrgRole): boolean => actor === 'owner';
+export const canManageOrganization = (actor: OrgRole): boolean =>
+  orgRoleCan(actor, 'login:organization.manage');
 
 // ---- Names --------------------------------------------------------------------------------------
 
