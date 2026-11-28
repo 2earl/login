@@ -2164,5 +2164,7 @@ export const tr: Catalog = {
     'No app roles given beyond what staff roles give.':
       'Personel rollerinin verdiklerinin ötesinde uygulama rolü verilmedi.',
     'Role taken back.': 'Rol geri alındı.',
+    'On behalf of': 'Adına',
+    '<0>{0}</0>, your organization': '<0>{0}</0>, kurumunuz',
   },
 };

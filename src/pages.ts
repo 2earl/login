@@ -695,6 +695,8 @@ export interface ConsentView {
   offeredMac: string;
   /** OpenID Connect `nonce`, carried to the approval and bound to the handle (app.ts nonceMac). */
   nonce?: { value: string; mac: string } | null;
+  /** The organization the app asks to act for, bound to the handle (app.ts orgMac). */
+  organization?: { value: string; name: string; mac: string } | null;
   clientName: string;
   /** Verified domain of a CIMD client; absent for a pre-registered or self-registered client. */
   clientDomain: string | null;
@@ -748,6 +750,9 @@ export function consentPage(view: ConsentView): string {
       '<dl class="details consent-facts">' +
       `<dt>Sends access to</dt><dd><strong>${escapeHtml(view.redirectHost)}</strong></dd>` +
       `<dt>For</dt><dd>${escapeHtml(view.resource)}</dd>` +
+      (view.organization
+        ? `<dt>On behalf of</dt><dd><span translate="no">${escapeHtml(view.organization.name)}</span>, your organization</dd>`
+        : '') +
       '</dl>' +
       loopback +
       '<form method="post" action="/authorize" class="consent-form">' +
@@ -757,6 +762,10 @@ export function consentPage(view: ConsentView): string {
       (view.nonce
         ? `<input type="hidden" name="nonce" value="${escapeHtml(view.nonce.value)}">` +
           `<input type="hidden" name="nonce_mac" value="${escapeHtml(view.nonce.mac)}">`
+        : '') +
+      (view.organization
+        ? `<input type="hidden" name="organization" value="${escapeHtml(view.organization.value)}">` +
+          `<input type="hidden" name="organization_mac" value="${escapeHtml(view.organization.mac)}">`
         : '') +
       scopes +
       unavailable +
