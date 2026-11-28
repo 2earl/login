@@ -253,8 +253,11 @@ describe('data export', () => {
         status: 'included',
         data: { service: 'Emanet', securityLog: [], stand_in_for: userId },
       },
-      // Registered, its Worker not yet bound (src/services.ts).
-      kyc: { service: 'KYC', status: 'not connected', note: 'This service holds no data yet.' },
+      kyc: {
+        service: '2earl KYC',
+        status: 'included',
+        data: { service: '2earl KYC', securityLog: [], stand_in_for: userId },
+      },
     });
 
     // A service that fails is named, and the rest of the download still works.

@@ -1116,6 +1116,21 @@ export const tr: Catalog = {
       'Kuruluşunuz adına Emanet Kurumsal’a giriş yapın',
     'Sign in to Emanet Saha as a field agent': 'Emanet Saha’ya saha görevlisi olarak giriş yapın',
     'Sign in to Emanet Merkez as 2earl staff': 'Emanet Merkez’e 2earl personeli olarak giriş yapın',
+    'Sign in to the 2earl KYC console': '2earl KYC konsoluna giriş yapın',
+    'Start identity verifications in 2earl KYC for your organization':
+      'Kurumunuz adına 2earl KYC’de kimlik doğrulaması başlatma',
+    'See the status of your organization’s identity verifications':
+      'Kurumunuzun kimlik doğrulamalarının durumunu görme',
+    'See the identity details of people your organization verified':
+      'Kurumunuzun doğruladığı kişilerin kimlik bilgilerini görme',
+    'See the photos taken during your organization’s verifications':
+      'Kurumunuzun doğrulamaları sırasında çekilen fotoğrafları görme',
+    'Delete verification data your organization holds in 2earl KYC':
+      'Kurumunuzun 2earl KYC’deki doğrulama verilerini silme',
+    'Change your organization’s KYC workflows and webhooks':
+      'Kurumunuzun KYC iş akışlarını ve webhook’larını değiştirme',
+    'See your organization’s KYC usage, plan and statements':
+      'Kurumunuzun KYC kullanımını, planını ve hesap dökümlerini görme',
     'Sign in with': 'Giriş yöntemi',
     'Sign in with SSO': 'SSO ile giriş yapın',
     'Sign in with a passkey': 'Geçiş anahtarıyla giriş yapın',
@@ -2099,48 +2114,5 @@ export const tr: Catalog = {
     Viewer: 'Görüntüleyen',
     'Merkez admin': 'Merkez yöneticisi',
     'Merkez reviewer': 'Merkez inceleyicisi',
-    'Sign in to the KYC console': 'KYC konsoluna giriş yapma',
-    'Start identity checks': 'Kimlik doğrulamaları başlatma',
-    'See identity checks and their results': 'Kimlik doğrulamalarını ve sonuçlarını görme',
-    'See the identity details that checks verified':
-      'Doğrulamaların onayladığı kimlik bilgilerini görme',
-    'See the evidence of identity checks': 'Kimlik doğrulamalarının kanıtlarını görme',
-    'Delete the data of identity checks': 'Kimlik doğrulamalarının verilerini silme',
-    'Change KYC workflows and settings': 'KYC iş akışlarını ve ayarlarını değiştirme',
-    'See KYC usage': 'KYC kullanımını görme',
-    'Open the KYC back office': 'KYC arka ofisini açma',
-    'Change KYC’s operator settings, staff, tenants, subscriptions and document catalogue':
-      'KYC’nin işletici ayarlarını, personelini, müşterilerini, aboneliklerini ve belge kataloğunu değiştirme',
-    'Change KYC plans, prices and statements':
-      'KYC planlarını, fiyatlarını ve hesap dökümlerini değiştirme',
-    'Approve tenants for sensitive documents, read KYC audit logs and handle erasure requests':
-      'Müşterileri hassas belgeler için onaylama, KYC denetim kayıtlarını okuma ve silme taleplerini işleme',
-    'Claim and decide manual reviews, and see the evidence of the one held':
-      'Elle incelemeleri üstlenme ve karara bağlama, üstlenilen incelemenin kanıtlarını görme',
-    'Decide manual reviews of sensitive documents':
-      'Hassas belgelerin elle incelemelerini karara bağlama',
-    'Assign and release manual reviews, see queue figures and give second approvals':
-      'Elle incelemeleri atama ve bırakma, kuyruk rakamlarını görme ve ikinci onay verme',
-    'See tenants’ details, delivery logs and KYC’s health':
-      'Müşteri bilgilerini, gönderim kayıtlarını ve KYC’nin durumunu görme',
-    'Open the organization’s KYC console': 'Kurumun KYC konsolunu açma',
-    'Manage the organization’s KYC settings and let 2earl staff help':
-      'Kurumun KYC ayarlarını yönetme ve 2earl personelinin yardım etmesine izin verme',
-    'Review and decide the organization’s identity checks in review':
-      'Kurumun incelemedeki kimlik doğrulamalarını inceleme ve karara bağlama',
-    'Manage the organization’s KYC workflows, webhooks and API clients, and test sessions':
-      'Kurumun KYC iş akışlarını, webhook’larını, API istemcilerini ve test oturumlarını yönetme',
-    'Read the organization’s KYC audit log and decisions':
-      'Kurumun KYC denetim kaydını ve kararlarını okuma',
-    'KYC platform admin': 'KYC platform yöneticisi',
-    'KYC finance': 'KYC finans',
-    'KYC compliance': 'KYC uyum',
-    'KYC reviewer': 'KYC inceleyicisi',
-    'KYC sensitive-document reviewer': 'KYC hassas belge inceleyicisi',
-    'KYC review lead': 'KYC inceleme sorumlusu',
-    'KYC support': 'KYC destek',
-    'KYC admin': 'KYC yöneticisi',
-    'KYC developer': 'KYC geliştiricisi',
-    'KYC auditor': 'KYC denetçisi',
   },
 };

@@ -187,139 +187,26 @@ export const SERVICES: readonly Service[] = [
     ],
   },
   {
-    // KYC (2earl/kyc): identity checks for 2earl's apps and for companies that buy it. A tenant is
-    // an organization, so deleting one reaches KYC too. Its console signs in with `kyc:console`;
-    // tenants' backends call its API with the other scopes (service accounts, phase 13c).
+    // 2earl KYC (2earl/kyc): identity verification sold to companies. Its customers are its own
+    // tenants, not login organizations. People being verified never hold a login account; these
+    // scopes are for the KYC console (staff and customer members) and for customers' API clients.
     id: 'kyc',
-    name: 'KYC',
+    name: '2earl KYC',
     resource: (env) => env.KYC_RESOURCE,
     scopes: {
-      'kyc:console': 'Sign in to the KYC console',
-      'kyc:sessions.write': 'Start identity checks',
-      'kyc:sessions.read': 'See identity checks and their results',
-      'kyc:identity.read': 'See the identity details that checks verified',
-      'kyc:evidence.read': 'See the evidence of identity checks',
-      'kyc:data.delete': 'Delete the data of identity checks',
-      'kyc:config.write': 'Change KYC workflows and settings',
-      'kyc:usage.read': 'See KYC usage',
+      'kyc:console': 'Sign in to the 2earl KYC console',
+      'kyc:sessions.write': 'Start identity verifications in 2earl KYC for your organization',
+      'kyc:sessions.read': 'See the status of your organization’s identity verifications',
+      'kyc:identity.read': 'See the identity details of people your organization verified',
+      'kyc:evidence.read': 'See the photos taken during your organization’s verifications',
+      'kyc:data.delete': 'Delete verification data your organization holds in 2earl KYC',
+      'kyc:config.write': 'Change your organization’s KYC workflows and webhooks',
+      'kyc:usage.read': 'See your organization’s KYC usage, plan and statements',
     },
-    // The binding is added once KYC's Worker exports AccountEvents; notices wait until then.
     deletionBinding: 'KYC_EVENTS',
-    organizationEvents: true,
+    // Only KYC's console may ask for its sign-in scope (DESIGN §4.32).
     firstPartyClients: {
       'kyc:console': (env) => [`${env.KYC_RESOURCE}/console/client.json`],
-    },
-    // KYC's roles before phase 13 (2earl/kyc docs/ADMIN.md §4, docs/CONTRACTS.md §8). Staff roles
-    // are platform roles; tenant roles are organization roles.
-    authz: {
-      permissions: {
-        'kyc:console.view': 'Open the KYC back office',
-        'kyc:operator.manage':
-          'Change KYC’s operator settings, staff, tenants, subscriptions and document catalogue',
-        'kyc:billing.manage': 'Change KYC plans, prices and statements',
-        'kyc:compliance.manage':
-          'Approve tenants for sensitive documents, read KYC audit logs and handle erasure requests',
-        'kyc:reviews.decide':
-          'Claim and decide manual reviews, and see the evidence of the one held',
-        'kyc:reviews.sensitive': 'Decide manual reviews of sensitive documents',
-        'kyc:reviews.lead':
-          'Assign and release manual reviews, see queue figures and give second approvals',
-        'kyc:support.read': 'See tenants’ details, delivery logs and KYC’s health',
-        'kyc:tenant.view': 'Open the organization’s KYC console',
-        'kyc:tenant.manage': 'Manage the organization’s KYC settings and let 2earl staff help',
-        'kyc:tenant.review': 'Review and decide the organization’s identity checks in review',
-        'kyc:tenant.develop':
-          'Manage the organization’s KYC workflows, webhooks and API clients, and test sessions',
-        'kyc:tenant.audit': 'Read the organization’s KYC audit log and decisions',
-      },
-      roles: {
-        'kyc:platform_admin': {
-          name: 'KYC platform admin',
-          assignable: 'platform',
-          privileged: true,
-          permissions: ['kyc:console.view', 'kyc:operator.manage'],
-        },
-        'kyc:finance': {
-          name: 'KYC finance',
-          assignable: 'platform',
-          permissions: ['kyc:console.view', 'kyc:billing.manage'],
-        },
-        'kyc:compliance': {
-          name: 'KYC compliance',
-          assignable: 'platform',
-          permissions: ['kyc:console.view', 'kyc:compliance.manage'],
-        },
-        'kyc:backoffice_reviewer': {
-          name: 'KYC reviewer',
-          assignable: 'platform',
-          permissions: ['kyc:console.view', 'kyc:reviews.decide'],
-        },
-        'kyc:sensitive_reviewer': {
-          name: 'KYC sensitive-document reviewer',
-          assignable: 'platform',
-          permissions: ['kyc:console.view', 'kyc:reviews.decide', 'kyc:reviews.sensitive'],
-        },
-        'kyc:backoffice_lead': {
-          name: 'KYC review lead',
-          assignable: 'platform',
-          permissions: ['kyc:console.view', 'kyc:reviews.decide', 'kyc:reviews.lead'],
-        },
-        'kyc:support': {
-          name: 'KYC support',
-          assignable: 'platform',
-          permissions: ['kyc:console.view', 'kyc:support.read'],
-        },
-        'kyc:tenant_admin': {
-          name: 'KYC admin',
-          assignable: 'org',
-          permissions: [
-            'kyc:tenant.view',
-            'kyc:tenant.manage',
-            'kyc:tenant.review',
-            'kyc:tenant.develop',
-            'kyc:tenant.audit',
-          ],
-        },
-        'kyc:tenant_reviewer': {
-          name: 'KYC reviewer',
-          assignable: 'org',
-          permissions: ['kyc:tenant.view', 'kyc:tenant.review'],
-        },
-        'kyc:tenant_developer': {
-          name: 'KYC developer',
-          assignable: 'org',
-          permissions: ['kyc:tenant.view', 'kyc:tenant.develop'],
-        },
-        'kyc:tenant_auditor': {
-          name: 'KYC auditor',
-          assignable: 'org',
-          permissions: ['kyc:tenant.view', 'kyc:tenant.audit'],
-        },
-      },
-      // Members get nothing in KYC until an owner or admin gives them a KYC role.
-      orgDefaults: {
-        owner: 'kyc:tenant_admin',
-        admin: 'kyc:tenant_admin',
-        auditor: 'kyc:tenant_auditor',
-      },
-      // The 2earl owner runs KYC as its first platform admin (KYC's BOOTSTRAP_STAFF); 2earl
-      // support helps tenants. Every other KYC staff role is given on /admin/team (phase 13b).
-      staffDefaults: {
-        owner: 'kyc:platform_admin',
-        support: 'kyc:support',
-      },
-      scopeGrants: {
-        // The console signs in with this scope and keeps its own session: every console
-        // permission. The API scopes are checked by KYC itself and carry none.
-        'kyc:console': '*',
-        'kyc:sessions.write': [],
-        'kyc:sessions.read': [],
-        'kyc:identity.read': [],
-        'kyc:evidence.read': [],
-        'kyc:data.delete': [],
-        'kyc:config.write': [],
-        'kyc:usage.read': [],
-      },
     },
   },
 ];
